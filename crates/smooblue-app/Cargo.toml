@@ -1,0 +1,40 @@
+[package]
+name = "smooblue-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Smooblue Dioxus desktop binary — multi-column Bluesky deck."
+
+[[bin]]
+name = "smooblue-app"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+smooblue-theme = { workspace = true }
+smooblue-oauth = { workspace = true }
+smooblue-atproto = { workspace = true }
+smooai-config = { workspace = true }
+smooai-logger = { workspace = true }
+# smooai-observability — see workspace Cargo.toml note.
+
+dioxus = { workspace = true }
+dioxus-desktop = { workspace = true }
+
+tokio = { workspace = true }
+url = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+keyring = { workspace = true }
+directories = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }

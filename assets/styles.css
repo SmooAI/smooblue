@@ -1,0 +1,490 @@
+/* ============================================================
+ * smoo design tokens
+ * Mirrors packages/ui/globals.css — keep in sync when tokens change.
+ * Values use OKLCH for perceptually-uniform interpolation.
+ * ============================================================ */
+
+:root {
+    /* Smoo Orange */
+    --color-smooai-orange: oklch(0.769 0.164 71);
+    --color-smooai-orange-300: oklch(0.871 0.109 80.3);
+    --color-smooai-orange-500: oklch(0.803 0.155 76.1);
+    --color-smooai-orange-700: oklch(0.64 0.135 71.7);
+
+    /* Smoo Red */
+    --color-smooai-red: oklch(0.712 0.181 22.4);
+    --color-smooai-red-500: oklch(0.712 0.181 22.4);
+    --color-smooai-red-700: oklch(0.619 0.254 29.1);
+
+    /* Smoo Green (teal) */
+    --color-smooai-green: oklch(0.657 0.112 194.8);
+    --color-smooai-green-500: oklch(0.907 0.151 194.8);
+    --color-smooai-green-800: oklch(0.657 0.112 194.8);
+
+    /* Smoo Blue (sky/accent) */
+    --color-smooai-blue: oklch(0.881 0.044 230.3);
+    --color-smooai-blue-300: oklch(0.803 0.074 230.9);
+    --color-smooai-blue-400: oklch(0.725 0.102 233.4);
+    --color-smooai-blue-500: oklch(0.655 0.124 236.3);
+
+    /* Smoo Dark Blue (surfaces) */
+    --color-smooai-dark-blue: oklch(0.13 0.043 265.1);
+    --color-smooai-dark-blue-700: oklch(0.303 0.154 265.8);
+    --color-smooai-dark-blue-800: oklch(0.224 0.104 266.4);
+    --color-smooai-dark-blue-850: oklch(0.177 0.074 266);
+    --color-smooai-dark-blue-900: oklch(0.13 0.043 265.1);
+
+    /* Neutrals */
+    --color-smooai-white: oklch(0.984 0.003 247.9);
+    --color-smooai-gray-400: oklch(0.715 0 89.9);
+    --color-smooai-gray-700: oklch(0.424 0 89.9);
+
+    /* Semantic mappings (dark mode is the default for smooblue) */
+    --background: oklch(0.145 0.014 265);
+    --foreground: var(--color-smooai-white);
+    --card: oklch(0.205 0.015 265);
+    --card-foreground: var(--color-smooai-white);
+    --muted: oklch(0.27 0.01 260);
+    --muted-foreground: var(--color-smooai-gray-400);
+    --accent: var(--color-smooai-orange);
+    --border: oklch(0.3 0.008 260);
+    --input: oklch(0.38 0.006 260);
+    --ring: var(--color-smooai-green-800);
+    --sidebar: var(--color-smooai-dark-blue-850);
+    --sidebar-border: var(--color-smooai-dark-blue-700);
+    --sidebar-active: var(--color-smooai-blue-500);
+
+    /* Gradient (brand) */
+    --gradient-brand: linear-gradient(135deg, var(--color-smooai-orange) 0%, var(--color-smooai-red) 100%);
+
+    /* Layout */
+    --column-width: 350px;
+    --column-gap: 6px;
+    --sidebar-width: 56px;
+    --radius: 10px;
+}
+
+/* ============================================================
+ * Reset / base
+ * ============================================================ */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#main {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+}
+
+body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui,
+        sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+button {
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+a {
+    color: var(--color-smooai-blue-300);
+    text-decoration: none;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-smooai-dark-blue-700);
+}
+
+/* ============================================================
+ * Deck shell — left rail + horizontal column scroller
+ * ============================================================ */
+.deck-shell {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    background: var(--background);
+}
+
+/* ---------- left rail sidebar ---------- */
+.deck-sidebar {
+    flex: 0 0 var(--sidebar-width);
+    background: var(--sidebar);
+    border-right: 1px solid var(--sidebar-border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 6px;
+}
+
+.deck-sidebar__logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--gradient-brand);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+.deck-sidebar__btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+    transition:
+        background 120ms,
+        color 120ms;
+}
+
+.deck-sidebar__btn:hover {
+    background: var(--color-smooai-dark-blue-700);
+    color: var(--foreground);
+}
+
+.deck-sidebar__btn--active {
+    background: var(--sidebar-active);
+    color: var(--color-smooai-white);
+}
+
+.deck-sidebar__spacer {
+    flex: 1;
+}
+
+/* ---------- horizontal column scroller ---------- */
+.deck-columns {
+    flex: 1;
+    display: flex;
+    gap: var(--column-gap);
+    padding: var(--column-gap);
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* ---------- single column ---------- */
+.deck-column {
+    flex: 0 0 var(--column-width);
+    display: flex;
+    flex-direction: column;
+    background: var(--card);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+.deck-column__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+    cursor: grab;
+}
+
+.deck-column__header:active {
+    cursor: grabbing;
+}
+
+.deck-column__drag {
+    color: var(--muted-foreground);
+    opacity: 0.6;
+}
+
+.deck-column__icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--color-smooai-dark-blue-700);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--foreground);
+    flex: 0 0 22px;
+}
+
+.deck-column__title {
+    flex: 1;
+    font-weight: 600;
+    color: var(--foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.deck-column__action {
+    color: var(--muted-foreground);
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deck-column__action:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.deck-column__body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.deck-column__empty,
+.deck-column__loading {
+    padding: 24px 16px;
+    color: var(--muted-foreground);
+    text-align: center;
+    font-size: 13px;
+}
+
+.deck-column__error {
+    padding: 16px;
+    color: var(--color-smooai-red);
+    background: rgba(255, 107, 108, 0.06);
+    border-radius: 6px;
+    margin: 12px;
+    font-size: 13px;
+}
+
+/* ---------- post card ---------- */
+.post {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 10px;
+    transition: background 100ms;
+}
+
+.post:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.post__avatar {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--color-smooai-dark-blue-700);
+    overflow: hidden;
+}
+
+.post__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.post__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.post__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 2px;
+}
+
+.post__name {
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 150px;
+}
+
+.post__handle {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 130px;
+}
+
+.post__time {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.post__text {
+    color: var(--foreground);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+
+.post__embed {
+    margin-top: 6px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+.post__embed img {
+    width: 100%;
+    height: auto;
+    display: block;
+    max-height: 320px;
+    object-fit: cover;
+}
+
+.post__actions {
+    display: flex;
+    gap: 24px;
+    margin-top: 8px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+}
+
+.post__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.post__action:hover {
+    color: var(--color-smooai-green);
+}
+
+/* ============================================================
+ * Login view
+ * ============================================================ */
+.login {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    width: 100vw;
+    background: var(--background);
+}
+
+.login__card {
+    width: 360px;
+    padding: 32px;
+    background: var(--card);
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    text-align: center;
+}
+
+.login__logo {
+    width: 84px;
+    height: 84px;
+    margin: 0 auto 16px;
+    border-radius: 50%;
+    background: var(--gradient-brand);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px rgba(244, 159, 10, 0.3);
+}
+
+.login__title {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    background: var(--gradient-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.login__sub {
+    color: var(--muted-foreground);
+    margin-bottom: 24px;
+    font-size: 13px;
+}
+
+.login__input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--foreground);
+    font-size: 14px;
+    margin-bottom: 12px;
+    outline: none;
+    transition: border-color 120ms;
+}
+
+.login__input:focus {
+    border-color: var(--ring);
+}
+
+.login__btn {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--gradient-brand);
+    color: var(--color-smooai-white);
+    border-radius: 8px;
+    font-weight: 600;
+    transition: opacity 120ms;
+}
+
+.login__btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.login__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.login__error {
+    color: var(--color-smooai-red);
+    font-size: 13px;
+    margin-top: 12px;
+}
+
+.login__pending {
+    color: var(--muted-foreground);
+    font-size: 13px;
+    margin-top: 12px;
+}

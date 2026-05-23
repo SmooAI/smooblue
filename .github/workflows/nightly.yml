@@ -1,0 +1,12 @@
+name: Nightly real-Bluesky check
+
+on:
+    schedule:
+        # 09:00 UTC ≈ early morning US Pacific. Catches Bluesky schema
+        # drift in our FeedResponse decoder within a day.
+        - cron: '0 9 * * *'
+    workflow_dispatch:
+
+jobs:
+    real-bluesky:
+        uses: ./.github/workflows/ci.yml

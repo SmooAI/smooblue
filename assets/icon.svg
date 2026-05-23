@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+    <defs>
+        <linearGradient id="smoo-gradient" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#f49f0a" />
+            <stop offset="55%" stop-color="#fb7a4d" />
+            <stop offset="100%" stop-color="#ff6b6c" />
+        </linearGradient>
+        <radialGradient id="smoo-glow" cx="512" cy="512" r="600" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#ff8a4b" stop-opacity="0.55" />
+            <stop offset="100%" stop-color="#5b1a8a" stop-opacity="0" />
+        </radialGradient>
+        <filter id="bird-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="14" />
+            <feOffset dx="0" dy="10" result="off" />
+            <feComponentTransfer><feFuncA type="linear" slope="0.55" /></feComponentTransfer>
+            <feMerge><feMergeNode /><feMergeNode in="SourceGraphic" /></feMerge>
+        </filter>
+    </defs>
+
+    <!-- Rounded square base in deep smoo dark-blue -->
+    <rect x="0" y="0" width="1024" height="1024" rx="220" ry="220" fill="#020618" />
+    <rect x="0" y="0" width="1024" height="1024" rx="220" ry="220" fill="url(#smoo-glow)" />
+
+    <!-- Smoo "S" mark, scaled-up + recentered from icon.svg -->
+    <!-- Outer ring + S — original viewBox 135x135, scale ×6.5 and offset to center -->
+    <g transform="translate(89,89) scale(6.5)">
+        <path fill="url(#smoo-gradient)" fill-rule="evenodd" d="M45.63,15.38c-12.39,5.21-22.54,14.64-28.65,26.61-6.12,11.97-7.8,25.72-4.77,38.81,3.04,13.09,10.6,24.69,21.36,32.75,10.76,8.06,24.02,12.05,37.44,11.28,13.42-.77,26.13-6.26,35.9-15.5,9.76-9.24,15.95-21.63,17.46-34.99,1.51-13.36-1.74-26.82-9.19-38.01-1.07-1.61-.64-3.78.97-4.85,1.61-1.07,3.78-.64,4.85.97,8.36,12.56,12.02,27.68,10.32,42.67-1.7,15-8.64,28.91-19.61,39.28-10.96,10.37-25.24,16.54-40.31,17.4-15.07.87-29.96-3.62-42.04-12.66-12.08-9.05-20.58-22.07-23.99-36.77-3.41-14.7-1.51-30.14,5.35-43.58,6.87-13.44,18.26-24.02,32.17-29.87,13.91-5.85,29.44-6.6,43.85-2.11,1.85.57,2.88,2.54,2.3,4.38-.57,1.85-2.54,2.88-4.38,2.3-12.83-4-26.67-3.33-39.06,1.88ZM108.73,20.17c0,2.07-1.68,3.75-3.75,3.75s-3.75-1.68-3.75-3.75,1.68-3.75,3.75-3.75,3.75,1.68,3.75,3.75ZM61.98,60.34c0,1.91,2.39,2.56,7.69,3.88,3.89.97,6.6,2.18,8.15,3.63,1.53,1.45,2.29,3.53,2.29,6.25,0,3.57-1.03,6.26-3.11,8.08-2.07,1.82-5.09,2.73-9.09,2.73h-9.6c-1.97,0-3.57-1.6-3.59-3.57-.01-1.99,1.6-3.61,3.59-3.61h9.41c3.15-.12,4.79-.95,4.91-2.47,0-1.3-1.03-2.21-3.07-2.73-6.91-1.72-11.11-3.44-12.6-5.15-1.48-1.71-2.23-3.77-2.23-6.19,0-6.59,3.2-9.85,9.59-9.8h10.77c1.99,0,3.6,1.61,3.6,3.59s-1.61,3.59-3.6,3.59h-9.69c-1.83,0-3.43.06-3.43,1.77Z" />
+    </g>
+
+    <!-- Bluesky butterfly mark in the lower-right corner.
+         Path is the official Bluesky butterfly silhouette, scaled to ~30%
+         of the canvas and tucked into the bottom-right with a soft shadow. -->
+    <g transform="translate(620,620) scale(1.6)" filter="url(#bird-shadow)">
+        <!-- white circular badge behind the butterfly -->
+        <circle cx="100" cy="100" r="118" fill="#ffffff" />
+        <!-- butterfly silhouette (simplified, Bluesky-style) in sky blue -->
+        <g transform="translate(20,28) scale(0.78)" fill="#1185fe">
+            <path d="M111.8 62.2C97.1 51 71.3 32.9 64.2 26.7 56.4 19.8 40 8 28.5 8 16.8 8 8 17.1 8 28.6c0 7.6 4 16 12 23.2 7.4 6.6 19 16.2 28 22.3 13 8.8 22.3 18.3 22.3 27.8 0 7.7-5.4 13.9-13.2 15.9 7.8 2 13.2 8.2 13.2 15.9 0 9.5-9.3 19-22.3 27.8-9 6.1-20.6 15.7-28 22.3-8 7.2-12 15.6-12 23.2C8 216.5 16.8 225.6 28.5 225.6c11.5 0 27.9-11.8 35.7-18.7 7.1-6.2 32.9-24.3 47.6-35.5 14.7 11.2 40.5 29.3 47.6 35.5 7.8 6.9 24.2 18.7 35.7 18.7 11.7 0 20.5-9.1 20.5-20.6 0-7.6-4-16-12-23.2-7.4-6.6-19-16.2-28-22.3-13-8.8-22.3-18.3-22.3-27.8 0-7.7 5.4-13.9 13.2-15.9-7.8-2-13.2-8.2-13.2-15.9 0-9.5 9.3-19 22.3-27.8 9-6.1 20.6-15.7 28-22.3 8-7.2 12-15.6 12-23.2C215.6 17.1 206.8 8 195.1 8c-11.5 0-27.9 11.8-35.7 18.7-7.1 6.2-32.9 24.3-47.6 35.5z" />
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,16 @@
+[application]
+name = "smooblue"
+default_platform = "desktop"
+
+[web.app]
+title = "Smooblue"
+
+[bundle]
+identifier = "ai.smoo.smooblue"
+publisher = "Smoo AI"
+copyright = "Copyright (c) Smoo AI 2026"
+category = "SocialNetworking"
+icon = ["assets/icons/icon-1024.png"]
+
+[bundle.macos]
+minimum_system_version = "11.0"

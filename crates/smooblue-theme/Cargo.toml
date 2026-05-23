@@ -1,0 +1,9 @@
+[package]
+name = "smooblue-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Smoo color tokens compiled to CSS for the smooblue Dioxus app."
+
+[lib]
+path = "src/lib.rs"

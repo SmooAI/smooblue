@@ -1,0 +1,83 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/smooblue-app",
+    "crates/smooblue-atproto",
+    "crates/smooblue-oauth",
+    "crates/smooblue-theme",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/SmooAI/smooblue"
+homepage = "https://github.com/SmooAI/smooblue"
+authors = ["Smoo AI <eng@smoo.ai>"]
+rust-version = "1.80"
+
+[workspace.dependencies]
+# Internal
+smooblue-app = { path = "crates/smooblue-app" }
+smooblue-atproto = { path = "crates/smooblue-atproto" }
+smooblue-oauth = { path = "crates/smooblue-oauth" }
+smooblue-theme = { path = "crates/smooblue-theme" }
+
+# SmooAI Rust packages
+smooai-config = "6"
+smooai-logger = "4"
+smooai-fetch = "3"
+# smooai-observability — not yet published to crates.io; tracked as a
+# follow-up pearl. Add back when v0.1+ ships.
+
+# Dioxus desktop UI
+dioxus = { version = "0.6", features = ["desktop", "router"] }
+dioxus-desktop = "0.6"
+
+# Async / runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP / network
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = { version = "2", features = ["serde"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# OAuth / crypto
+p256 = { version = "0.13", features = ["jwk", "ecdsa", "pem"] }
+ecdsa = { version = "0.16", features = ["signing", "verifying"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+jsonwebtoken = "9"
+
+# Persistence
+keyring = "3"
+directories = "5"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Errors / logging
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+
+# Image rendering (avatars, embeds) — only needed if not relying on webview
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+# Test utilities
+wiremock = "0.6"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
