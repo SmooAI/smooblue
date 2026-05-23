@@ -1,0 +1,22 @@
+[package]
+name = "smooblue-crm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Opt-in Smoo AI CRM sync for smooblue (POSTs Bluesky profile after explicit user consent)."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }

@@ -16,4 +16,6 @@ pub mod feed;
 
 pub use client::AtClient;
 pub use error::AtError;
-pub use feed::{Embed, EmbedImage, EmbedKind, FeedItem, FeedResponse, PostAuthor, PostRecord};
+pub use feed::{
+    ActorProfile, Embed, EmbedImage, EmbedKind, FeedItem, FeedResponse, PostAuthor, PostRecord,
+};

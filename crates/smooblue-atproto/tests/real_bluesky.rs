@@ -38,9 +38,19 @@ async fn resolve_handle_returns_a_did() {
     // `com.atproto.identity.resolveHandle` is what smooblue-oauth uses to
     // start the OAuth flow. Prove the URL + response shape work against prod.
     let url = format!("{APPVIEW}/xrpc/com.atproto.identity.resolveHandle?handle={TEST_ACTOR}");
-    let resp: Value = http_client().get(&url).send().await.expect("send").json().await.expect("json");
+    let resp: Value = http_client()
+        .get(&url)
+        .send()
+        .await
+        .expect("send")
+        .json()
+        .await
+        .expect("json");
     let did = resp["did"].as_str().expect("did field present");
-    assert!(did.starts_with("did:plc:") || did.starts_with("did:web:"), "unexpected DID shape: {did}");
+    assert!(
+        did.starts_with("did:plc:") || did.starts_with("did:web:"),
+        "unexpected DID shape: {did}"
+    );
 }
 
 #[tokio::test]
@@ -48,8 +58,19 @@ async fn resolve_handle_returns_a_did() {
 async fn get_profile_of_bsky_app() {
     // `app.bsky.actor.getProfile` — what a future Profile column will use.
     let url = format!("{APPVIEW}/xrpc/app.bsky.actor.getProfile?actor={TEST_ACTOR}");
-    let resp: Value = http_client().get(&url).send().await.expect("send").json().await.expect("json");
-    assert_eq!(resp["handle"].as_str(), Some(TEST_ACTOR), "handle mismatch in profile response");
+    let resp: Value = http_client()
+        .get(&url)
+        .send()
+        .await
+        .expect("send")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(
+        resp["handle"].as_str(),
+        Some(TEST_ACTOR),
+        "handle mismatch in profile response"
+    );
     assert!(resp["did"].as_str().is_some(), "profile missing did");
 }
 
@@ -62,8 +83,16 @@ async fn get_author_feed_decodes_into_our_types() {
     // smooblue uses (`post.author.handle`, `post.record.text`, etc.), this
     // test fails with a serde error.
     let url = format!("{APPVIEW}/xrpc/app.bsky.feed.getAuthorFeed?actor={TEST_ACTOR}&limit=5");
-    let body = http_client().get(&url).send().await.expect("send").text().await.expect("text");
-    let feed: smooblue_atproto::FeedResponse = serde_json::from_str(&body).unwrap_or_else(|e| panic!("FeedResponse decode failed: {e}\nresponse body:\n{body}"));
+    let body = http_client()
+        .get(&url)
+        .send()
+        .await
+        .expect("send")
+        .text()
+        .await
+        .expect("text");
+    let feed: smooblue_atproto::FeedResponse = serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("FeedResponse decode failed: {e}\nresponse body:\n{body}"));
     assert!(!feed.feed.is_empty(), "@bsky.app should have posts");
     // First post must have all the fields the PostCard renders.
     let first = &feed.feed[0].post;
@@ -109,13 +138,27 @@ async fn authenticated_timeline_via_app_password() {
         .json()
         .await
         .expect("createSession json");
-    let access_jwt = session_resp["accessJwt"].as_str().expect("createSession returned accessJwt");
+    let access_jwt = session_resp["accessJwt"]
+        .as_str()
+        .expect("createSession returned accessJwt");
 
     // 2. Hit getTimeline with Bearer auth.
     let url = format!("{APPVIEW}/xrpc/app.bsky.feed.getTimeline?limit=10");
-    let body = http.get(&url).bearer_auth(access_jwt).send().await.expect("timeline send").text().await.expect("timeline text");
-    let feed: smooblue_atproto::FeedResponse = serde_json::from_str(&body).unwrap_or_else(|e| panic!("getTimeline decode failed: {e}\nresponse body:\n{body}"));
-    assert!(!feed.feed.is_empty(), "timeline should have posts for {handle}");
+    let body = http
+        .get(&url)
+        .bearer_auth(access_jwt)
+        .send()
+        .await
+        .expect("timeline send")
+        .text()
+        .await
+        .expect("timeline text");
+    let feed: smooblue_atproto::FeedResponse = serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("getTimeline decode failed: {e}\nresponse body:\n{body}"));
+    assert!(
+        !feed.feed.is_empty(),
+        "timeline should have posts for {handle}"
+    );
     // Spot-check a few fields PostCard depends on.
     for item in feed.feed.iter().take(3) {
         let _ = item.post.display_name();

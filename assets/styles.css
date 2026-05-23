@@ -477,6 +477,36 @@ a {
     cursor: not-allowed;
 }
 
+.login__consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 4px 0 16px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+}
+
+.login__consent input[type="checkbox"] {
+    margin-top: 2px;
+    accent-color: var(--color-smooai-green-800);
+    flex-shrink: 0;
+}
+
+.login__consent a {
+    color: var(--color-smooai-blue-300);
+}
+
+.login__consent-text {
+    flex: 1;
+}
+
 .login__error {
     color: var(--color-smooai-red);
     font-size: 13px;

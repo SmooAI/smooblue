@@ -15,6 +15,23 @@ pub struct FeedItem {
     pub post: PostView,
 }
 
+/// `app.bsky.actor.defs#profileViewDetailed` — full profile shape.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ActorProfile {
+    pub did: String,
+    pub handle: String,
+    #[serde(rename = "displayName", default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(rename = "followersCount", default)]
+    pub followers_count: Option<u64>,
+    #[serde(rename = "followsCount", default)]
+    pub follows_count: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PostView {
     pub uri: String,

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/smooblue-app",
     "crates/smooblue-atproto",
+    "crates/smooblue-crm",
     "crates/smooblue-oauth",
     "crates/smooblue-theme",
 ]
@@ -20,6 +21,7 @@ rust-version = "1.80"
 # Internal
 smooblue-app = { path = "crates/smooblue-app" }
 smooblue-atproto = { path = "crates/smooblue-atproto" }
+smooblue-crm = { path = "crates/smooblue-crm" }
 smooblue-oauth = { path = "crates/smooblue-oauth" }
 smooblue-theme = { path = "crates/smooblue-theme" }
 

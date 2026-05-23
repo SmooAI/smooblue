@@ -57,6 +57,18 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.actor.getProfile` — full profile view (display name, avatar,
+    /// description, follower counts). Used by the CRM opt-in flow and the
+    /// (forthcoming) Profile column.
+    pub async fn get_profile(&self, actor: &str) -> Result<crate::feed::ActorProfile, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.actor.getProfile")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut().append_pair("actor", actor);
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.feed.getAuthorFeed` — for profile / single-author columns.
     pub async fn get_author_feed(
         &self,

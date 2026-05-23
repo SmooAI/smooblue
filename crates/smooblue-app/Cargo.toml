@@ -16,6 +16,7 @@ path = "src/lib.rs"
 smooblue-theme = { workspace = true }
 smooblue-oauth = { workspace = true }
 smooblue-atproto = { workspace = true }
+smooblue-crm = { workspace = true }
 smooai-config = { workspace = true }
 smooai-logger = { workspace = true }
 # smooai-observability — see workspace Cargo.toml note.
