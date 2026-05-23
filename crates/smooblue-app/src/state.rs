@@ -49,10 +49,46 @@ impl ColumnSpec {
 /// Idempotent — safe to call on every render.
 pub fn use_bootstrap() {
     use_context_provider::<Signal<Option<Session>>>(|| {
-        Signal::new(crate::persistence::load_session())
+        // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
+        // app boots straight into the deck — no OAuth + no network.
+        let initial = if crate::demo::is_active() {
+            Some(crate::demo::fake_session())
+        } else {
+            crate::persistence::load_session()
+        };
+        Signal::new(initial)
     });
     use_context_provider::<Signal<Vec<ColumnSpec>>>(|| {
-        Signal::new(crate::persistence::load_columns().unwrap_or_else(|| vec![ColumnSpec::home()]))
+        let initial = if crate::demo::is_active() {
+            // Multi-column deck for the screenshot. Each column reuses the
+            // demo Home feed so the layout reads as fully-populated even
+            // before the non-Home column kinds have demo data.
+            vec![
+                ColumnSpec {
+                    id: "home".into(),
+                    kind: ColumnKind::Home,
+                    title: "Home".into(),
+                },
+                ColumnSpec {
+                    id: "notifs".into(),
+                    kind: ColumnKind::Notifications,
+                    title: "Notifications".into(),
+                },
+                ColumnSpec {
+                    id: "discover".into(),
+                    kind: ColumnKind::Home,
+                    title: "Discover".into(),
+                },
+                ColumnSpec {
+                    id: "rust".into(),
+                    kind: ColumnKind::Home,
+                    title: "Rust".into(),
+                },
+            ]
+        } else {
+            crate::persistence::load_columns().unwrap_or_else(|| vec![ColumnSpec::home()])
+        };
+        Signal::new(initial)
     });
 }
 

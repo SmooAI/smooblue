@@ -13,9 +13,11 @@
 mod client;
 mod error;
 pub mod feed;
+pub mod notifications;
 
 pub use client::AtClient;
 pub use error::AtError;
 pub use feed::{
     ActorProfile, Embed, EmbedImage, EmbedKind, FeedItem, FeedResponse, PostAuthor, PostRecord,
 };
+pub use notifications::{Notification, NotificationsResponse};

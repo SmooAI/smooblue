@@ -64,14 +64,8 @@ pub fn LoginView() -> Element {
     rsx! {
         div { class: "login",
             div { class: "login__card",
-                div { class: "login__logo",
-                    svg {
-                        width: "44",
-                        height: "44",
-                        view_box: "0 0 135 135",
-                        fill: "white",
-                        path { d: "M45.63,15.38c-12.39,5.21-22.54,14.64-28.65,26.61-6.12,11.97-7.8,25.72-4.77,38.81,3.04,13.09,10.6,24.69,21.36,32.75,10.76,8.06,24.02,12.05,37.44,11.28,13.42-.77,26.13-6.26,35.9-15.5,9.76-9.24,15.95-21.63,17.46-34.99,1.51-13.36-1.74-26.82-9.19-38.01-1.07-1.61-.64-3.78.97-4.85,1.61-1.07,3.78-.64,4.85.97,8.36,12.56,12.02,27.68,10.32,42.67-1.7,15-8.64,28.91-19.61,39.28-10.96,10.37-25.24,16.54-40.31,17.4-15.07.87-29.96-3.62-42.04-12.66-12.08-9.05-20.58-22.07-23.99-36.77-3.41-14.7-1.51-30.14,5.35-43.58,6.87-13.44,18.26-24.02,32.17-29.87,13.91-5.85,29.44-6.6,43.85-2.11,1.85.57,2.88,2.54,2.3,4.38-.57,1.85-2.54,2.88-4.38,2.3-12.83-4-26.67-3.33-39.06,1.88Z" }
-                    }
+                div { class: "brand-badge login__logo",
+                    dangerous_inner_html: "{smooblue_theme::MONOGRAM_SVG}",
                 }
                 h1 { class: "login__title", "Smooblue" }
                 p { class: "login__sub", "Sign in with your Bluesky handle" }
@@ -95,7 +89,7 @@ pub fn LoginView() -> Element {
                     }
                 }
                 button {
-                    class: "login__btn",
+                    class: "btn btn--primary btn--lg login__btn",
                     disabled: matches!(*status.read(), Status::Pending),
                     onclick: start_signin,
                     if matches!(*status.read(), Status::Pending) { "Opening browser…" } else { "Continue with Bluesky" }

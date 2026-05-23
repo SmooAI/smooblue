@@ -23,6 +23,7 @@ smooai-logger = { workspace = true }
 
 dioxus = { workspace = true }
 dioxus-desktop = { workspace = true }
+dioxus-free-icons = { workspace = true }
 
 tokio = { workspace = true }
 url = { workspace = true }

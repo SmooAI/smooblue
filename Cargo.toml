@@ -29,12 +29,21 @@ smooblue-theme = { path = "crates/smooblue-theme" }
 smooai-config = "6"
 smooai-logger = "4"
 smooai-fetch = "3"
+# Shared design system — OKLCH tokens, base CSS, monogram SVG. Pulled
+# from git until it ships to crates.io; the path-dep override is the
+# escape hatch when iterating locally on the design system.
+smooai-ui = { git = "https://github.com/SmooAI/ui.git", branch = "main" }
 # smooai-observability — not yet published to crates.io; tracked as a
 # follow-up pearl. Add back when v0.1+ ships.
 
 # Dioxus desktop UI
 dioxus = { version = "0.6", features = ["desktop", "router"] }
 dioxus-desktop = "0.6"
+# Lucide icons — one consistent stroke-style set across the app
+# (sidebar, post actions, notification reasons, compose, etc).
+# Pinned at 0.9 because 0.10 jumped to dioxus 0.7 (Component<T> generic
+# trait changed, rsx! can no longer infer T). Bump together with dioxus.
+dioxus-free-icons = { version = "=0.9", features = ["lucide"] }
 
 # Async / runtime
 tokio = { version = "1", features = ["full"] }

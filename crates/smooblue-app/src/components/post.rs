@@ -1,5 +1,6 @@
 //! Single post card.
 
+use crate::icons;
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
 
@@ -37,9 +38,21 @@ pub fn PostCard(post: PostView) -> Element {
                     }
                 }
                 div { class: "post__actions",
-                    span { class: "post__action", "💬 {replies}" }
-                    span { class: "post__action", "🔁 {reposts}" }
-                    span { class: "post__action", "❤ {likes}" }
+                    span { class: "post__action",
+                        icons::MessageCircle { size: icons::Size::Sm }
+                        span { "{replies}" }
+                    }
+                    span { class: "post__action",
+                        icons::Repeat2 { size: icons::Size::Sm }
+                        span { "{reposts}" }
+                    }
+                    span { class: "post__action",
+                        icons::Heart { size: icons::Size::Sm }
+                        span { "{likes}" }
+                    }
+                    span { class: "post__action post__action--right",
+                        icons::MoreHorizontal { size: icons::Size::Sm }
+                    }
                 }
             }
         }

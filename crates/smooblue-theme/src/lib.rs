@@ -1,62 +1,110 @@
-//! Smoo color tokens exported as a CSS string.
+//! Smooblue stylesheet — the shared SmooAI design system plus smooblue's
+//! deck-specific component CSS (columns, posts, notification cards, login).
 //!
-//! Values mirror `packages/ui/globals.css` — the canonical smoo design system.
-//! When `globals.css` changes, regenerate by copying the relevant `--color-*`
-//! lines here so the desktop app and the web app stay visually aligned.
+//! Anything cross-app (tokens, buttons, FAB, modal, rail, brand badge,
+//! scrollbars, base typography) lives in [`smooai_ui`] and is consumed
+//! from there. Anything smooblue-specific lives in `assets/styles.css`
+//! next door.
 
-/// The complete stylesheet embedded into the Dioxus desktop window.
+/// CSS string embedded into the Dioxus desktop window. Concatenates
+/// [`smooai_ui::STYLES`] (shared tokens + base components) and our
+/// smooblue-only component CSS (deck/columns/posts/notifs/login).
 ///
-/// Includes:
-/// - smoo color tokens (palette + semantic mappings)
-/// - reset / base typography
-/// - deck shell layout (left rail + horizontal column scroller)
-/// - column / post / sidebar / avatar / button components
-pub const STYLES: &str = include_str!("../../../assets/styles.css");
+/// The order matters: the shared sheet defines the tokens (`--foreground`,
+/// `--card`, etc) that our component CSS references.
+pub const STYLES: &str = concatcp!(smooai_ui::STYLES, "\n", APP_STYLES);
 
-/// Tailwind-style semantic color names used across components.
-pub mod color {
-    // Brand palette
-    pub const SMOO_ORANGE: &str = "var(--color-smooai-orange)";
-    pub const SMOO_RED: &str = "var(--color-smooai-red)";
-    pub const SMOO_GREEN: &str = "var(--color-smooai-green)";
-    pub const SMOO_BLUE_400: &str = "var(--color-smooai-blue-400)";
-    pub const SMOO_DARK_BLUE: &str = "var(--color-smooai-dark-blue)";
-    pub const SMOO_DARK_BLUE_850: &str = "var(--color-smooai-dark-blue-850)";
+/// Smoo monogram SVG, re-exported from [`smooai_ui::MONOGRAM_SVG`] so
+/// every component reaches for the same thing.
+pub const MONOGRAM_SVG: &str = smooai_ui::MONOGRAM_SVG;
 
-    // Semantic
-    pub const BG: &str = "var(--background)";
-    pub const FG: &str = "var(--foreground)";
-    pub const CARD: &str = "var(--card)";
-    pub const BORDER: &str = "var(--border)";
-    pub const MUTED_FG: &str = "var(--muted-foreground)";
-    pub const SIDEBAR_BG: &str = "var(--sidebar)";
-    pub const SIDEBAR_BORDER: &str = "var(--sidebar-border)";
+/// Smooblue-only component CSS — the bits no other app needs.
+const APP_STYLES: &str = include_str!("../../../assets/styles.css");
+
+/// Tiny compile-time str concatenation. Avoids pulling `const_format` for
+/// this single use.
+macro_rules! concatcp {
+    ($a:expr, $b:expr, $c:expr) => {{
+        const A: &str = $a;
+        const B: &str = $b;
+        const C: &str = $c;
+        const LEN: usize = A.len() + B.len() + C.len();
+        const fn cp(out: &mut [u8; LEN]) {
+            let a = A.as_bytes();
+            let b = B.as_bytes();
+            let c = C.as_bytes();
+            let mut i = 0;
+            while i < a.len() {
+                out[i] = a[i];
+                i += 1;
+            }
+            let mut j = 0;
+            while j < b.len() {
+                out[a.len() + j] = b[j];
+                j += 1;
+            }
+            let mut k = 0;
+            while k < c.len() {
+                out[a.len() + b.len() + k] = c[k];
+                k += 1;
+            }
+        }
+        const OUT: [u8; LEN] = {
+            let mut o = [0u8; LEN];
+            cp(&mut o);
+            o
+        };
+        // SAFETY: All three inputs are valid UTF-8 (compile-time str literals),
+        // and we only copy bytes 1:1 in order, so the concatenated buffer
+        // remains valid UTF-8.
+        match core::str::from_utf8(&OUT) {
+            Ok(s) => s,
+            Err(_) => panic!("smooai-ui + app CSS concat produced invalid UTF-8"),
+        }
+    }};
 }
+use concatcp;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn stylesheet_contains_smoo_tokens() {
-        assert!(
-            STYLES.contains("--color-smooai-orange"),
-            "missing smoo orange token"
-        );
-        assert!(
-            STYLES.contains("--color-smooai-dark-blue"),
-            "missing smoo dark blue token"
-        );
-        assert!(
-            STYLES.contains("--color-smooai-green"),
-            "missing smoo green token"
-        );
+    fn shared_tokens_are_present() {
+        // Tokens come from smooai-ui, not our local CSS.
+        assert!(STYLES.contains("--color-smooai-orange"));
+        assert!(STYLES.contains("--color-smooai-green"));
+        assert!(STYLES.contains("--color-smooai-dark-blue"));
+        assert!(STYLES.contains("--gradient-brand"));
     }
 
     #[test]
-    fn stylesheet_defines_deck_layout() {
-        assert!(STYLES.contains(".deck-shell"), "missing deck shell layout");
-        assert!(STYLES.contains(".deck-column"), "missing column layout");
-        assert!(STYLES.contains(".deck-sidebar"), "missing sidebar layout");
+    fn shared_base_components_are_present() {
+        // Buttons / FAB / modal / rail / brand-badge come from smooai-ui.
+        for cls in [
+            ".btn",
+            ".btn--primary",
+            ".fab",
+            ".modal__sheet",
+            ".modal__backdrop",
+            ".rail",
+            ".rail__btn",
+            ".brand-badge",
+        ] {
+            assert!(STYLES.contains(cls), "missing class {cls}");
+        }
+    }
+
+    #[test]
+    fn app_specific_components_are_present() {
+        for cls in [".deck-shell", ".deck-column", ".post", ".notif", ".login"] {
+            assert!(STYLES.contains(cls), "missing class {cls}");
+        }
+    }
+
+    #[test]
+    fn monogram_re_exports_correctly() {
+        assert_eq!(MONOGRAM_SVG, smooai_ui::MONOGRAM_SVG);
+        assert!(MONOGRAM_SVG.starts_with("<svg"));
     }
 }

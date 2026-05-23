@@ -3,6 +3,8 @@
 //! (components, view models, persistence helpers) lives here.
 
 pub mod components;
+pub mod demo;
+pub mod icons;
 pub mod persistence;
 pub mod state;
 pub mod views;

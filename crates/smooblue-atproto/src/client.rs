@@ -57,6 +57,24 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.notification.listNotifications` — backs the Notifications column.
+    pub async fn list_notifications(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::notifications::NotificationsResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.notification.listNotifications")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.actor.getProfile` — full profile view (display name, avatar,
     /// description, follower counts). Used by the CRM opt-in flow and the
     /// (forthcoming) Profile column.

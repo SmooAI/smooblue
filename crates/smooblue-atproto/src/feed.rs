@@ -10,7 +10,7 @@ pub struct FeedResponse {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FeedItem {
     pub post: PostView,
 }

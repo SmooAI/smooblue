@@ -1,104 +1,21 @@
-/* ============================================================
- * smoo design tokens
- * Mirrors packages/ui/globals.css — keep in sync when tokens change.
- * Values use OKLCH for perceptually-uniform interpolation.
- * ============================================================ */
+/* ===========================================================
+ *  Smooblue-only component CSS.
+ *
+ *  Tokens, reset, base typography, buttons (.btn / .btn--primary /
+ *  .btn--ghost), the floating action button (.fab), the modal sheet
+ *  (.modal__backdrop / .modal__sheet), the vertical nav rail (.rail /
+ *  .rail__btn / .rail__btn--active), the brand badge (.brand-badge),
+ *  and the global scrollbar style all live in smooai-ui.
+ *  See: https://github.com/SmooAI/ui  (crate: smooai-ui)
+ *
+ *  Anything below is unique to a multi-column Bluesky deck: the deck
+ *  shell layout + columns + post card + notification card + login.
+ * =========================================================== */
 
-:root {
-    /* Smoo Orange */
-    --color-smooai-orange: oklch(0.769 0.164 71);
-    --color-smooai-orange-300: oklch(0.871 0.109 80.3);
-    --color-smooai-orange-500: oklch(0.803 0.155 76.1);
-    --color-smooai-orange-700: oklch(0.64 0.135 71.7);
-
-    /* Smoo Red */
-    --color-smooai-red: oklch(0.712 0.181 22.4);
-    --color-smooai-red-500: oklch(0.712 0.181 22.4);
-    --color-smooai-red-700: oklch(0.619 0.254 29.1);
-
-    /* Smoo Green (teal) */
-    --color-smooai-green: oklch(0.657 0.112 194.8);
-    --color-smooai-green-500: oklch(0.907 0.151 194.8);
-    --color-smooai-green-800: oklch(0.657 0.112 194.8);
-
-    /* Smoo Blue (sky/accent) */
-    --color-smooai-blue: oklch(0.881 0.044 230.3);
-    --color-smooai-blue-300: oklch(0.803 0.074 230.9);
-    --color-smooai-blue-400: oklch(0.725 0.102 233.4);
-    --color-smooai-blue-500: oklch(0.655 0.124 236.3);
-
-    /* Smoo Dark Blue (surfaces) */
-    --color-smooai-dark-blue: oklch(0.13 0.043 265.1);
-    --color-smooai-dark-blue-700: oklch(0.303 0.154 265.8);
-    --color-smooai-dark-blue-800: oklch(0.224 0.104 266.4);
-    --color-smooai-dark-blue-850: oklch(0.177 0.074 266);
-    --color-smooai-dark-blue-900: oklch(0.13 0.043 265.1);
-
-    /* Neutrals */
-    --color-smooai-white: oklch(0.984 0.003 247.9);
-    --color-smooai-gray-400: oklch(0.715 0 89.9);
-    --color-smooai-gray-700: oklch(0.424 0 89.9);
-
-    /* Semantic mappings (dark mode is the default for smooblue) */
-    --background: oklch(0.145 0.014 265);
-    --foreground: var(--color-smooai-white);
-    --card: oklch(0.205 0.015 265);
-    --card-foreground: var(--color-smooai-white);
-    --muted: oklch(0.27 0.01 260);
-    --muted-foreground: var(--color-smooai-gray-400);
-    --accent: var(--color-smooai-orange);
-    --border: oklch(0.3 0.008 260);
-    --input: oklch(0.38 0.006 260);
-    --ring: var(--color-smooai-green-800);
-    --sidebar: var(--color-smooai-dark-blue-850);
-    --sidebar-border: var(--color-smooai-dark-blue-700);
-    --sidebar-active: var(--color-smooai-blue-500);
-
-    /* Gradient (brand) */
-    --gradient-brand: linear-gradient(135deg, var(--color-smooai-orange) 0%, var(--color-smooai-red) 100%);
-
-    /* Layout */
-    --column-width: 350px;
-    --column-gap: 6px;
-    --sidebar-width: 56px;
-    --radius: 10px;
-}
-
-/* ============================================================
- * Reset / base
- * ============================================================ */
-* {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-html,
-body,
 #main {
     height: 100%;
     width: 100%;
     overflow: hidden;
-}
-
-body {
-    background: var(--background);
-    color: var(--foreground);
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui,
-        sans-serif;
-    font-size: 14px;
-    line-height: 1.4;
-}
-
-button {
-    background: transparent;
-    border: 0;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
 }
 
 a {
@@ -106,27 +23,9 @@ a {
     text-decoration: none;
 }
 
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-smooai-dark-blue-700);
-}
-
-/* ============================================================
- * Deck shell — left rail + horizontal column scroller
- * ============================================================ */
+/* ===========================================================
+ *  Deck shell — horizontally-scrolling column scroller next to the rail
+ * =========================================================== */
 .deck-shell {
     display: flex;
     height: 100vh;
@@ -134,70 +33,52 @@ a {
     background: var(--background);
 }
 
-/* ---------- left rail sidebar ---------- */
-.deck-sidebar {
-    flex: 0 0 var(--sidebar-width);
-    background: var(--sidebar);
-    border-right: 1px solid var(--sidebar-border);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 12px 0;
-    gap: 6px;
-}
-
-.deck-sidebar__logo {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: var(--gradient-brand);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 12px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-}
-
-.deck-sidebar__btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--muted-foreground);
-    transition:
-        background 120ms,
-        color 120ms;
-}
-
-.deck-sidebar__btn:hover {
-    background: var(--color-smooai-dark-blue-700);
-    color: var(--foreground);
-}
-
-.deck-sidebar__btn--active {
-    background: var(--sidebar-active);
-    color: var(--color-smooai-white);
-}
-
-.deck-sidebar__spacer {
-    flex: 1;
-}
-
-/* ---------- horizontal column scroller ---------- */
 .deck-columns {
     flex: 1;
     display: flex;
-    gap: var(--column-gap);
-    padding: var(--column-gap);
+    gap: 6px;
+    padding: 6px;
     overflow-x: auto;
     overflow-y: hidden;
 }
 
-/* ---------- single column ---------- */
+/* ===========================================================
+ *  Rail extensions — divider + spacer + logo slot.
+ *  Base .rail / .rail__btn / .rail__btn--active styles come from
+ *  smooai-ui; we just add the layout glue here.
+ * =========================================================== */
+.rail__logo {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rail__logo svg {
+    width: 20px;
+    height: 20px;
+}
+
+.rail__divider {
+    width: 24px;
+    height: 1px;
+    background: var(--sidebar-border);
+    margin: 6px 0;
+}
+
+.rail__spacer {
+    flex: 1;
+}
+
+/* ===========================================================
+ *  Single column
+ * =========================================================== */
 .deck-column {
-    flex: 0 0 var(--column-width);
+    flex: 0 0 350px;
     display: flex;
     flex-direction: column;
     background: var(--card);
@@ -229,11 +110,11 @@ a {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: var(--color-smooai-dark-blue-700);
+    background: rgba(49, 155, 210, 0.12);
+    color: var(--color-smooai-blue-300);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--foreground);
     flex: 0 0 22px;
 }
 
@@ -250,10 +131,11 @@ a {
     color: var(--muted-foreground);
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
+    transition: background 120ms, color 120ms;
 }
 
 .deck-column__action:hover {
@@ -279,12 +161,14 @@ a {
     padding: 16px;
     color: var(--color-smooai-red);
     background: rgba(255, 107, 108, 0.06);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     margin: 12px;
     font-size: 13px;
 }
 
-/* ---------- post card ---------- */
+/* ===========================================================
+ *  Post card
+ * =========================================================== */
 .post {
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
@@ -360,7 +244,7 @@ a {
 
 .post__embed {
     margin-top: 6px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
     border: 1px solid var(--border);
 }
@@ -375,25 +259,209 @@ a {
 
 .post__actions {
     display: flex;
-    gap: 24px;
+    align-items: center;
+    gap: 20px;
     margin-top: 8px;
     color: var(--muted-foreground);
     font-size: 12px;
 }
 
+/* Inherits hover behavior from .icon-action--reply / --repost / --like
+   in smooai-ui; we just add layout. */
 .post__action {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
+    cursor: pointer;
 }
 
-.post__action:hover {
+.post__action svg {
+    flex: 0 0 auto;
+    opacity: 0.85;
+}
+
+.post__action--right {
+    margin-left: auto;
+}
+
+/* ===========================================================
+ *  Notification card
+ * =========================================================== */
+.notif {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    transition: background 100ms;
+}
+
+.notif:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.notif--unread {
+    background: rgba(49, 155, 210, 0.05);
+    border-left: 2px solid var(--color-smooai-blue-400);
+}
+
+.notif--unread:hover {
+    background: rgba(49, 155, 210, 0.08);
+}
+
+.notif__icon {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+    margin-top: 4px;
+}
+
+.notif__icon--like {
+    color: var(--color-smooai-red);
+}
+.notif__icon--repost {
     color: var(--color-smooai-green);
 }
+.notif__icon--follow {
+    color: var(--color-smooai-blue-300);
+}
 
-/* ============================================================
- * Login view
- * ============================================================ */
+.notif__avatar {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--color-smooai-dark-blue-700);
+    overflow: hidden;
+}
+
+.notif__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.notif__body {
+    flex: 1;
+    min-width: 0;
+}
+
+.notif__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.notif__name {
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+}
+
+.notif__time {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.notif__phrase {
+    color: var(--muted-foreground);
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+/* ===========================================================
+ *  Compose sheet — small extensions on top of the shared .modal__*
+ * =========================================================== */
+.compose__head {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.compose__title {
+    flex: 1;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--foreground);
+}
+
+.compose__close {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    color: var(--muted-foreground);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 120ms, color 120ms;
+}
+
+.compose__close:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.compose__textarea {
+    width: 100%;
+    min-height: 140px;
+    padding: 12px 14px;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--foreground);
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.45;
+    resize: vertical;
+    outline: none;
+    transition: border-color 120ms;
+}
+
+.compose__textarea:focus {
+    border-color: var(--ring);
+}
+
+.compose__bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.compose__counter {
+    color: var(--muted-foreground);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+.compose__counter--over {
+    color: var(--color-smooai-red);
+    font-weight: 600;
+}
+
+.compose__post {
+    margin-left: auto;
+}
+
+.compose__error {
+    color: var(--color-smooai-red);
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+/* ===========================================================
+ *  Login view (smooblue-specific full-screen sign-in)
+ * =========================================================== */
 .login {
     display: flex;
     align-items: center;
@@ -407,7 +475,7 @@ a {
     width: 360px;
     padding: 32px;
     background: var(--card);
-    border-radius: 16px;
+    border-radius: var(--radius-xl);
     border: 1px solid var(--border);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
     text-align: center;
@@ -417,12 +485,12 @@ a {
     width: 84px;
     height: 84px;
     margin: 0 auto 16px;
-    border-radius: 50%;
-    background: var(--gradient-brand);
-    display: flex;
-    align-items: center;
-    justify-content: center;
     box-shadow: 0 8px 24px rgba(244, 159, 10, 0.3);
+}
+
+.login__logo svg {
+    width: 44px;
+    height: 44px;
 }
 
 .login__title {
@@ -458,53 +526,9 @@ a {
     border-color: var(--ring);
 }
 
+/* Full-width override on top of the shared .btn--primary. */
 .login__btn {
     width: 100%;
-    padding: 10px 12px;
-    background: var(--gradient-brand);
-    color: var(--color-smooai-white);
-    border-radius: 8px;
-    font-weight: 600;
-    transition: opacity 120ms;
-}
-
-.login__btn:hover:not(:disabled) {
-    opacity: 0.9;
-}
-
-.login__btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.login__consent {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 4px 0 16px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--muted-foreground);
-    font-size: 12px;
-    line-height: 1.45;
-    text-align: left;
-    cursor: pointer;
-}
-
-.login__consent input[type="checkbox"] {
-    margin-top: 2px;
-    accent-color: var(--color-smooai-green-800);
-    flex-shrink: 0;
-}
-
-.login__consent a {
-    color: var(--color-smooai-blue-300);
-}
-
-.login__consent-text {
-    flex: 1;
 }
 
 .login__error {
@@ -517,4 +541,34 @@ a {
     color: var(--muted-foreground);
     font-size: 13px;
     margin-top: 12px;
+}
+
+.login__consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 4px 0 16px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--muted-foreground);
+    font-size: 12px;
+    line-height: 1.45;
+    text-align: left;
+    cursor: pointer;
+}
+
+.login__consent input[type='checkbox'] {
+    margin-top: 2px;
+    accent-color: var(--ring);
+    flex-shrink: 0;
+}
+
+.login__consent a {
+    color: var(--color-smooai-blue-300);
+}
+
+.login__consent-text {
+    flex: 1;
 }

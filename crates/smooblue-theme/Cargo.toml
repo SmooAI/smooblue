@@ -7,3 +7,6 @@ description = "Smoo color tokens compiled to CSS for the smooblue Dioxus app."
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+smooai-ui = { workspace = true }
