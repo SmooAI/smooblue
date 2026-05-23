@@ -65,7 +65,7 @@ pub fn ComposeSheet(open: Signal<bool>) -> Element {
                     }
                 }
                 textarea {
-                    class: "compose__textarea",
+                    class: "input input--lg compose__textarea",
                     placeholder: "What's up?",
                     autofocus: true,
                     value: "{text}",

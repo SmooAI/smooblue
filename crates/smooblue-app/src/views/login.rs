@@ -70,7 +70,7 @@ pub fn LoginView() -> Element {
                 h1 { class: "login__title", "Smooblue" }
                 p { class: "login__sub", "Sign in with your Bluesky handle" }
                 input {
-                    class: "login__input",
+                    class: "input input--lg login__input",
                     placeholder: "alice.bsky.social",
                     autofocus: true,
                     value: "{handle}",

@@ -411,24 +411,11 @@ a {
     color: var(--foreground);
 }
 
+/* Compose-specific overrides on top of the shared `.input` / `.input--lg`
+   classes — just a taller min-height since the compose box is the main
+   action on the sheet. */
 .compose__textarea {
-    width: 100%;
     min-height: 140px;
-    padding: 12px 14px;
-    background: var(--input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--foreground);
-    font-family: inherit;
-    font-size: 15px;
-    line-height: 1.45;
-    resize: vertical;
-    outline: none;
-    transition: border-color 120ms;
-}
-
-.compose__textarea:focus {
-    border-color: var(--ring);
 }
 
 .compose__bar {
@@ -509,21 +496,9 @@ a {
     font-size: 13px;
 }
 
+/* Layout glue only — the field treatment comes from shared `.input`. */
 .login__input {
-    width: 100%;
-    padding: 10px 12px;
-    background: var(--input);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--foreground);
-    font-size: 14px;
     margin-bottom: 12px;
-    outline: none;
-    transition: border-color 120ms;
-}
-
-.login__input:focus {
-    border-color: var(--ring);
 }
 
 /* Full-width override on top of the shared .btn--primary. */
