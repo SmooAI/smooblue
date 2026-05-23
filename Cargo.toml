@@ -31,8 +31,8 @@ smooai-fetch = "3"
 # follow-up pearl. Add back when v0.1+ ships.
 
 # Dioxus desktop UI
-dioxus = { version = "0.6", features = ["desktop", "router"] }
-dioxus-desktop = "0.6"
+dioxus = { version = "0.7", features = ["desktop", "router"] }
+dioxus-desktop = "0.7"
 
 # Async / runtime
 tokio = { version = "1", features = ["full"] }
