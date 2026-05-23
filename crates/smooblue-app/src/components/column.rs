@@ -55,8 +55,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
             let Some(s) = session else {
                 return Err::<ColumnData, String>("not signed in".into());
             };
-            let appview = Url::parse("https://api.bsky.app").map_err(|e| e.to_string())?;
-            let client = AtClient::new(s, appview);
+            // For OAuth-authenticated calls we MUST hit the user's PDS, not
+            // api.bsky.app directly. The PDS proxies app.bsky.* lexicons to
+            // the AppView with service-auth on our behalf; calling the
+            // AppView directly with a user OAuth token returns 401
+            // AuthMissing because the AppView only accepts service-auth.
+            let base = Url::parse(&s.pds).map_err(|e| e.to_string())?;
+            let client = AtClient::new(s, base);
             match kind {
                 ColumnKind::Home => client
                     .get_timeline(None, 30)

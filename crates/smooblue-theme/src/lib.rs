@@ -18,6 +18,12 @@ pub const STYLES: &str = concatcp!(smooai_ui::STYLES, "\n", APP_STYLES);
 /// every component reaches for the same thing.
 pub const MONOGRAM_SVG: &str = smooai_ui::MONOGRAM_SVG;
 
+/// Smooblue's product brand mark — the composite of the smoo monogram
+/// and the Bluesky butterfly. Use this (not [`MONOGRAM_SVG`]) for the
+/// rail logo + login screen so smooblue is visibly distinct from other
+/// smoo apps.
+pub const BRAND_SVG: &str = include_str!("../../../assets/icon.svg");
+
 /// Smooblue-only component CSS — the bits no other app needs.
 const APP_STYLES: &str = include_str!("../../../assets/styles.css");
 

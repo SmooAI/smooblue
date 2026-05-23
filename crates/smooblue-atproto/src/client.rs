@@ -111,19 +111,23 @@ impl AtClient {
         let mut nonce = self.session.lock().unwrap().dpop_nonce.clone();
 
         for _ in 0..2 {
-            let (access, token_type, dpop_key) = {
+            let (access, dpop_key) = {
                 let s = self.session.lock().unwrap();
                 if s.is_expired() {
                     return Err(AtError::SessionExpired);
                 }
-                (s.access_token.clone(), s.token_type.clone(), s.dpop_key()?)
+                (s.access_token.clone(), s.dpop_key()?)
             };
             let proof =
                 dpop_key.sign_proof("GET", url.as_str(), nonce.as_deref(), Some(&access))?;
+            // Per RFC 9449, the Authorization scheme MUST be literally "DPoP"
+            // (not "Bearer", not whatever token_type the server happened to
+            // return). Some servers return token_type="Bearer" even for
+            // DPoP-bound tokens; forcing the scheme here keeps us correct.
             let resp = self
                 .http
                 .get(url.clone())
-                .header("Authorization", format!("{} {}", token_type, access))
+                .header("Authorization", format!("DPoP {}", access))
                 .header("DPoP", proof)
                 .send()
                 .await?;

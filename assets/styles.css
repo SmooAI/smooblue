@@ -47,11 +47,15 @@ a {
  *  Base .rail / .rail__btn / .rail__btn--active styles come from
  *  smooai-ui; we just add the layout glue here.
  * =========================================================== */
+/* Smooblue's brand mark is a self-contained composite SVG (smoo
+   monogram + bluesky butterfly with its own rounded-square backdrop).
+   The wrapper just sizes it and adds a subtle drop shadow. */
 .rail__logo {
     width: 36px;
     height: 36px;
-    border-radius: 50%;
     margin-bottom: 12px;
+    border-radius: 8px;
+    overflow: hidden;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
     display: flex;
     align-items: center;
@@ -59,8 +63,9 @@ a {
 }
 
 .rail__logo svg {
-    width: 20px;
-    height: 20px;
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 .rail__divider {
@@ -469,15 +474,21 @@ a {
 }
 
 .login__logo {
-    width: 84px;
-    height: 84px;
-    margin: 0 auto 16px;
+    width: 88px;
+    height: 88px;
+    margin: 0 auto 18px;
+    border-radius: 20px;
+    overflow: hidden;
     box-shadow: 0 8px 24px rgba(244, 159, 10, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .login__logo svg {
-    width: 44px;
-    height: 44px;
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 .login__title {

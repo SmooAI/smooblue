@@ -64,8 +64,8 @@ pub fn LoginView() -> Element {
     rsx! {
         div { class: "login",
             div { class: "login__card",
-                div { class: "brand-badge login__logo",
-                    dangerous_inner_html: "{smooblue_theme::MONOGRAM_SVG}",
+                div { class: "login__logo",
+                    dangerous_inner_html: "{smooblue_theme::BRAND_SVG}",
                 }
                 h1 { class: "login__title", "Smooblue" }
                 p { class: "login__sub", "Sign in with your Bluesky handle" }

@@ -9,10 +9,11 @@ use dioxus::prelude::*;
 pub fn Sidebar() -> Element {
     rsx! {
         nav { class: "rail",
-            // Smoo monogram in the gradient brand badge — sourced from smooai-ui
-            // so the same SVG lands in every SmooAI Rust app.
-            div { class: "brand-badge rail__logo", title: "Smooblue",
-                dangerous_inner_html: "{smooblue_theme::MONOGRAM_SVG}",
+            // Smooblue product mark (smoo monogram + bluesky butterfly).
+            // Self-contained SVG with its own backdrop, so no .brand-badge
+            // gradient pill behind it.
+            div { class: "rail__logo", title: "Smooblue",
+                dangerous_inner_html: "{smooblue_theme::BRAND_SVG}",
             }
             RailBtn { label: "Home", active: true, kind: RailKind::Home }
             RailBtn { label: "Search", active: false, kind: RailKind::Search }

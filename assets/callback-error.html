@@ -1,41 +1,77 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
         <title>Smooblue — sign-in failed</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
-            body {
-                background: #131313;
-                color: #f8fafc;
-                font-family: -apple-system, sans-serif;
+            :root {
+                --bg: oklch(0.145 0.014 265);
+                --card: oklch(0.205 0.015 265);
+                --fg: oklch(0.984 0.003 247.9);
+                --muted: oklch(0.715 0 89.9);
+                --red: #ff6b6c;
+            }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            html, body {
+                height: 100%;
+                background: var(--bg);
+                color: var(--fg);
+                font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+                -webkit-font-smoothing: antialiased;
+            }
+            body { display: flex; align-items: center; justify-content: center; padding: 24px; }
+            .card {
+                background: var(--card);
+                border: 1px solid #8b1d1d;
+                border-radius: 18px;
+                padding: 40px 44px 36px;
+                text-align: center;
+                max-width: 420px;
+                box-shadow: 0 24px 80px rgba(139, 29, 29, 0.4);
+                animation: card-in 280ms cubic-bezier(.2,.7,.3,1) both;
+            }
+            @keyframes card-in {
+                from { opacity: 0; transform: translateY(10px); }
+                to   { opacity: 1; transform: translateY(0); }
+            }
+            .badge {
+                width: 96px;
+                height: 96px;
+                margin: 0 auto 20px;
+                border-radius: 22px;
+                background: #020618;
+                box-shadow: 0 12px 32px rgba(139, 29, 29, 0.35);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                height: 100vh;
-                margin: 0;
+                color: var(--red);
             }
-            .card {
-                text-align: center;
-                padding: 40px;
-                background: #1d1d1d;
-                border-radius: 16px;
-                max-width: 360px;
-                border: 1px solid #8b1d1d;
-            }
+            .badge svg { width: 48px; height: 48px; display: block; }
             h1 {
-                color: #ff6b6c;
-                margin: 0 0 8px;
+                font-size: 24px;
+                font-weight: 700;
+                color: var(--red);
+                margin-bottom: 8px;
             }
             p {
-                color: #a3a3a3;
-                margin: 0;
+                color: var(--muted);
+                font-size: 14px;
+                line-height: 1.5;
             }
         </style>
     </head>
     <body>
         <div class="card">
+            <div class="badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+            </div>
             <h1>Sign-in didn't complete</h1>
-            <p>Return to Smooblue to try again.</p>
+            <p>Return to Smooblue to try again. Most failures here are because the authorization was cancelled or timed out.</p>
         </div>
     </body>
 </html>
