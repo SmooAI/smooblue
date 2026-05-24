@@ -10,8 +10,8 @@
 //! what we want for demos, screenshots, and UI screen-recording.
 
 use smooblue_atproto::feed::{
-    Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView, FeedItem, PostAuthor,
-    PostRecord, PostView, ThreadView,
+    ActorProfile, ActorViewerState, Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView,
+    FeedItem, PostAuthor, PostRecord, PostView, ThreadView,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -533,6 +533,44 @@ pub fn thread_for(focus_uri: &str) -> ThreadView {
             make_post(reply3, None, None),
         ]),
     )
+}
+
+/// Demo: synthetic profile (ActorProfile + first page of their feed)
+/// for the ProfileSheet so SMOOBLUE_DEBUG_OPEN_PROFILE=demo renders
+/// the full layout without network. The handle in the focus signal
+/// is used loosely — we always return the "you" profile here.
+pub fn profile_for(actor: &str) -> (ActorProfile, Vec<FeedItem>) {
+    let display = if actor.contains(':') || actor == "you.bsky.social" {
+        ("You", "you.bsky.social", "did:plc:demo-you")
+    } else {
+        // Use the handle the user passed in as the display, so demo
+        // also exercises the lookup-by-arbitrary-actor path.
+        ("Demo Actor", actor, "did:plc:demo-other")
+    };
+    let profile = ActorProfile {
+        did: display.2.to_string(),
+        handle: display.1.to_string(),
+        display_name: Some(display.0.to_string()),
+        description: Some(
+            "Building Smooblue — a native multi-column Bluesky client in Rust + Dioxus.\nOAuth + DPoP, single-binary, ~30MB. Open source.\n\nsmoo.ai/smooblue".to_string(),
+        ),
+        avatar: Some("https://picsum.photos/seed/you/200".to_string()),
+        banner: Some("https://picsum.photos/seed/banner-you/1200/400".to_string()),
+        followers_count: Some(2_341),
+        follows_count: Some(184),
+        posts_count: Some(427),
+        viewer: Some(ActorViewerState {
+            following: None,
+            followed_by: Some("at://did:plc:demo-other/app.bsky.graph.follow/x".to_string()),
+            muted: Some(false),
+            blocked_by: Some(false),
+            blocking: None,
+        }),
+    };
+    // Re-use the same demo feed (first three posts are "yours" in the
+    // home_feed timeline anyway, so the profile reads as authentic).
+    let feed = home_feed();
+    (profile, feed)
 }
 
 fn embed_image(url: &str, alt: &str) -> EmbedImage {

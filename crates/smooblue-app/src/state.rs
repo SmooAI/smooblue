@@ -180,6 +180,13 @@ pub struct ReplyTarget {
     pub text: String,
 }
 
+/// Which actor (if any) the user has currently focused into a
+/// profile view. `None` ⇒ closed; `Some(actor)` ⇒ the ProfileSheet
+/// loads + renders the profile + recent posts for this DID or handle.
+/// Either form is accepted by app.bsky.actor.getProfile.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ProfileFocus(pub Option<String>);
+
 /// Which post (if any) the user has currently focused into a thread
 /// view. `None` ⇒ closed; `Some(uri)` ⇒ the ThreadSheet loads + renders
 /// the conversation around this AT-URI.
@@ -213,6 +220,15 @@ pub fn use_bootstrap() {
         Signal::new(ComposeContext { open, reply_to: None })
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));
+    use_context_provider::<Signal<ProfileFocus>>(|| {
+        // SMOOBLUE_DEBUG_OPEN_PROFILE=<handle-or-did> → boot straight
+        // into a profile view. `demo` resolves to the synth demo actor.
+        let initial = std::env::var("SMOOBLUE_DEBUG_OPEN_PROFILE")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| if v == "demo" { "you.bsky.social".to_string() } else { v });
+        Signal::new(ProfileFocus(initial))
+    });
     use_context_provider::<Signal<ThreadFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_THREAD=<at-uri> → boot straight into a
         // thread view for that URI. In demo mode the special value

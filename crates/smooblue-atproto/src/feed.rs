@@ -16,7 +16,7 @@ pub struct FeedItem {
 }
 
 /// `app.bsky.actor.defs#profileViewDetailed` — full profile shape.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct ActorProfile {
     pub did: String,
     pub handle: String,
@@ -26,10 +26,37 @@ pub struct ActorProfile {
     pub description: Option<String>,
     #[serde(default)]
     pub avatar: Option<String>,
+    /// Wide banner image shown behind the avatar in profile views.
+    #[serde(default)]
+    pub banner: Option<String>,
     #[serde(rename = "followersCount", default)]
     pub followers_count: Option<u64>,
     #[serde(rename = "followsCount", default)]
     pub follows_count: Option<u64>,
+    #[serde(rename = "postsCount", default)]
+    pub posts_count: Option<u64>,
+    /// Per-viewer relationship — whether the signed-in user follows
+    /// this actor, is followed back, has them muted/blocked.
+    #[serde(default)]
+    pub viewer: Option<ActorViewerState>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct ActorViewerState {
+    /// AT-URI of the viewer's follow record, if they follow this actor.
+    /// Pass to `delete_record` to unfollow.
+    #[serde(default)]
+    pub following: Option<String>,
+    /// AT-URI of this actor's follow-record pointing back at the
+    /// viewer (i.e. the "follows-you" badge condition).
+    #[serde(rename = "followedBy", default)]
+    pub followed_by: Option<String>,
+    #[serde(default)]
+    pub muted: Option<bool>,
+    #[serde(default)]
+    pub blocked_by: Option<bool>,
+    #[serde(default)]
+    pub blocking: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

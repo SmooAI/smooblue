@@ -4,7 +4,7 @@ use crate::auth_refresh::fresh_client;
 use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
-    add_column_unique, ColumnSpec, ComposeContext, OptimisticMap, ReplyTarget, ThreadFocus, Tick,
+    ComposeContext, OptimisticMap, ProfileFocus, ReplyTarget, ThreadFocus, Tick,
 };
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
@@ -16,10 +16,10 @@ pub fn PostCard(post: PostView) -> Element {
     // every second ("11s" → "12s" → "1m"). The read itself does the work
     // — Dioxus tracks the signal access as a render dependency.
     let _tick = use_context::<Signal<Tick>>().read().0;
-    let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let mut optimistic = use_context::<Signal<OptimisticMap>>();
     let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let mut thread_focus = use_context::<Signal<ThreadFocus>>();
+    let mut profile_focus = use_context::<Signal<ProfileFocus>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
@@ -66,16 +66,12 @@ pub fn PostCard(post: PostView) -> Element {
     let embed = post.embed.clone();
     let replies = post.reply_count;
     let actor_did = post.author.did.clone();
-    let actor_handle = post.author.handle.clone();
-    let actor_name = post.display_name().to_string();
 
+    // Click an avatar → open the profile sheet (modal with banner +
+    // bio + follow + recent posts). The sheet itself has an
+    // "Add as column" button if the user wants a permanent column.
     let open_profile = move |_evt: MouseEvent| {
-        let title = if actor_name.is_empty() {
-            format!("@{}", actor_handle)
-        } else {
-            actor_name.clone()
-        };
-        add_column_unique(&mut cols, ColumnSpec::author(actor_did.clone(), title));
+        profile_focus.set(ProfileFocus(Some(actor_did.clone())));
     };
 
     // Click anywhere on the body (text / timestamp / empty space, but

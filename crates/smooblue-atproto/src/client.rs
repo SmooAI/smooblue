@@ -425,6 +425,28 @@ impl AtClient {
         self.post_json(&url, &body).await
     }
 
+    /// Create a follow (`app.bsky.graph.follow`). Returns the new
+    /// record's URI so the caller can pass it back to
+    /// [`Self::delete_record`] to unfollow. `subject_did` is the DID
+    /// of the actor being followed.
+    pub async fn create_follow(&self, subject_did: &str) -> Result<CreatedRecord, AtError> {
+        let did = self.session.lock().unwrap().did.clone();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let body = serde_json::json!({
+            "repo": did,
+            "collection": "app.bsky.graph.follow",
+            "record": {
+                "$type": "app.bsky.graph.follow",
+                "subject": subject_did,
+                "createdAt": created_at,
+            }
+        });
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.repo.createRecord")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.post_json(&url, &body).await
+    }
+
     /// Create a repost (`app.bsky.feed.repost`). Symmetric with [`Self::create_like`].
     pub async fn create_repost(&self, post_uri: &str, post_cid: &str) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().unwrap().did.clone();

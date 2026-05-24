@@ -2,8 +2,8 @@
 //! (compose) + the global compose sheet + the search-column add sheet.
 
 use crate::components::{
-    column::Column, compose::ComposeSheet, search_sheet::SearchSheet, sidebar::Sidebar,
-    thread::ThreadSheet,
+    column::Column, compose::ComposeSheet, profile::ProfileSheet, search_sheet::SearchSheet,
+    sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::state::{ColumnSpec, ComposeContext, Tick};
@@ -57,6 +57,7 @@ pub fn DeckShell() -> Element {
             ComposeSheet {}
             SearchSheet { open: search_open }
             ThreadSheet {}
+            ProfileSheet {}
         }
     }
 }

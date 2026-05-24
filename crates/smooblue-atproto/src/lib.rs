@@ -20,8 +20,8 @@ pub use client::{
 };
 pub use error::AtError;
 pub use feed::{
-    ActorProfile, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind, EmbedMedia,
-    EmbedRecordView, EmbedRecordWrapper, FeedItem, FeedResponse, GetPostThreadResponse, PostAuthor,
-    PostRecord, PostView, PostViewerState, ThreadView,
+    ActorProfile, ActorViewerState, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind,
+    EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FeedItem, FeedResponse,
+    GetPostThreadResponse, PostAuthor, PostRecord, PostView, PostViewerState, ThreadView,
 };
 pub use notifications::{Notification, NotificationsResponse};

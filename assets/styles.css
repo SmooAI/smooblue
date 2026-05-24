@@ -1274,6 +1274,215 @@ a {
 }
 
 /* ===========================================================
+ *  Profile sheet — modal author detail view
+ * =========================================================== */
+.profile__sheet {
+    /* Slightly wider than thread so the banner has room to breathe. */
+    width: 680px;
+    max-width: 92vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    position: relative;
+}
+
+.profile__close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 0;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 120ms ease;
+}
+
+.profile__close:hover {
+    background: var(--color-smooai-red);
+}
+
+.profile__banner {
+    height: 160px;
+    width: 100%;
+    flex-shrink: 0;
+    background: var(--muted);
+    border-top-left-radius: var(--radius);
+    border-top-right-radius: var(--radius);
+}
+
+.profile__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0 16px;
+    margin-top: -44px;
+    /* Avatar overlaps the banner — its frame is z-stacked above. */
+    position: relative;
+    z-index: 1;
+}
+
+.profile__avatar-frame {
+    width: 92px;
+    height: 92px;
+    border-radius: 50%;
+    background: var(--card);
+    padding: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.profile__avatar {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
+}
+
+.profile__avatar--placeholder {
+    background: var(--muted);
+    color: var(--muted-foreground);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.profile__actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.profile__follow {
+    min-width: 92px;
+    font-weight: 600;
+}
+
+.profile__follow--following {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-foreground);
+}
+
+.profile__follow--following:hover:not(:disabled) {
+    border-color: var(--color-smooai-red);
+    color: var(--color-smooai-red);
+}
+
+.profile__add-column {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 13px;
+}
+
+.profile__add-column:hover {
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+.profile__identity {
+    padding: 12px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.profile__name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile__name {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--foreground);
+}
+
+.profile__followed-by {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.12);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.profile__handle {
+    color: var(--muted-foreground);
+    font-size: 14px;
+}
+
+.profile__bio {
+    padding: 12px 16px 0;
+    margin: 0;
+    color: var(--foreground);
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.profile__stats {
+    display: flex;
+    gap: 18px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile__stat {
+    display: flex;
+    gap: 6px;
+    font-size: 13px;
+}
+
+.profile__stat-num {
+    font-weight: 700;
+    color: var(--foreground);
+    font-variant-numeric: tabular-nums;
+}
+
+.profile__stat-label {
+    color: var(--muted-foreground);
+}
+
+.profile__feed {
+    overflow-y: auto;
+    padding: 8px 12px 16px;
+    flex: 1 1 auto;
+}
+
+.profile__feed-empty {
+    color: var(--muted-foreground);
+    text-align: center;
+    padding: 30px 12px;
+    font-size: 13px;
+    font-style: italic;
+}
+
+.profile__loading,
+.profile__error {
+    color: var(--muted-foreground);
+    text-align: center;
+    padding: 60px 16px;
+    font-size: 14px;
+}
+
+.profile__error {
+    color: var(--color-smooai-red);
+}
+
+/* ===========================================================
  *  Login view (smooblue-specific full-screen sign-in)
  * =========================================================== */
 .login {
