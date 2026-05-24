@@ -35,6 +35,10 @@ tracing = { workspace = true }
 
 keyring = { workspace = true }
 directories = { workspace = true }
+rfd = { workspace = true }
+image = { workspace = true }
+base64 = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }

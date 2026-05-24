@@ -83,6 +83,9 @@ tracing = "0.1"
 # Image rendering (avatars, embeds) — only needed if not relying on webview
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
+# Native file picker — used by the compose sheet for the "+ Image" action.
+rfd = "0.14"
+
 # Test utilities
 wiremock = "0.6"
 tempfile = "3"

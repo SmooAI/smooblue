@@ -615,6 +615,159 @@ a {
     margin-top: 8px;
 }
 
+/* ── Compose: attachments ─────────────────────────────────── */
+.compose__attach {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-foreground);
+    border-radius: 8px;
+    height: 32px;
+    width: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.compose__attach:hover:not(:disabled) {
+    background: rgba(244, 159, 10, 0.12);
+    color: var(--color-smooai-orange);
+    border-color: var(--color-smooai-orange);
+}
+
+.compose__attach--disabled,
+.compose__attach:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.compose__attachments {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.compose__attachment {
+    display: flex;
+    gap: 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px;
+    align-items: stretch;
+}
+
+.compose__attachment-preview {
+    position: relative;
+    flex: 0 0 96px;
+}
+
+.compose__thumb {
+    width: 96px;
+    height: 96px;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--muted);
+    display: block;
+}
+
+.compose__thumb--preparing {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--border);
+}
+
+.compose__thumb-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--color-smooai-orange);
+    animation: compose-spin 0.8s linear infinite;
+}
+
+@keyframes compose-spin {
+    to { transform: rotate(360deg); }
+}
+
+.compose__thumb--failed {
+    color: var(--color-smooai-red);
+    font-weight: 800;
+    font-size: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-smooai-red);
+    background: rgba(255, 107, 108, 0.08);
+}
+
+.compose__attachment-remove {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--foreground);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.compose__attachment-remove:hover {
+    background: var(--color-smooai-red);
+    color: #fff;
+    border-color: var(--color-smooai-red);
+}
+
+.compose__attachment-meta {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.compose__alt-input {
+    flex: 1 1 auto;
+    resize: none;
+    min-height: 64px;
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 6px 8px;
+}
+
+.compose__alt-input:focus {
+    outline: none;
+    border-color: var(--color-smooai-orange);
+    box-shadow: 0 0 0 2px rgba(244, 159, 10, 0.18);
+}
+
+.compose__alt-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted-foreground);
+}
+
+.compose__alt-counter {
+    font-variant-numeric: tabular-nums;
+}
+
+.compose__alt-hint {
+    opacity: 0.85;
+    font-style: italic;
+}
+
 /* ===========================================================
  *  Login view (smooblue-specific full-screen sign-in)
  * =========================================================== */

@@ -3,7 +3,7 @@
 use crate::error::AtError;
 use crate::feed::FeedResponse;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use smooblue_oauth::Session;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,6 +33,48 @@ pub struct StrongRef {
 pub struct ReplyRef {
     pub root: StrongRef,
     pub parent: StrongRef,
+}
+
+/// What `com.atproto.repo.uploadBlob` returns — a CID-bearing blob ref
+/// that the bsky lexicon embeds verbatim inside the post record.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlobRef {
+    #[serde(rename = "$type")]
+    #[serde(default = "default_blob_type")]
+    pub kind: String,
+    #[serde(rename = "ref")]
+    pub link: BlobLink,
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub size: u64,
+}
+
+fn default_blob_type() -> String {
+    "blob".into()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BlobLink {
+    #[serde(rename = "$link")]
+    pub cid: String,
+}
+
+/// Single image attached to a post (`app.bsky.embed.images` item).
+#[derive(Clone, Debug, Serialize)]
+pub struct PostImage {
+    pub blob: BlobRef,
+    /// Screen-reader description. Empty string is valid but discouraged.
+    pub alt: String,
+    /// Aspect-ratio hint so clients can lay out the placeholder without
+    /// downloading the full thumbnail.
+    #[serde(rename = "aspectRatio", skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<AspectRatio>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AspectRatio {
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Lightweight AT-URI breakdown: `at://<did>/<collection>/<rkey>`.
@@ -232,7 +274,7 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_with_reply(text, None).await
+        self.create_post_full(text, None, &[]).await
     }
 
     /// Same as [`Self::create_post`] but adds a reply context. The
@@ -242,6 +284,18 @@ impl AtClient {
         &self,
         text: &str,
         reply: Option<&ReplyRef>,
+    ) -> Result<CreatedRecord, AtError> {
+        self.create_post_full(text, reply, &[]).await
+    }
+
+    /// Full post creation — text + optional reply + optional image
+    /// attachments. Pass at most 4 images per the bsky lexicon.
+    /// Each image's `blob` field must come from a prior [`Self::upload_blob`] call.
+    pub async fn create_post_full(
+        &self,
+        text: &str,
+        reply: Option<&ReplyRef>,
+        images: &[PostImage],
     ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().unwrap().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -256,6 +310,14 @@ impl AtClient {
                 "parent": { "uri": r.parent.uri, "cid": r.parent.cid },
             });
         }
+        if !images.is_empty() {
+            // app.bsky.embed.images takes up to 4 image refs.
+            let trimmed = &images[..images.len().min(4)];
+            record["embed"] = serde_json::json!({
+                "$type": "app.bsky.embed.images",
+                "images": trimmed,
+            });
+        }
         let body = serde_json::json!({
             "repo": did,
             "collection": "app.bsky.feed.post",
@@ -265,6 +327,23 @@ impl AtClient {
             .session_pds_url("/xrpc/com.atproto.repo.createRecord")
             .map_err(|e| AtError::Decode(e.to_string()))?;
         self.post_json(&url, &body).await
+    }
+
+    /// Upload raw image bytes to the user's PDS via
+    /// `com.atproto.repo.uploadBlob`. The endpoint is unusual: body is
+    /// the raw bytes (not multipart, not JSON) and Content-Type is the
+    /// image's mime. The returned [`BlobRef`] is what
+    /// `app.bsky.embed.images` cites.
+    pub async fn upload_blob(&self, bytes: Vec<u8>, mime: &str) -> Result<BlobRef, AtError> {
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.repo.uploadBlob")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        #[derive(Deserialize)]
+        struct R {
+            blob: BlobRef,
+        }
+        let r: R = self.post_bytes(&url, bytes, mime).await?;
+        Ok(r.blob)
     }
 
     /// Create a like (`app.bsky.feed.like`). Returns the new record's URI so
@@ -327,6 +406,64 @@ impl AtClient {
     fn session_pds_url(&self, path: &str) -> Result<Url, url::ParseError> {
         let pds = self.session.lock().unwrap().pds.clone();
         Url::parse(&pds)?.join(path)
+    }
+
+    /// POST raw bytes with a custom Content-Type (e.g. `image/jpeg`),
+    /// DPoP-signed with the same nonce-retry loop as [`Self::post_json`].
+    /// Used for `com.atproto.repo.uploadBlob` which doesn't take JSON.
+    async fn post_bytes<T: DeserializeOwned>(
+        &self,
+        url: &Url,
+        bytes: Vec<u8>,
+        content_type: &str,
+    ) -> Result<T, AtError> {
+        let mut nonce = self.session.lock().unwrap().dpop_nonce.clone();
+        for _ in 0..2 {
+            let (access, dpop_key) = {
+                let s = self.session.lock().unwrap();
+                if s.is_expired() {
+                    return Err(AtError::SessionExpired);
+                }
+                (s.access_token.clone(), s.dpop_key()?)
+            };
+            let proof =
+                dpop_key.sign_proof("POST", url.as_str(), nonce.as_deref(), Some(&access))?;
+            let resp = self
+                .http
+                .post(url.clone())
+                .header("Authorization", format!("DPoP {}", access))
+                .header("DPoP", proof)
+                .header("Content-Type", content_type)
+                .body(bytes.clone())
+                .send()
+                .await?;
+            let status = resp.status();
+            let server_nonce = resp
+                .headers()
+                .get("DPoP-Nonce")
+                .and_then(|h| h.to_str().ok())
+                .map(String::from);
+            if let Some(n) = &server_nonce {
+                self.session.lock().unwrap().dpop_nonce = Some(n.clone());
+            }
+            if status.is_success() {
+                let body = resp.text().await?;
+                return serde_json::from_str(&body).map_err(AtError::from);
+            }
+            let resp_body = resp.text().await.unwrap_or_default();
+            if (status == 401 || status == 400) && resp_body.contains("use_dpop_nonce") {
+                if server_nonce.is_some() {
+                    nonce = server_nonce;
+                    continue;
+                }
+                return Err(AtError::MissingDpopNonce);
+            }
+            return Err(AtError::Status {
+                status: status.as_u16(),
+                body: resp_body,
+            });
+        }
+        Err(AtError::MissingDpopNonce)
     }
 
     async fn post_json<T: DeserializeOwned>(
@@ -564,6 +701,124 @@ mod tests {
         );
         let rec = client.create_post("hello smooblue").await.unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
+    }
+
+    #[tokio::test]
+    async fn upload_blob_hits_pds_with_image_mime_and_raw_body() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.uploadBlob"))
+            .and(header_exists("Authorization"))
+            .and(header_exists("DPoP"))
+            .respond_with(|req: &Request| {
+                assert_eq!(
+                    req.headers
+                        .get("content-type")
+                        .map(|v| v.to_str().unwrap()),
+                    Some("image/jpeg"),
+                    "content-type must echo the image mime, not application/json"
+                );
+                assert!(!req.body.is_empty(), "body must be the raw image bytes");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "blob": {
+                        "$type": "blob",
+                        "ref":   { "$link": "bafyJPG" },
+                        "mimeType": "image/jpeg",
+                        "size": req.body.len(),
+                    }
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let blob = client
+            .upload_blob(vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 1, 2, 3], "image/jpeg")
+            .await
+            .unwrap();
+        assert_eq!(blob.link.cid, "bafyJPG");
+        assert_eq!(blob.mime_type, "image/jpeg");
+    }
+
+    #[tokio::test]
+    async fn create_post_with_images_embeds_them() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.images");
+                assert_eq!(embed["images"].as_array().unwrap().len(), 1);
+                assert_eq!(embed["images"][0]["alt"], "a cat sitting on a keyboard");
+                assert_eq!(embed["images"][0]["blob"]["$type"], "blob");
+                assert_eq!(embed["images"][0]["blob"]["ref"]["$link"], "bafyJPG");
+                assert_eq!(embed["images"][0]["aspectRatio"]["width"], 1600);
+                assert_eq!(embed["images"][0]["aspectRatio"]["height"], 900);
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://did:plc:test/app.bsky.feed.post/abc",
+                    "cid": "bafy..."
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let img = PostImage {
+            blob: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafyJPG".into() },
+                mime_type: "image/jpeg".into(),
+                size: 1234,
+            },
+            alt: "a cat sitting on a keyboard".into(),
+            aspect_ratio: Some(AspectRatio { width: 1600, height: 900 }),
+        };
+        let rec = client
+            .create_post_full("look at this cat", None, std::slice::from_ref(&img))
+            .await
+            .unwrap();
+        assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
+    }
+
+    #[tokio::test]
+    async fn create_post_caps_at_four_images() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let len = body["record"]["embed"]["images"].as_array().unwrap().len();
+                assert_eq!(len, 4, "must trim to 4 even if caller passes more");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://x/app.bsky.feed.post/y", "cid": "c"
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let img = PostImage {
+            blob: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafy".into() },
+                mime_type: "image/jpeg".into(),
+                size: 1,
+            },
+            alt: "".into(),
+            aspect_ratio: None,
+        };
+        let many = vec![img.clone(), img.clone(), img.clone(), img.clone(), img.clone(), img];
+        client.create_post_full("six images", None, &many).await.unwrap();
     }
 
     #[tokio::test]

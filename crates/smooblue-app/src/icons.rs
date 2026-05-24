@@ -153,3 +153,15 @@ pub fn Package(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdPackage } }
 }
+
+#[component]
+pub fn ImageIcon(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdImage } }
+}
+
+#[component]
+pub fn Sparkles(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdSparkles } }
+}

@@ -5,6 +5,7 @@
 pub mod components;
 pub mod demo;
 pub mod icons;
+pub mod image_prep;
 pub mod persistence;
 pub mod state;
 pub mod views;
