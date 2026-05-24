@@ -137,6 +137,63 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.feed.searchPosts` — text search across all posts.
+    pub async fn search_posts(
+        &self,
+        query: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<FeedResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.searchPosts")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        // searchPosts returns `posts: [PostView]` — wrap into FeedResponse so
+        // the column renderer can stay generic.
+        #[derive(serde::Deserialize)]
+        struct SearchResp {
+            #[serde(default)]
+            posts: Vec<crate::feed::PostView>,
+            cursor: Option<String>,
+        }
+        let r: SearchResp = self.get_json(&url).await?;
+        Ok(FeedResponse {
+            cursor: r.cursor,
+            feed: r
+                .posts
+                .into_iter()
+                .map(|p| crate::feed::FeedItem { post: p })
+                .collect(),
+        })
+    }
+
+    /// `app.bsky.feed.getFeed` — fetch a custom feed (e.g. "Indianapolis
+    /// Sports 1"). `feed_uri` is the AT-URI of the feed generator record.
+    pub async fn get_feed(
+        &self,
+        feed_uri: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<FeedResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getFeed")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("feed", feed_uri)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.notification.getUnreadCount` — cheap call for the
     /// hybrid Notifications polling (poll this every few seconds; only
     /// fetch the full list when the count actually changes).

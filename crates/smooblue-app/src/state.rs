@@ -43,6 +43,63 @@ impl ColumnSpec {
             title: "Home".into(),
         }
     }
+
+    pub fn notifications() -> Self {
+        Self {
+            id: "notifications".into(),
+            kind: ColumnKind::Notifications,
+            title: "Notifications".into(),
+        }
+    }
+
+    /// Bluesky's "Discover" custom feed (the system whats-hot generator).
+    /// AT-URI is well-known.
+    pub fn discover() -> Self {
+        Self {
+            id: "discover".into(),
+            kind: ColumnKind::Feed {
+                uri: "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
+                    .into(),
+            },
+            title: "Discover".into(),
+        }
+    }
+
+    pub fn search(query: impl Into<String>) -> Self {
+        let q: String = query.into();
+        Self {
+            id: format!("search:{}", q),
+            kind: ColumnKind::Search { query: q.clone() },
+            title: format!("Search · {q}"),
+        }
+    }
+
+    pub fn author(actor: impl Into<String>, title: impl Into<String>) -> Self {
+        let a: String = actor.into();
+        Self {
+            id: format!("author:{}", a),
+            kind: ColumnKind::AuthorFeed { actor: a.clone() },
+            title: title.into(),
+        }
+    }
+}
+
+/// Append a column to the deck if no column with the same id is already
+/// present. Persists the new layout to disk.
+pub fn add_column_unique(cols: &mut Signal<Vec<ColumnSpec>>, spec: ColumnSpec) {
+    let mut list = cols.write();
+    if list.iter().any(|c| c.id == spec.id) {
+        return;
+    }
+    list.push(spec);
+    let _ = crate::persistence::save_columns(&list);
+}
+
+/// Remove the column with the given id and persist.
+pub fn remove_column(cols: &mut Signal<Vec<ColumnSpec>>, id: &str) {
+    let mut list = cols.write();
+    list.retain(|c| c.id != id);
+    let _ = crate::persistence::save_columns(&list);
 }
 
 /// Global tick counter, bumped every second by [`DeckShell`]'s tick task.

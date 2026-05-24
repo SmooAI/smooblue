@@ -76,6 +76,12 @@ pub fn Plus(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdPlus } }
 }
 
+#[component]
+pub fn X(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdX } }
+}
+
 // ── Column header ──
 
 #[component]

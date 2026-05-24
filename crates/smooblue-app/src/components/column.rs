@@ -91,7 +91,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
 
     rsx! {
         section { class: "deck-column",
-            ColumnHeader { title: spec.title.clone(), kind: spec.kind.clone() }
+            ColumnHeader { id: spec.id.clone(), title: spec.title.clone(), kind: spec.kind.clone() }
             div { class: "deck-column__body",
                 match (&*data.read(), &*error.read(), *loading.read()) {
                     (_, _, true) if data.read().is_empty() => rsx! { div { class: "deck-column__loading", "Loading…" } },
@@ -161,15 +161,26 @@ async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<Colum
             .await
             .map(|r| ColumnData::Notifications(r.notifications))
             .map_err(|e| e.to_string()),
-        // Search + Feed columns aren't fully wired through AtClient yet;
-        // return empty until the matching XRPC calls land. The polling
-        // loop will still tick harmlessly.
-        ColumnKind::Search { .. } | ColumnKind::Feed { .. } => Ok(ColumnData::Posts(Vec::new())),
+        ColumnKind::Search { query } => client
+            .search_posts(query, None, 30)
+            .await
+            .map(|r| ColumnData::Posts(r.feed))
+            .map_err(|e| e.to_string()),
+        ColumnKind::Feed { uri } => client
+            .get_feed(uri, None, 30)
+            .await
+            .map(|r| ColumnData::Posts(r.feed))
+            .map_err(|e| e.to_string()),
     }
 }
 
 #[component]
-fn ColumnHeader(title: String, kind: ColumnKind) -> Element {
+fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
+    let mut cols = use_context::<Signal<Vec<crate::state::ColumnSpec>>>();
+    let id_for_close = id.clone();
+    let close = move |_| {
+        crate::state::remove_column(&mut cols, &id_for_close);
+    };
     rsx! {
         header { class: "deck-column__header",
             span { class: "deck-column__drag",
@@ -188,8 +199,8 @@ fn ColumnHeader(title: String, kind: ColumnKind) -> Element {
             button { class: "deck-column__action", title: "Sort",
                 icons::ListFilter { size: icons::Size::Sm }
             }
-            button { class: "deck-column__action", title: "Column settings",
-                icons::Settings2 { size: icons::Size::Sm }
+            button { class: "deck-column__action", title: "Close column", onclick: close,
+                icons::X { size: icons::Size::Sm }
             }
         }
     }

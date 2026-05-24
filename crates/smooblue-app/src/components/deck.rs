@@ -1,7 +1,9 @@
 //! Deck shell — rail + horizontally-scrolling columns + floating "+"
-//! (compose) + the global compose sheet.
+//! (compose) + the global compose sheet + the search-column add sheet.
 
-use crate::components::{column::Column, compose::ComposeSheet, sidebar::Sidebar};
+use crate::components::{
+    column::Column, compose::ComposeSheet, search_sheet::SearchSheet, sidebar::Sidebar,
+};
 use crate::icons;
 use crate::state::{ColumnSpec, Tick};
 use dioxus::prelude::*;
@@ -12,6 +14,7 @@ pub fn DeckShell() -> Element {
     let cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let columns = cols.read().clone();
     let mut compose_open = use_signal(|| false);
+    let search_open = use_signal(|| false);
 
     // 1-second tick that drives time-relative re-renders (post timestamps
     // ticking "11s" → "12s" etc.). Reading the Tick context in
@@ -32,7 +35,7 @@ pub fn DeckShell() -> Element {
 
     rsx! {
         div { class: "deck-shell",
-            Sidebar {}
+            Sidebar { search_open }
             div { class: "deck-columns",
                 for spec in columns {
                     Column { key: "{spec.id}", spec: spec }
@@ -45,6 +48,7 @@ pub fn DeckShell() -> Element {
                 icons::Plus { size: icons::Size::Lg }
             }
             ComposeSheet { open: compose_open }
+            SearchSheet { open: search_open }
         }
     }
 }

@@ -235,6 +235,16 @@ a {
     display: block;
 }
 
+.post__avatar--clickable {
+    cursor: pointer;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.post__avatar--clickable:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 2px var(--color-smooai-orange);
+}
+
 .post__body {
     flex: 1;
     min-width: 0;

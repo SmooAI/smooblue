@@ -1,7 +1,7 @@
 //! Single post card.
 
 use crate::icons;
-use crate::state::Tick;
+use crate::state::{add_column_unique, ColumnSpec, Tick};
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
 
@@ -11,6 +11,7 @@ pub fn PostCard(post: PostView) -> Element {
     // every second ("11s" → "12s" → "1m"). The read itself does the work
     // — Dioxus tracks the signal access as a render dependency.
     let _tick = use_context::<Signal<Tick>>().read().0;
+    let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
     let time = post.relative_time();
@@ -20,10 +21,23 @@ pub fn PostCard(post: PostView) -> Element {
     let likes = post.like_count;
     let reposts = post.repost_count;
     let replies = post.reply_count;
+    let actor_did = post.author.did.clone();
+    let actor_handle = post.author.handle.clone();
+    let actor_name = post.display_name().to_string();
+    let open_profile = move |_evt: MouseEvent| {
+        let title = if actor_name.is_empty() {
+            format!("@{}", actor_handle)
+        } else {
+            actor_name.clone()
+        };
+        add_column_unique(&mut cols, ColumnSpec::author(actor_did.clone(), title));
+    };
 
     rsx! {
         article { class: "post",
-            div { class: "post__avatar",
+            div { class: "post__avatar post__avatar--clickable",
+                onclick: open_profile,
+                title: "Open profile column",
                 if let Some(url) = avatar {
                     img { src: "{url}", alt: "{handle}" }
                 }
