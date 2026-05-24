@@ -234,6 +234,93 @@ impl AtClient {
         })
     }
 
+    /// `app.bsky.feed.getLikes` — paginated list of actors who liked
+    /// a post. Backs the "tap heart count → see who liked" modal.
+    pub async fn get_likes(
+        &self,
+        post_uri: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::LikesResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getLikes")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("uri", post_uri)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
+    /// `app.bsky.feed.getRepostedBy` — paginated list of actors who
+    /// reposted a post.
+    pub async fn get_reposted_by(
+        &self,
+        post_uri: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::RepostedByResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getRepostedBy")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("uri", post_uri)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
+    /// `app.bsky.feed.getQuotes` — paginated list of posts that
+    /// quote a given post. Returns full PostViews so the caller can
+    /// render them with the standard PostCard.
+    pub async fn get_quotes(
+        &self,
+        post_uri: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::QuotesResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getQuotes")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("uri", post_uri)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
+    /// `app.bsky.graph.getKnownFollowers` — actors followed by the
+    /// signed-in viewer who also follow the given subject. The
+    /// "mutuals" set, used for the "Followed by alice, bob and N
+    /// others you follow" social proof on a profile sheet.
+    pub async fn get_known_followers(
+        &self,
+        actor: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::KnownFollowersResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.graph.getKnownFollowers")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("actor", actor)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.feed.getPostThread` — full thread context for a
     /// single post. Returns the focused post plus its parent chain
     /// (up to `parent_height` ancestors) and replies (up to `depth`

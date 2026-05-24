@@ -22,6 +22,7 @@ pub use error::AtError;
 pub use feed::{
     ActorProfile, ActorViewerState, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind,
     EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FeedItem, FeedResponse,
-    GetPostThreadResponse, PostAuthor, PostRecord, PostView, PostViewerState, ThreadView,
+    GetPostThreadResponse, KnownFollowersResponse, LikeView, LikesResponse, PostAuthor, PostRecord,
+    PostView, PostViewerState, QuotesResponse, RepostedByResponse, ThreadView,
 };
 pub use notifications::{Notification, NotificationsResponse};

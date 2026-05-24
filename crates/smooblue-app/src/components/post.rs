@@ -4,7 +4,8 @@ use crate::auth_refresh::fresh_client;
 use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
-    ComposeContext, OptimisticMap, ProfileFocus, ReplyTarget, ThreadFocus, Tick,
+    ComposeContext, Engagement, EngagementFocus, OptimisticMap, ProfileFocus, ReplyTarget,
+    ThreadFocus, Tick,
 };
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
@@ -20,6 +21,7 @@ pub fn PostCard(post: PostView) -> Element {
     let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let mut thread_focus = use_context::<Signal<ThreadFocus>>();
     let mut profile_focus = use_context::<Signal<ProfileFocus>>();
+    let mut engagement_focus = use_context::<Signal<EngagementFocus>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
@@ -65,7 +67,29 @@ pub fn PostCard(post: PostView) -> Element {
     let avatar = post.author.avatar.clone();
     let embed = post.embed.clone();
     let replies = post.reply_count;
+    let quote_count = post.quote_count;
     let actor_did = post.author.did.clone();
+
+    // Click handlers for the tap-the-count modals. Each one stashes
+    // the post URI in the EngagementFocus signal — the EngagementSheet
+    // (mounted at the deck level) picks it up and runs the right
+    // lexicon call. Stop propagation so the click doesn't ALSO open
+    // the thread via the wider post-body click target.
+    let uri_for_likes = post_uri.clone();
+    let open_likes = move |evt: MouseEvent| {
+        evt.stop_propagation();
+        engagement_focus.set(EngagementFocus(Some(Engagement::Likes(uri_for_likes.clone()))));
+    };
+    let uri_for_reposters = post_uri.clone();
+    let open_reposters = move |evt: MouseEvent| {
+        evt.stop_propagation();
+        engagement_focus.set(EngagementFocus(Some(Engagement::Reposters(uri_for_reposters.clone()))));
+    };
+    let uri_for_quotes = post_uri.clone();
+    let open_quotes = move |evt: MouseEvent| {
+        evt.stop_propagation();
+        engagement_focus.set(EngagementFocus(Some(Engagement::Quotes(uri_for_quotes.clone()))));
+    };
 
     // Click an avatar → open the profile sheet (modal with banner +
     // bio + follow + recent posts). The sheet itself has an
@@ -264,17 +288,48 @@ pub fn PostCard(post: PostView) -> Element {
                         icons::MessageCircle { size: icons::Size::Sm }
                         span { "{replies}" }
                     }
+                    // Repost: icon toggles, count opens the reposters
+                    // sheet. Two separate buttons sharing the visual
+                    // grouping via CSS.
                     button { class: "{repost_class}",
                         onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_repost(evt); },
                         title: if is_reposted { "Undo repost" } else { "Repost" },
                         icons::Repeat2 { size: icons::Size::Sm }
-                        span { "{display_reposts}" }
                     }
+                    if display_reposts > 0 {
+                        button { class: "post__action-count",
+                            onclick: open_reposters,
+                            title: "See who reposted",
+                            "{display_reposts}"
+                        }
+                    } else {
+                        span { class: "post__action-count post__action-count--zero", "0" }
+                    }
+                    // Quote count — bsky's lexicon exposes this; we
+                    // show it inline if any quotes exist. Click opens
+                    // the quotes list.
+                    if quote_count > 0 {
+                        button { class: "post__action post__action--quote",
+                            onclick: open_quotes,
+                            title: "See who quoted",
+                            icons::Quote { size: icons::Size::Sm }
+                            span { "{quote_count}" }
+                        }
+                    }
+                    // Like: same split — icon toggles, count opens the likers sheet.
                     button { class: "{like_class}",
                         onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_like(evt); },
                         title: if is_liked { "Unlike" } else { "Like" },
                         icons::Heart { size: icons::Size::Sm }
-                        span { "{display_likes}" }
+                    }
+                    if display_likes > 0 {
+                        button { class: "post__action-count",
+                            onclick: open_likes,
+                            title: "See who liked",
+                            "{display_likes}"
+                        }
+                    } else {
+                        span { class: "post__action-count post__action-count--zero", "0" }
                     }
                     span { class: "post__action post__action--right",
                         icons::MoreHorizontal { size: icons::Size::Sm }

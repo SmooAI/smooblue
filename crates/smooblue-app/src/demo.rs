@@ -340,6 +340,7 @@ fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
         reply_count: 0,
         repost_count: 0,
         like_count: 0,
+            quote_count: 0,
         indexed_at: Some(ts.to_string()),
         viewer: None,
     }
@@ -419,6 +420,7 @@ fn item(
             reply_count: replies,
             repost_count: reposts,
             like_count: likes,
+            quote_count: 0,
             viewer: None,
         },
     }
@@ -455,6 +457,7 @@ fn item_with_embed(
             reply_count: replies,
             repost_count: reposts,
             like_count: likes,
+            quote_count: 0,
             viewer: None,
         },
     }
@@ -533,6 +536,76 @@ pub fn thread_for(focus_uri: &str) -> ThreadView {
             make_post(reply3, None, None),
         ]),
     )
+}
+
+/// Demo: synthetic engagement data for the EngagementSheet
+/// (likes/reposters/quotes). Returns the same `Loaded` variant the
+/// real fetch path produces.
+pub fn engagement_for(kind: &crate::state::Engagement) -> crate::components::engagement::Loaded {
+    use crate::components::engagement::Loaded;
+    let avatar = |seed: &str| Some(format!("https://picsum.photos/seed/{seed}/80"));
+    let actor = |handle: &str, display: &str, seed: &str| PostAuthor {
+        did: format!("did:plc:demo-{handle}"),
+        handle: handle.to_string(),
+        display_name: Some(display.to_string()),
+        avatar: avatar(seed),
+    };
+    match kind {
+        crate::state::Engagement::Likes(_) | crate::state::Engagement::Reposters(_) => {
+            Loaded::Actors(vec![
+                actor("alice.bsky.social", "Alice Mendez", "alice"),
+                actor("rustlang.bsky.social", "Rust", "rust"),
+                actor("dioxuslabs.com", "Dioxus", "dx"),
+                actor("carol.bsky.social", "Carol", "carol"),
+                actor("devinivy.com", "Devin Ivy", "devin"),
+                actor("bob.bsky.social", "Bob", "bob"),
+                actor("photo.bsky.social", "Photographer", "photog"),
+                actor("smoo.ai", "Smoo AI", "smoo"),
+            ])
+        }
+        crate::state::Engagement::Quotes(_) => {
+            Loaded::Posts(home_feed().into_iter().take(3).collect())
+        }
+    }
+}
+
+/// Demo: known-followers list ("mutuals") for the profile sheet.
+/// Used when SMOOBLUE_DEMO=1 — returns a handful of fake mutuals so
+/// the social-proof row renders without network.
+pub fn known_followers_for(_actor: &str) -> Vec<PostAuthor> {
+    let avatar = |seed: &str| Some(format!("https://picsum.photos/seed/{seed}/80"));
+    vec![
+        PostAuthor {
+            did: "did:plc:demo-alice".into(),
+            handle: "alice.bsky.social".into(),
+            display_name: Some("Alice Mendez".into()),
+            avatar: avatar("alice"),
+        },
+        PostAuthor {
+            did: "did:plc:demo-dx".into(),
+            handle: "dioxuslabs.com".into(),
+            display_name: Some("Dioxus".into()),
+            avatar: avatar("dx"),
+        },
+        PostAuthor {
+            did: "did:plc:demo-rust".into(),
+            handle: "rustlang.bsky.social".into(),
+            display_name: Some("Rust".into()),
+            avatar: avatar("rust"),
+        },
+        PostAuthor {
+            did: "did:plc:demo-carol".into(),
+            handle: "carol.bsky.social".into(),
+            display_name: Some("Carol".into()),
+            avatar: avatar("carol"),
+        },
+        PostAuthor {
+            did: "did:plc:demo-devin".into(),
+            handle: "devinivy.com".into(),
+            display_name: Some("Devin Ivy".into()),
+            avatar: avatar("devin"),
+        },
+    ]
 }
 
 /// Demo: synthetic profile (ActorProfile + first page of their feed)

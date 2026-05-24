@@ -20,7 +20,7 @@ use crate::demo;
 use crate::icons;
 use crate::state::{add_column_unique, ColumnSpec, ProfileFocus};
 use dioxus::prelude::*;
-use smooblue_atproto::{ActorProfile, FeedItem};
+use smooblue_atproto::{ActorProfile, FeedItem, PostAuthor};
 use smooblue_oauth::Session;
 
 /// Combined snapshot loaded on open — one network round-trip for the
@@ -234,6 +234,7 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         if !description.trim().is_empty() {
             p { class: "profile__bio", "{description}" }
         }
+        KnownFollowersRow { actor: did.clone() }
         div { class: "profile__stats",
             div { class: "profile__stat",
                 span { class: "profile__stat-num", "{format_count(posts)}" }
@@ -254,6 +255,88 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
             } else {
                 for item in data.feed.iter() {
                     PostCard { key: "{item.post.uri}", post: item.post.clone() }
+                }
+            }
+        }
+    }
+}
+
+/// "Followed by alice, bob and 12 others you follow" — the mutuals
+/// social-proof row that bsky.app shows under the bio. Loads
+/// `app.bsky.graph.getKnownFollowers` lazily. Silent on failure
+/// (just renders nothing) so a transient network blip doesn't
+/// pollute the profile.
+#[component]
+fn KnownFollowersRow(actor: String) -> Element {
+    let session = use_context::<Signal<Option<Session>>>();
+    let key = actor.clone();
+    let followers = use_resource(move || {
+        let actor = key.clone();
+        let session_sig = session;
+        async move {
+            if demo::is_active() {
+                return Ok::<Vec<PostAuthor>, String>(demo::known_followers_for(&actor));
+            }
+            let Some(client) = fresh_client(session_sig).await else {
+                return Err("not signed in".into());
+            };
+            client
+                .get_known_followers(&actor, None, 12)
+                .await
+                .map(|r| r.followers)
+                .map_err(|e| e.to_string())
+        }
+    });
+
+    let snap = followers.read_unchecked();
+    let Some(Ok(list)) = snap.as_ref() else {
+        // Either still loading or errored — render nothing rather
+        // than a placeholder; the row is purely additive.
+        return rsx! { Fragment {} };
+    };
+    if list.is_empty() {
+        return rsx! { Fragment {} };
+    }
+    // Show up to 3 avatars + names inline, then "+N others you follow"
+    // for the remainder. Counts above 12 are capped by the API call's
+    // limit anyway; we surface the visible-count as a rough lower bound.
+    let inline_n = list.len().min(3);
+    let inline: Vec<PostAuthor> = list.iter().take(inline_n).cloned().collect();
+    let extra = list.len().saturating_sub(inline_n);
+
+    rsx! {
+        div { class: "profile__mutuals",
+            div { class: "profile__mutuals-avatars",
+                for (i, a) in inline.iter().enumerate() {
+                    if let Some(url) = a.avatar.as_ref() {
+                        img {
+                            key: "{i}",
+                            class: "profile__mutuals-avatar",
+                            src: "{url}",
+                            alt: "{a.handle}",
+                            title: "{a.handle}",
+                        }
+                    }
+                }
+            }
+            span { class: "profile__mutuals-text",
+                "Followed by "
+                for (i, a) in inline.iter().enumerate() {
+                    span { key: "{i}", class: "profile__mutuals-name",
+                        if let Some(name) = a.display_name.as_ref().filter(|s| !s.is_empty()) {
+                            "{name}"
+                        } else {
+                            "@{a.handle}"
+                        }
+                    }
+                    if i + 1 < inline.len() {
+                        ", "
+                    }
+                }
+                if extra > 0 {
+                    " and {extra} other"
+                    if extra != 1 { "s" }
+                    " you follow"
                 }
             }
         }

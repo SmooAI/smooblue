@@ -187,6 +187,21 @@ pub struct ReplyTarget {
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ProfileFocus(pub Option<String>);
 
+/// What the EngagementSheet should show — the modal that opens when
+/// the user taps a like/repost/quote count on a post card.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct EngagementFocus(pub Option<Engagement>);
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum Engagement {
+    /// `app.bsky.feed.getLikes` for the given post URI.
+    Likes(String),
+    /// `app.bsky.feed.getRepostedBy` for the given post URI.
+    Reposters(String),
+    /// `app.bsky.feed.getQuotes` for the given post URI.
+    Quotes(String),
+}
+
 /// Which post (if any) the user has currently focused into a thread
 /// view. `None` ⇒ closed; `Some(uri)` ⇒ the ThreadSheet loads + renders
 /// the conversation around this AT-URI.
@@ -220,6 +235,23 @@ pub fn use_bootstrap() {
         Signal::new(ComposeContext { open, reply_to: None })
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));
+    use_context_provider::<Signal<EngagementFocus>>(|| {
+        // SMOOBLUE_DEBUG_OPEN_ENGAGEMENT=likes|reposters|quotes opens
+        // the corresponding sheet against a synthetic post URI on boot.
+        // Useful for screenshots and iterating the UI.
+        let initial = std::env::var("SMOOBLUE_DEBUG_OPEN_ENGAGEMENT")
+            .ok()
+            .and_then(|v| {
+                let uri = "at://did:plc:demo/app.bsky.feed.post/demo".to_string();
+                match v.as_str() {
+                    "likes" => Some(Engagement::Likes(uri)),
+                    "reposters" => Some(Engagement::Reposters(uri)),
+                    "quotes" => Some(Engagement::Quotes(uri)),
+                    _ => None,
+                }
+            });
+        Signal::new(EngagementFocus(initial))
+    });
     use_context_provider::<Signal<ProfileFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_PROFILE=<handle-or-did> → boot straight
         // into a profile view. `demo` resolves to the synth demo actor.

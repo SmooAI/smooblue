@@ -75,6 +75,8 @@ pub struct PostView {
     pub repost_count: i64,
     #[serde(rename = "likeCount", default)]
     pub like_count: i64,
+    #[serde(rename = "quoteCount", default)]
+    pub quote_count: i64,
     /// Per-viewer state. Tells us whether the *signed-in* user has
     /// already liked or reposted this post, and the AT-URI of their
     /// like/repost record (used to undo it).
@@ -215,6 +217,53 @@ pub enum EmbedRecordView {
 pub struct EmbedAspectRatio {
     pub width: u32,
     pub height: u32,
+}
+
+/// Paginated list of actors who liked a post — backs the "tap heart
+/// count → see who liked" modal. The `Like` view is the like *record*
+/// (with createdAt etc.), but the only field we actually render is
+/// `actor`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LikesResponse {
+    #[serde(default)]
+    pub likes: Vec<LikeView>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LikeView {
+    pub actor: PostAuthor,
+    #[serde(rename = "indexedAt", default)]
+    pub indexed_at: Option<String>,
+}
+
+/// Paginated list of actors who reposted a post.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RepostedByResponse {
+    #[serde(rename = "repostedBy", default)]
+    pub reposted_by: Vec<PostAuthor>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// Paginated list of posts that quote a given post.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuotesResponse {
+    #[serde(default)]
+    pub posts: Vec<PostView>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// `app.bsky.graph.getKnownFollowers` — actors followed by the
+/// viewer who ALSO follow the given subject. The "mutuals" set.
+#[derive(Debug, Clone, Deserialize)]
+pub struct KnownFollowersResponse {
+    #[serde(default)]
+    pub followers: Vec<PostAuthor>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 /// Response wrapper for `app.bsky.feed.getPostThread`.

@@ -1137,6 +1137,167 @@ a {
 }
 
 /* ===========================================================
+ *  Engagement sheet — modal for likes / reposters / quotes
+ * =========================================================== */
+.engagement__sheet {
+    width: 460px;
+    max-width: 92vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.engagement__head {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.engagement__title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--foreground);
+    flex: 1 1 auto;
+}
+
+.engagement__close {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.engagement__close:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.engagement__body {
+    overflow-y: auto;
+    padding: 8px 0;
+    flex: 1 1 auto;
+}
+
+.engagement__empty,
+.engagement__loading,
+.engagement__error {
+    color: var(--muted-foreground);
+    text-align: center;
+    padding: 40px 16px;
+    font-size: 13px;
+}
+
+.engagement__error {
+    color: var(--color-smooai-red);
+}
+
+/* Compact actor row used inside the likes / reposters list. */
+.actor-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 16px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
+    text-align: left;
+    transition: background 120ms ease;
+}
+
+.actor-row:hover {
+    background: var(--card);
+}
+
+.actor-row__avatar {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--muted);
+}
+
+.actor-row__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.actor-row__avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+}
+
+.actor-row__meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.actor-row__name {
+    font-weight: 600;
+    color: var(--foreground);
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.actor-row__handle {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The clickable counts next to like/repost icons in PostCard. */
+.post__action-count {
+    background: transparent;
+    border: 0;
+    padding: 2px 4px;
+    margin: 0;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 100ms ease, color 100ms ease;
+}
+
+.post__action-count:hover {
+    background: rgba(244, 159, 10, 0.12);
+    color: var(--color-smooai-orange);
+}
+
+.post__action-count--zero {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.post__action-count--zero:hover {
+    background: transparent;
+    color: var(--muted-foreground);
+}
+
+.post__action--quote {
+    cursor: pointer;
+}
+
+/* ===========================================================
  *  Thread sheet — modal post-detail view
  * =========================================================== */
 .thread__sheet {
@@ -1431,6 +1592,42 @@ a {
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+.profile__mutuals {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px 0;
+}
+
+.profile__mutuals-avatars {
+    display: flex;
+    flex: 0 0 auto;
+}
+
+.profile__mutuals-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--card);
+    margin-left: -6px;
+}
+
+.profile__mutuals-avatar:first-child {
+    margin-left: 0;
+}
+
+.profile__mutuals-text {
+    color: var(--muted-foreground);
+    font-size: 12px;
+    line-height: 1.3;
+}
+
+.profile__mutuals-name {
+    color: var(--foreground);
+    font-weight: 600;
 }
 
 .profile__stats {
