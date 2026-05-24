@@ -233,6 +233,29 @@ impl AtClient {
         })
     }
 
+    /// `app.bsky.feed.getPostThread` — full thread context for a
+    /// single post. Returns the focused post plus its parent chain
+    /// (up to `parent_height` ancestors) and replies (up to `depth`
+    /// levels deep). Defaults follow Bluesky's: parent_height=10,
+    /// depth=6.
+    pub async fn get_post_thread(
+        &self,
+        uri: &str,
+        depth: u32,
+        parent_height: u32,
+    ) -> Result<crate::feed::ThreadView, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getPostThread")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("uri", uri)
+            .append_pair("depth", &depth.to_string())
+            .append_pair("parentHeight", &parent_height.to_string());
+        let r: crate::feed::GetPostThreadResponse = self.get_json(&url).await?;
+        Ok(r.thread)
+    }
+
     /// `app.bsky.feed.getPosts` — batch hydrate up to 25 posts by
     /// AT-URI in one round trip. Used by the Notifications column to
     /// render the subject post under each "liked / replied to / etc."
@@ -903,6 +926,62 @@ mod tests {
         );
         let out = client.get_posts(&[]).await.unwrap();
         assert!(out.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_post_thread_decodes_parent_chain_and_replies() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getPostThread"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "thread": {
+                    "$type": "app.bsky.feed.defs#threadViewPost",
+                    "post": {
+                        "uri": "at://focus", "cid": "fcid",
+                        "author": { "did": "df", "handle": "focus.bsky.social" },
+                        "record": { "text": "focused post text" }
+                    },
+                    "parent": {
+                        "$type": "app.bsky.feed.defs#threadViewPost",
+                        "post": {
+                            "uri": "at://parent", "cid": "pcid",
+                            "author": { "did": "dp", "handle": "parent.bsky.social" },
+                            "record": { "text": "parent text" }
+                        }
+                    },
+                    "replies": [
+                        {
+                            "$type": "app.bsky.feed.defs#threadViewPost",
+                            "post": {
+                                "uri": "at://reply1", "cid": "r1",
+                                "author": { "did": "dr", "handle": "replier.bsky.social" },
+                                "record": { "text": "first reply" }
+                            }
+                        },
+                        {
+                            "$type": "app.bsky.feed.defs#notFoundPost",
+                            "uri": "at://deleted"
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+        let client = AtClient::new(
+            fake_session(&server.uri()),
+            Url::parse(&server.uri()).unwrap(),
+        );
+        let thread = client.get_post_thread("at://focus", 6, 10).await.unwrap();
+        let chain = thread.parent_chain();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].post().unwrap().uri, "at://parent");
+        let crate::feed::ThreadView::Post { replies, .. } = &thread else {
+            panic!("expected Post");
+        };
+        let replies = replies.as_ref().unwrap();
+        assert_eq!(replies.len(), 2);
+        assert_eq!(replies[0].post().unwrap().uri, "at://reply1");
+        assert!(matches!(replies[1], crate::feed::ThreadView::NotFound { .. }));
     }
 
     #[tokio::test]

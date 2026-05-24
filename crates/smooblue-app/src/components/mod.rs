@@ -6,3 +6,4 @@ pub mod notification_card;
 pub mod post;
 pub mod search_sheet;
 pub mod sidebar;
+pub mod thread;

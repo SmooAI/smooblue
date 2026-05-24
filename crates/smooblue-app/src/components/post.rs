@@ -3,7 +3,7 @@
 use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
-    add_column_unique, ColumnSpec, ComposeContext, OptimisticMap, ReplyTarget, Tick,
+    add_column_unique, ColumnSpec, ComposeContext, OptimisticMap, ReplyTarget, ThreadFocus, Tick,
 };
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
@@ -20,6 +20,7 @@ pub fn PostCard(post: PostView) -> Element {
     let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let mut optimistic = use_context::<Signal<OptimisticMap>>();
     let mut compose_ctx = use_context::<Signal<ComposeContext>>();
+    let mut thread_focus = use_context::<Signal<ThreadFocus>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
@@ -78,12 +79,20 @@ pub fn PostCard(post: PostView) -> Element {
         add_column_unique(&mut cols, ColumnSpec::author(actor_did.clone(), title));
     };
 
+    // Click anywhere on the body (text / timestamp / empty space, but
+    // not on the action buttons — they stop_propagation) opens this
+    // post in the thread sheet.
+    let post_uri_thread = post_uri.clone();
+    let open_thread = move |_evt: MouseEvent| {
+        thread_focus.set(ThreadFocus(Some(post_uri_thread.clone())));
+    };
+
     // ── Like ────────────────────────────────────────────────────────
     let post_uri_l = post_uri.clone();
     let post_cid_l = post_cid.clone();
     let server_like_uri_l = server_like_uri.clone();
     let opt_state_l = opt_state.clone();
-    let toggle_like = move |_evt: MouseEvent| {
+    let mut toggle_like = move |_evt: MouseEvent| {
         let Some(sess) = session.read().clone() else { return };
         let want_liked = !is_liked;
         let known_like_uri = opt_state_l
@@ -145,7 +154,7 @@ pub fn PostCard(post: PostView) -> Element {
     let post_cid_r = post_cid.clone();
     let server_repost_uri_r = server_repost_uri.clone();
     let opt_state_r = opt_state.clone();
-    let toggle_repost = move |_evt: MouseEvent| {
+    let mut toggle_repost = move |_evt: MouseEvent| {
         let Some(sess) = session.read().clone() else { return };
         let want_reposted = !is_reposted;
         let known_repost_uri = opt_state_r
@@ -210,7 +219,7 @@ pub fn PostCard(post: PostView) -> Element {
     let post_cid_reply = post_cid.clone();
     let handle_reply = handle.clone();
     let text_reply = text.clone();
-    let open_reply = move |_evt: MouseEvent| {
+    let mut open_reply = move |_evt: MouseEvent| {
         let mut w = compose_ctx.write();
         w.reply_to = Some(ReplyTarget {
             uri: post_uri_reply.clone(),
@@ -242,13 +251,17 @@ pub fn PostCard(post: PostView) -> Element {
                 }
             }
             div { class: "post__body",
-                div { class: "post__head",
-                    span { class: "post__name", "{name}" }
-                    span { class: "post__handle", "@{handle}" }
-                    span { class: "post__time", "{time}" }
-                }
-                if !text.is_empty() {
-                    p { class: "post__text", "{text}" }
+                div { class: "post__body--clickable",
+                    onclick: open_thread,
+                    title: "Open thread",
+                    div { class: "post__head",
+                        span { class: "post__name", "{name}" }
+                        span { class: "post__handle", "@{handle}" }
+                        span { class: "post__time", "{time}" }
+                    }
+                    if !text.is_empty() {
+                        p { class: "post__text", "{text}" }
+                    }
                 }
                 if let Some(e) = embed {
                     div { class: "post__embed",
@@ -256,17 +269,20 @@ pub fn PostCard(post: PostView) -> Element {
                     }
                 }
                 div { class: "post__actions",
-                    button { class: "post__action post__action--clickable", onclick: open_reply,
+                    button { class: "post__action post__action--clickable",
+                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); open_reply(evt); },
                         title: "Reply",
                         icons::MessageCircle { size: icons::Size::Sm }
                         span { "{replies}" }
                     }
-                    button { class: "{repost_class}", onclick: toggle_repost,
+                    button { class: "{repost_class}",
+                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_repost(evt); },
                         title: if is_reposted { "Undo repost" } else { "Repost" },
                         icons::Repeat2 { size: icons::Size::Sm }
                         span { "{display_reposts}" }
                     }
-                    button { class: "{like_class}", onclick: toggle_like,
+                    button { class: "{like_class}",
+                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_like(evt); },
                         title: if is_liked { "Unlike" } else { "Like" },
                         icons::Heart { size: icons::Size::Sm }
                         span { "{display_likes}" }

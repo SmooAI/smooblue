@@ -3,6 +3,7 @@
 
 use crate::components::{
     column::Column, compose::ComposeSheet, search_sheet::SearchSheet, sidebar::Sidebar,
+    thread::ThreadSheet,
 };
 use crate::icons;
 use crate::state::{ColumnSpec, ComposeContext, Tick};
@@ -55,6 +56,7 @@ pub fn DeckShell() -> Element {
             }
             ComposeSheet {}
             SearchSheet { open: search_open }
+            ThreadSheet {}
         }
     }
 }

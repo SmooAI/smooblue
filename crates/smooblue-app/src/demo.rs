@@ -11,7 +11,7 @@
 
 use smooblue_atproto::feed::{
     Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView, FeedItem, PostAuthor,
-    PostRecord, PostView,
+    PostRecord, PostView, ThreadView,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -457,6 +457,81 @@ fn item_with_embed(
             viewer: None,
         },
     }
+}
+
+/// Synthesize a thread for the given URI. Used when the demo mode is
+/// active so the ThreadSheet has real content to render without going
+/// to the network. Always returns the same shape — a focused post
+/// with 1 parent ancestor and 3 replies (one nested) — but uses the
+/// requested URI as the focus so click-to-focus inside the tree works.
+pub fn thread_for(focus_uri: &str) -> ThreadView {
+    let now = chrono::Utc::now();
+    let m = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
+
+    let root = synth_post(
+        "founder.bsky.social",
+        "Founder",
+        "Hot take: every desktop Bluesky client should be free + native + open-source. The web client is fine but a deck experience belongs in a 30MB binary, not a browser tab.",
+        &m(360),
+    );
+    let parent = synth_post(
+        "you.bsky.social",
+        "You",
+        "Agreed — and DPoP-bound OAuth means we can ship one without renegotiating session security from scratch every time someone forks.",
+        &m(220),
+    );
+    let mut focused = synth_post(
+        "you.bsky.social",
+        "You",
+        "Just landed thread view in smooblue. Click any post → modal opens with parent chain + focused post + replies tree. Same PostCard everywhere so likes/reposts/reply all keep working inside the modal.",
+        &m(15),
+    );
+    // Override URI so click-to-focus on this very post in the demo
+    // re-uses the same thread.
+    focused.uri = focus_uri.to_string();
+
+    let reply1 = synth_post(
+        "carol.bsky.social",
+        "Carol",
+        "Showing the parent chain is huge. Half the time I see a notification, I have no idea what it was replying to.",
+        &m(10),
+    );
+    let reply1_child = synth_post(
+        "you.bsky.social",
+        "You",
+        "Yep — that's exactly why we hydrated reason_subject for notifications too. Same idea, different surface.",
+        &m(8),
+    );
+    let reply2 = synth_post(
+        "rustlang.bsky.social",
+        "Rust",
+        "Nice. The recursive ThreadView decode with #[serde(tag)] is a clean way to handle the notFound / blocked variants without panicking on shapes.",
+        &m(6),
+    );
+    let reply3 = synth_post(
+        "dioxuslabs.com",
+        "Dioxus",
+        "use_resource keyed on the focused URI is exactly the pattern — clicking a reply re-fires the fetch automatically.",
+        &m(3),
+    );
+
+    let make_post = |post: PostView, parent: Option<Box<ThreadView>>, replies: Option<Vec<ThreadView>>| ThreadView::Post {
+        post,
+        parent,
+        replies,
+    };
+
+    let root_node = make_post(root, None, None);
+    let parent_node = make_post(parent, Some(Box::new(root_node)), None);
+    make_post(
+        focused,
+        Some(Box::new(parent_node)),
+        Some(vec![
+            make_post(reply1, None, Some(vec![make_post(reply1_child, None, None)])),
+            make_post(reply2, None, None),
+            make_post(reply3, None, None),
+        ]),
+    )
 }
 
 fn embed_image(url: &str, alt: &str) -> EmbedImage {

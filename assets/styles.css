@@ -1122,6 +1122,143 @@ a {
 }
 
 /* ===========================================================
+ *  Thread sheet — modal post-detail view
+ * =========================================================== */
+.thread__sheet {
+    /* Wider than compose; we're showing full PostCards stacked. */
+    width: 620px;
+    max-width: 90vw;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.thread__head {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.thread__title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--foreground);
+    flex: 1 1 auto;
+}
+
+.thread__close {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.thread__close:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.thread__body {
+    overflow-y: auto;
+    padding: 14px 16px 20px;
+    flex: 1 1 auto;
+}
+
+.thread__loading,
+.thread__error {
+    color: var(--muted-foreground);
+    text-align: center;
+    padding: 30px 12px;
+    font-size: 13px;
+}
+
+.thread__error {
+    color: var(--color-smooai-red);
+}
+
+/* Ancestor row — rail + smaller card */
+.thread__parent {
+    display: flex;
+    gap: 10px;
+    padding-bottom: 6px;
+    position: relative;
+}
+
+.thread__rail {
+    flex: 0 0 2px;
+    background: var(--border);
+    margin: 8px 0;
+    border-radius: 1px;
+}
+
+.thread__parent-card {
+    flex: 1 1 auto;
+    opacity: 0.86;
+}
+
+/* Focused post — what the user clicked */
+.thread__focused {
+    margin: 8px 0 12px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background: var(--card);
+    border-left: 3px solid var(--color-smooai-orange);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
+}
+
+/* Replies tree */
+.thread__reply {
+    display: flex;
+    gap: 10px;
+    padding-top: 8px;
+}
+
+.thread__reply-card {
+    flex: 1 1 auto;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: background 120ms ease;
+}
+
+.thread__reply-card:hover {
+    background: var(--card);
+}
+
+.thread__placeholder {
+    color: var(--muted-foreground);
+    font-style: italic;
+    font-size: 13px;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+}
+
+.thread__placeholder--focused {
+    margin: 12px 0;
+    text-align: center;
+}
+
+.thread__continue {
+    color: var(--color-smooai-orange);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+    margin-top: 6px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.post__body--clickable {
+    cursor: pointer;
+}
+
+/* ===========================================================
  *  Login view (smooblue-specific full-screen sign-in)
  * =========================================================== */
 .login {

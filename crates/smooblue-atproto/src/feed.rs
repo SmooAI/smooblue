@@ -190,6 +190,75 @@ pub struct EmbedAspectRatio {
     pub height: u32,
 }
 
+/// Response wrapper for `app.bsky.feed.getPostThread`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct GetPostThreadResponse {
+    pub thread: ThreadView,
+}
+
+/// One node of a Bluesky thread. The lexicon discriminates on
+/// `$type`; we cover the common cases and treat unknowns as the
+/// `Other` terminal so a brand-new server variant doesn't crash the
+/// client.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "$type")]
+pub enum ThreadView {
+    /// A real post in the thread. May have a parent (ascending the
+    /// reply chain) and replies (descending — sorted server-side).
+    #[serde(rename = "app.bsky.feed.defs#threadViewPost")]
+    Post {
+        post: PostView,
+        /// Box because the chain is unbounded and Rust enums need a
+        /// known size.
+        #[serde(default)]
+        parent: Option<Box<ThreadView>>,
+        #[serde(default)]
+        replies: Option<Vec<ThreadView>>,
+    },
+    /// Parent / reply was deleted.
+    #[serde(rename = "app.bsky.feed.defs#notFoundPost")]
+    NotFound {
+        uri: String,
+    },
+    /// Viewer is blocked from seeing this part of the thread.
+    #[serde(rename = "app.bsky.feed.defs#blockedPost")]
+    Blocked {
+        uri: String,
+    },
+    /// Future-proof — any unknown `$type` collapses here. Renderer
+    /// treats it as a silent terminator.
+    #[serde(other)]
+    Other,
+}
+
+impl ThreadView {
+    /// Walk `parent` chain, collecting URIs from closest-parent up to
+    /// thread root. Useful for breadcrumb-style rendering.
+    pub fn parent_chain(&self) -> Vec<&ThreadView> {
+        let mut out = Vec::new();
+        let mut cur = match self {
+            ThreadView::Post { parent: Some(p), .. } => Some(p.as_ref()),
+            _ => None,
+        };
+        while let Some(node) = cur {
+            out.push(node);
+            cur = match node {
+                ThreadView::Post { parent: Some(p), .. } => Some(p.as_ref()),
+                _ => None,
+            };
+        }
+        out
+    }
+
+    /// The PostView at THIS node, if this is a Post variant.
+    pub fn post(&self) -> Option<&PostView> {
+        match self {
+            ThreadView::Post { post, .. } => Some(post),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct EmbedImage {
     pub thumb: String,

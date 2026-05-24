@@ -145,6 +145,17 @@ pub struct ReplyTarget {
     pub text: String,
 }
 
+/// Which post (if any) the user has currently focused into a thread
+/// view. `None` ⇒ closed; `Some(uri)` ⇒ the ThreadSheet loads + renders
+/// the conversation around this AT-URI.
+///
+/// Wrapped in its own context (rather than reusing ComposeContext)
+/// because (a) thread and compose can both be open in different
+/// session flows, and (b) the close-on-click-backdrop semantics are
+/// the same modal pattern but the data lifecycle differs.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ThreadFocus(pub Option<String>);
+
 /// Global tick counter, bumped every second by [`DeckShell`]'s tick task.
 /// Components that render time-relative text (post / notification
 /// timestamps) read this signal so their render re-runs each tick —
@@ -165,6 +176,22 @@ pub fn use_bootstrap() {
             .filter(|v| v == "1")
             .is_some();
         Signal::new(ComposeContext { open, reply_to: None })
+    });
+    use_context_provider::<Signal<ThreadFocus>>(|| {
+        // SMOOBLUE_DEBUG_OPEN_THREAD=<at-uri> → boot straight into a
+        // thread view for that URI. In demo mode the special value
+        // `demo` resolves to the synthesized demo thread.
+        let initial = std::env::var("SMOOBLUE_DEBUG_OPEN_THREAD")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                if v == "demo" {
+                    "at://did:plc:demo/app.bsky.feed.post/thread-root".to_string()
+                } else {
+                    v
+                }
+            });
+        Signal::new(ThreadFocus(initial))
     });
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
