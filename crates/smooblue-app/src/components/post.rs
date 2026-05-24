@@ -1,11 +1,16 @@
 //! Single post card.
 
 use crate::icons;
+use crate::state::Tick;
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
 
 #[component]
 pub fn PostCard(post: PostView) -> Element {
+    // Subscribe to the global tick so the relative timestamp re-renders
+    // every second ("11s" → "12s" → "1m"). The read itself does the work
+    // — Dioxus tracks the signal access as a render dependency.
+    let _tick = use_context::<Signal<Tick>>().read().0;
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
     let time = post.relative_time();

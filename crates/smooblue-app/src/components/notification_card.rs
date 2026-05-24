@@ -1,11 +1,14 @@
 //! A single notification card. Uses Lucide icons for the reason glyph.
 
 use crate::icons;
+use crate::state::Tick;
 use dioxus::prelude::*;
 use smooblue_atproto::Notification;
 
 #[component]
 pub fn NotificationCard(notif: Notification) -> Element {
+    // Subscribe to the global tick so `relative_time()` text refreshes.
+    let _tick = use_context::<Signal<Tick>>().read().0;
     let name = notif
         .author
         .display_name

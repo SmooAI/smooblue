@@ -45,9 +45,17 @@ impl ColumnSpec {
     }
 }
 
+/// Global tick counter, bumped every second by [`DeckShell`]'s tick task.
+/// Components that render time-relative text (post / notification
+/// timestamps) read this signal so their render re-runs each tick —
+/// that's how "11s" becomes "12s" without a manual refresh.
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct Tick(pub u64);
+
 /// Install global signals into the Dioxus context root.
 /// Idempotent — safe to call on every render.
 pub fn use_bootstrap() {
+    use_context_provider::<Signal<Tick>>(|| Signal::new(Tick(0)));
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
         // app boots straight into the deck — no OAuth + no network.

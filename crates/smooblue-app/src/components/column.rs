@@ -39,14 +39,6 @@ impl ColumnData {
             Self::Notifications(n) => n.is_empty(),
         }
     }
-
-    fn top_key(&self) -> Option<String> {
-        match self {
-            Self::Empty => None,
-            Self::Posts(p) => p.first().map(|i| i.post.uri.clone()),
-            Self::Notifications(n) => n.first().map(|n| n.uri.clone()),
-        }
-    }
 }
 
 /// How often each column refetches. Picked to match deck.blue's feel
@@ -66,12 +58,9 @@ pub fn Column(spec: ColumnSpec) -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let spec_kind = spec.kind.clone();
 
-    // Current visible data.
+    // Current visible data. Fresh poll cycles overwrite directly — no
+    // banner / opt-in. We auto-load.
     let mut data = use_signal(ColumnData::default);
-    // Pending fresh items the user hasn't promoted to the top yet (we count
-    // them separately so we can show the "N new posts" banner without
-    // disturbing scroll).
-    let mut pending = use_signal::<Option<ColumnData>>(|| None);
     let mut error = use_signal::<Option<String>>(|| None);
     let mut loading = use_signal(|| true);
 
@@ -88,19 +77,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
                     Ok(fresh) => {
                         error.set(None);
                         loading.set(false);
-
-                        let current_top = data.read().top_key();
-                        let fresh_top = fresh.top_key();
-
-                        // First load OR currently empty → seat immediately.
-                        if data.read().is_empty() || current_top == fresh_top {
-                            data.set(fresh);
-                            pending.set(None);
-                        } else {
-                            // Something new at the top → stash as pending
-                            // so the banner can offer to swap it in.
-                            pending.set(Some(fresh));
-                        }
+                        data.set(fresh);
                     }
                     Err(e) => {
                         loading.set(false);
@@ -112,31 +89,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
         }
     });
 
-    let promote_pending = move |_evt: MouseEvent| {
-        if let Some(fresh) = pending.write().take() {
-            data.set(fresh);
-        }
-    };
-
-    let pending_count = pending
-        .read()
-        .as_ref()
-        .map(|p| count_new(&data.read(), p))
-        .unwrap_or(0);
-
     rsx! {
         section { class: "deck-column",
             ColumnHeader { title: spec.title.clone(), kind: spec.kind.clone() }
             div { class: "deck-column__body",
-                if pending_count > 0 {
-                    button {
-                        class: "deck-column__new-banner",
-                        onclick: promote_pending,
-                        "↑ {pending_count} new "
-                        if matches!(*data.read(), ColumnData::Notifications(_)) { "notification" } else { "post" }
-                        if pending_count != 1 { "s" }
-                    }
-                }
                 match (&*data.read(), &*error.read(), *loading.read()) {
                     (_, _, true) if data.read().is_empty() => rsx! { div { class: "deck-column__loading", "Loading…" } },
                     (data, _, _) if data.is_empty() => rsx! { div { class: "deck-column__empty", "Nothing here yet." } },
@@ -165,19 +121,6 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 }
             }
         }
-    }
-}
-
-/// Count how many items in `fresh` are above the top of `current` (i.e.
-/// items the user hasn't seen yet).
-fn count_new(current: &ColumnData, fresh: &ColumnData) -> usize {
-    let Some(top) = current.top_key() else {
-        return 0;
-    };
-    match fresh {
-        ColumnData::Posts(items) => items.iter().take_while(|i| i.post.uri != top).count(),
-        ColumnData::Notifications(items) => items.iter().take_while(|n| n.uri != top).count(),
-        ColumnData::Empty => 0,
     }
 }
 
