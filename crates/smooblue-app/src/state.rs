@@ -102,6 +102,24 @@ pub fn remove_column(cols: &mut Signal<Vec<ColumnSpec>>, id: &str) {
     let _ = crate::persistence::save_columns(&list);
 }
 
+/// Per-post optimistic state for likes (and later reposts). Lives in a
+/// context-shared map keyed by the post's AT-URI so the optimistic flip
+/// survives column re-renders triggered by polling.
+///
+/// We track the *intended* server state (liked + the like-record URI we
+/// got back) so the next polling cycle can reconcile cleanly.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct OptimisticPostState {
+    /// `true` if the user has liked this post locally (whether or not the
+    /// server has confirmed yet). `false` if they explicitly un-liked.
+    pub liked: Option<bool>,
+    /// AT-URI of our like record once createRecord returned. Needed to
+    /// call deleteRecord on un-like.
+    pub like_uri: Option<String>,
+}
+
+pub type OptimisticMap = std::collections::HashMap<String, OptimisticPostState>;
+
 /// Global tick counter, bumped every second by [`DeckShell`]'s tick task.
 /// Components that render time-relative text (post / notification
 /// timestamps) read this signal so their render re-runs each tick —
@@ -113,6 +131,7 @@ pub struct Tick(pub u64);
 /// Idempotent — safe to call on every render.
 pub fn use_bootstrap() {
     use_context_provider::<Signal<Tick>>(|| Signal::new(Tick(0)));
+    use_context_provider::<Signal<OptimisticMap>>(|| Signal::new(OptimisticMap::new()));
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
         // app boots straight into the deck — no OAuth + no network.

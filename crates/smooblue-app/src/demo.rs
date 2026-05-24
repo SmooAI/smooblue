@@ -262,6 +262,7 @@ fn item(
             reply_count: replies,
             repost_count: reposts,
             like_count: likes,
+            viewer: None,
         },
     }
 }

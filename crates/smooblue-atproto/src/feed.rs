@@ -48,6 +48,21 @@ pub struct PostView {
     pub repost_count: i64,
     #[serde(rename = "likeCount", default)]
     pub like_count: i64,
+    /// Per-viewer state. Tells us whether the *signed-in* user has
+    /// already liked or reposted this post, and the AT-URI of their
+    /// like/repost record (used to undo it).
+    #[serde(default)]
+    pub viewer: Option<PostViewerState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+pub struct PostViewerState {
+    /// AT-URI of the viewer's like record, if they liked this post.
+    #[serde(default)]
+    pub like: Option<String>,
+    /// AT-URI of the viewer's repost record, if they reposted.
+    #[serde(default)]
+    pub repost: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]

@@ -332,6 +332,31 @@ a {
     margin-left: auto;
 }
 
+/* Clickable post actions (currently just like; repost/reply land later). */
+.post__action--clickable {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: color 120ms ease, transform 120ms ease;
+}
+
+.post__action--clickable:hover {
+    color: var(--color-smooai-red);
+    transform: scale(1.05);
+}
+
+.post__action--liked {
+    color: var(--color-smooai-red);
+}
+
+.post__action--liked svg {
+    fill: var(--color-smooai-red);
+    opacity: 1;
+}
+
 /* ===========================================================
  *  Notification card
  * =========================================================== */
