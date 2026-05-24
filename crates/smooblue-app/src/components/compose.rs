@@ -440,8 +440,10 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
     let mut atts_for_use_suggestion = attachments;
     let use_suggestion = move |_| {
         if let Some(slot) = atts_for_use_suggestion.write().iter_mut().find(|a| a.id == id) {
-            if let Some(sugg) = slot.ai_suggestion.clone() {
-                slot.alt = sugg.text;
+            // Reset to the best auto-fill (merged LLM+OCR when both
+            // exist, otherwise whichever single source we have).
+            if let Some(merged) = slot.computed_alt() {
+                slot.alt = merged;
                 slot.alt_user_edited = true;
             }
         }
@@ -475,6 +477,34 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
         AttachmentState::Ready(_) => "Describe this image for screen readers…",
     };
 
+    // Decide which alt-text chip to show. Pre-computed here so the
+    // rsx! block stays declarative.
+    let has_llm = att.ai_suggestion.is_some();
+    let has_ocr = att.ocr_text.is_some();
+    let merged_alt = att.computed_alt().unwrap_or_default();
+    let llm_text = att.ai_suggestion.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let ocr_text_clone = att.ocr_text.clone().unwrap_or_default();
+    enum ChipState {
+        Combined,    // alt = merged LLM+OCR
+        AiOnly,      // alt = LLM-only suggestion
+        OcrOnly,     // alt = OCR-only text
+        UseAi { combined: bool },  // user edited, offer revert
+        None,        // nothing to show
+    }
+    let chip = if att.ai_in_flight || att.ocr_in_flight {
+        ChipState::None  // busy state rendered separately
+    } else if has_llm && has_ocr && !merged_alt.is_empty() && att.alt == merged_alt {
+        ChipState::Combined
+    } else if has_llm && !llm_text.is_empty() && att.alt == llm_text {
+        ChipState::AiOnly
+    } else if has_ocr && !ocr_text_clone.is_empty() && att.alt == ocr_text_clone {
+        ChipState::OcrOnly
+    } else if has_llm || has_ocr {
+        ChipState::UseAi { combined: has_llm && has_ocr }
+    } else {
+        ChipState::None
+    };
+
     rsx! {
         div { class: "compose__attachment",
             div { class: "compose__attachment-preview",
@@ -500,22 +530,36 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                                 "Reading text…"
                             }
                         }
-                    } else if let Some(sugg) = att.ai_suggestion.as_ref() {
-                        // If the user has typed something different than
-                        // the AI suggestion, offer a one-click revert.
-                        if att.alt != sugg.text {
-                            button {
-                                class: "compose__alt-ai compose__alt-ai--use",
-                                title: "Use AI-suggested alt text",
-                                onclick: use_suggestion,
-                                icons::Sparkles { size: icons::Size::Sm }
-                                "Use AI"
-                            }
-                        } else {
-                            span { class: "compose__alt-ai compose__alt-ai--seeded",
-                                icons::Sparkles { size: icons::Size::Sm }
-                                "AI suggested"
-                            }
+                    } else {
+                        match chip {
+                            ChipState::Combined => rsx! {
+                                span { class: "compose__alt-ai compose__alt-ai--seeded",
+                                    icons::Sparkles { size: icons::Size::Sm }
+                                    "AI + text"
+                                }
+                            },
+                            ChipState::AiOnly => rsx! {
+                                span { class: "compose__alt-ai compose__alt-ai--seeded",
+                                    icons::Sparkles { size: icons::Size::Sm }
+                                    "AI suggested"
+                                }
+                            },
+                            ChipState::OcrOnly => rsx! {
+                                span { class: "compose__alt-ai compose__alt-ai--seeded",
+                                    icons::Sparkles { size: icons::Size::Sm }
+                                    "From image text"
+                                }
+                            },
+                            ChipState::UseAi { combined } => rsx! {
+                                button {
+                                    class: "compose__alt-ai compose__alt-ai--use",
+                                    title: "Use AI-suggested alt text",
+                                    onclick: use_suggestion,
+                                    icons::Sparkles { size: icons::Size::Sm }
+                                    if combined { "Use AI + text" } else { "Use AI" }
+                                }
+                            },
+                            ChipState::None => rsx! { Fragment {} },
                         }
                     }
                 }
