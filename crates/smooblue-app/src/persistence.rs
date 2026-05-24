@@ -13,6 +13,7 @@ const KEYRING_SERVICE: &str = "ai.smoo.smooblue";
 const KEYRING_ACCOUNT: &str = "oauth-session";
 const COLUMNS_FILE: &str = "columns.json";
 const LAST_HANDLE_FILE: &str = "last_handle.txt";
+const DRAFT_FILE: &str = "draft.txt";
 
 /// Persist the OAuth session.
 pub fn save_session(session: &Session) -> Result<(), String> {
@@ -65,6 +66,38 @@ pub fn load_last_handle() -> Option<String> {
     let path = dir.config_dir().join(LAST_HANDLE_FILE);
     let s = std::fs::read_to_string(path).ok()?.trim().to_string();
     if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Persist the in-progress compose draft so it survives quitting the
+/// app mid-post. Called on every keystroke (file write is cheap; the
+/// draft is at most 300 chars). Empty input clears the file rather
+/// than writing an empty draft we'd then load back on next boot.
+pub fn save_draft(text: &str) -> Result<(), String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
+        .ok_or_else(|| "no config dir".to_string())?;
+    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
+    let path = dir.config_dir().join(DRAFT_FILE);
+    if text.is_empty() {
+        // Best-effort cleanup; ignore "not found" because that's the
+        // very state we wanted anyway.
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+/// Load any saved draft, or `None` if there isn't one (or the file
+/// is just whitespace). Trimming on load so the textarea doesn't
+/// inherit a trailing newline the user didn't write.
+pub fn load_draft() -> Option<String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")?;
+    let path = dir.config_dir().join(DRAFT_FILE);
+    let s = std::fs::read_to_string(path).ok()?;
+    if s.trim().is_empty() {
         None
     } else {
         Some(s)

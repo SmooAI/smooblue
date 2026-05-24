@@ -115,7 +115,16 @@ impl AttachedImage {
 pub fn ComposeSheet() -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let mut ctx = use_context::<Signal<ComposeContext>>();
-    let mut text = use_signal(String::new);
+    // Load any saved draft so users don't lose work across launches.
+    // Skipped in demo mode (we always want a clean slate for screenshots)
+    // and when a reply is in flight (draft would belong to a top-level
+    // post, not a specific reply target).
+    let mut text = use_signal(|| {
+        if crate::demo::is_active() {
+            return String::new();
+        }
+        crate::persistence::load_draft().unwrap_or_default()
+    });
     let attachments = use_signal::<Vec<AttachedImage>>(Vec::new);
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -205,6 +214,7 @@ pub fn ComposeSheet() -> Element {
                 tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                 posting.set(false);
                 text.set(String::new());
+                let _ = crate::persistence::save_draft("");
                 attachments.set(Vec::new());
                 let mut w = ctx.write();
                 w.reply_to = None;
@@ -247,6 +257,9 @@ pub fn ComposeSheet() -> Element {
                 Ok(_record) => {
                     posting.set(false);
                     text.set(String::new());
+                    // Drop the persisted draft now that the post is
+                    // live — nothing left to recover.
+                    let _ = crate::persistence::save_draft("");
                     attachments.set(Vec::new());
                     let mut w = ctx.write();
                     w.reply_to = None;
@@ -352,7 +365,17 @@ pub fn ComposeSheet() -> Element {
                     placeholder: "{placeholder}",
                     autofocus: true,
                     value: "{text}",
-                    oninput: move |e| text.set(e.value()),
+                    oninput: move |e| {
+                        let v = e.value();
+                        // Persist on every keystroke — file write is
+                        // cheap, max 300 chars, and the alternative is
+                        // a debounce that loses the last second of
+                        // typing if the user quits suddenly.
+                        if !crate::demo::is_active() {
+                            let _ = crate::persistence::save_draft(&v);
+                        }
+                        text.set(v);
+                    },
                     onkeydown: move |e| {
                         if e.key() == Key::Enter && (e.modifiers().meta() || e.modifiers().ctrl()) {
                             do_submit_kbd();
