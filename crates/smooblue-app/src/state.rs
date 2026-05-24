@@ -232,7 +232,10 @@ pub fn use_bootstrap() {
             .ok()
             .filter(|v| v == "1")
             .is_some();
-        Signal::new(ComposeContext { open, reply_to: None })
+        Signal::new(ComposeContext {
+            open,
+            reply_to: None,
+        })
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));
     use_context_provider::<Signal<EngagementFocus>>(|| {
@@ -258,7 +261,13 @@ pub fn use_bootstrap() {
         let initial = std::env::var("SMOOBLUE_DEBUG_OPEN_PROFILE")
             .ok()
             .filter(|v| !v.is_empty())
-            .map(|v| if v == "demo" { "you.bsky.social".to_string() } else { v });
+            .map(|v| {
+                if v == "demo" {
+                    "you.bsky.social".to_string()
+                } else {
+                    v
+                }
+            });
         Signal::new(ProfileFocus(initial))
     });
     use_context_provider::<Signal<ThreadFocus>>(|| {
@@ -347,7 +356,10 @@ mod tests {
         let target = "home";
         let src = list.iter().position(|c| c.id == dragged).unwrap();
         let spec = list.remove(src);
-        let dst = list.iter().position(|c| c.id == target).unwrap_or(list.len());
+        let dst = list
+            .iter()
+            .position(|c| c.id == target)
+            .unwrap_or(list.len());
         list.insert(dst, spec);
         // search:rust should now be first.
         assert_eq!(list[0].id, "search:rust");

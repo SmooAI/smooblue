@@ -64,7 +64,11 @@ pub fn load_last_handle() -> Option<String> {
     let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")?;
     let path = dir.config_dir().join(LAST_HANDLE_FILE);
     let s = std::fs::read_to_string(path).ok()?.trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 #[cfg(test)]

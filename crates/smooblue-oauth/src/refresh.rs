@@ -262,7 +262,13 @@ mod tests {
         let session = fake_session(&format!("{}/oauth/token", server.uri()));
         let err = refresh_session(&http, &session, "cid").await.unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("invalid_grant"), "error should mention invalid_grant: {msg}");
-        assert!(msg.contains("re-auth"), "should signal re-auth required: {msg}");
+        assert!(
+            msg.contains("invalid_grant"),
+            "error should mention invalid_grant: {msg}"
+        );
+        assert!(
+            msg.contains("re-auth"),
+            "should signal re-auth required: {msg}"
+        );
     }
 }

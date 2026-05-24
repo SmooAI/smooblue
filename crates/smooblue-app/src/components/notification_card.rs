@@ -28,7 +28,11 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
     });
     let reason = group.reason.clone();
     let unread = group.any_unread();
-    let unread_class = if unread { "notif notif--unread" } else { "notif" };
+    let unread_class = if unread {
+        "notif notif--unread"
+    } else {
+        "notif"
+    };
     let icon_color_class = match reason.as_str() {
         "like" => "notif__icon notif__icon--like",
         "repost" => "notif__icon notif__icon--repost",

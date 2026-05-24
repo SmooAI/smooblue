@@ -274,7 +274,10 @@ fn collect_subject_uris(items: &[Notification]) -> Vec<String> {
 /// Look up the PostView that gives context to a single notification.
 /// Returns `None` for follows / starterpack notifications (no subject)
 /// or when hydration didn't find the post (deleted, blocked, etc.).
-fn subject_for<'a>(n: &Notification, subjects: &'a HashMap<String, PostView>) -> Option<&'a PostView> {
+fn subject_for<'a>(
+    n: &Notification,
+    subjects: &'a HashMap<String, PostView>,
+) -> Option<&'a PostView> {
     let key = match n.reason.as_str() {
         "like" | "repost" | "quote" => n.reason_subject.as_deref()?,
         "reply" | "mention" => &n.uri,

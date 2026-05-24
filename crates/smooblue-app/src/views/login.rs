@@ -22,11 +22,7 @@ pub fn LoginView() -> Element {
 
     let start_signin = move |_evt: MouseEvent| {
         // Strip a leading @ in case the user types "@alice.bsky.social".
-        let entered = handle
-            .read()
-            .trim()
-            .trim_start_matches('@')
-            .to_string();
+        let entered = handle.read().trim().trim_start_matches('@').to_string();
         if entered.is_empty() {
             status.set(Status::Error(
                 "Enter your handle (e.g., alice.bsky.social)".into(),

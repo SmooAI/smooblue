@@ -79,7 +79,11 @@ impl SmooLlmAltText {
             .timeout(Duration::from_secs(15))
             .build()
             .expect("reqwest client builds");
-        Self { endpoint, http, auth_bearer: None }
+        Self {
+            endpoint,
+            http,
+            auth_bearer: None,
+        }
     }
 
     pub fn with_bearer(mut self, token: impl Into<String>) -> Self {
@@ -91,8 +95,8 @@ impl SmooLlmAltText {
     /// to [`DEFAULT_ENDPOINT`]. Returns `None` if the env value is
     /// present but doesn't parse — caller decides what to do.
     pub fn from_env() -> Option<Self> {
-        let raw = std::env::var("SMOOBLUE_VISION_ENDPOINT")
-            .unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
+        let raw =
+            std::env::var("SMOOBLUE_VISION_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
         let url = Url::parse(&raw).ok()?;
         Some(Self::new(url))
     }
@@ -172,7 +176,10 @@ mod tests {
             merge_descriptions(Some("a meme template"), Some("WHEN YOU SEE IT")),
             "a meme template Text reads: \"WHEN YOU SEE IT\""
         );
-        assert_eq!(merge_descriptions(Some("  "), Some("x")), "Text reads: \"x\"");
+        assert_eq!(
+            merge_descriptions(Some("  "), Some("x")),
+            "Text reads: \"x\""
+        );
     }
 
     #[tokio::test]
@@ -188,7 +195,10 @@ mod tests {
             .await;
         let url = Url::parse(&format!("{}/smooblue/describe-image", server.uri())).unwrap();
         let provider = SmooLlmAltText::new(url);
-        let suggestion = provider.describe(&[0xFF, 0xD8, 0xFF, 0xE0], "image/jpeg").await.unwrap();
+        let suggestion = provider
+            .describe(&[0xFF, 0xD8, 0xFF, 0xE0], "image/jpeg")
+            .await
+            .unwrap();
         assert_eq!(suggestion.text, "A black cat sitting on a laptop keyboard.");
         assert!((suggestion.confidence - 0.87).abs() < 0.001);
         assert_eq!(suggestion.source, AltSource::SmooLlm);

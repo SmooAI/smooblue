@@ -96,7 +96,11 @@ pub(crate) fn parse_at_uri(uri: &str) -> Option<AtUriParts<'_>> {
     if did.is_empty() || collection.is_empty() || rkey.is_empty() {
         return None;
     }
-    Some(AtUriParts { did, collection, rkey })
+    Some(AtUriParts {
+        did,
+        collection,
+        rkey,
+    })
 }
 
 #[derive(Clone)]
@@ -495,7 +499,11 @@ impl AtClient {
 
     /// Create a like (`app.bsky.feed.like`). Returns the new record's URI so
     /// the caller can pass it back to [`Self::delete_record`] to unlike.
-    pub async fn create_like(&self, post_uri: &str, post_cid: &str) -> Result<CreatedRecord, AtError> {
+    pub async fn create_like(
+        &self,
+        post_uri: &str,
+        post_cid: &str,
+    ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let body = serde_json::json!({
@@ -536,7 +544,11 @@ impl AtClient {
     }
 
     /// Create a repost (`app.bsky.feed.repost`). Symmetric with [`Self::create_like`].
-    pub async fn create_repost(&self, post_uri: &str, post_cid: &str) -> Result<CreatedRecord, AtError> {
+    pub async fn create_repost(
+        &self,
+        post_uri: &str,
+        post_cid: &str,
+    ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let body = serde_json::json!({
@@ -557,7 +569,8 @@ impl AtClient {
     /// Delete a record by its AT-URI (`at://<did>/<collection>/<rkey>`). Used
     /// to unlike / unrepost / delete a post.
     pub async fn delete_record(&self, at_uri: &str) -> Result<(), AtError> {
-        let parsed = parse_at_uri(at_uri).ok_or_else(|| AtError::Decode(format!("bad at-uri: {at_uri}")))?;
+        let parsed =
+            parse_at_uri(at_uri).ok_or_else(|| AtError::Decode(format!("bad at-uri: {at_uri}")))?;
         let body = serde_json::json!({
             "repo": parsed.did,
             "collection": parsed.collection,
@@ -900,9 +913,7 @@ mod tests {
             .and(header_exists("DPoP"))
             .respond_with(|req: &Request| {
                 assert_eq!(
-                    req.headers
-                        .get("content-type")
-                        .map(|v| v.to_str().unwrap()),
+                    req.headers.get("content-type").map(|v| v.to_str().unwrap()),
                     Some("image/jpeg"),
                     "content-type must echo the image mime, not application/json"
                 );
@@ -961,12 +972,17 @@ mod tests {
         let img = PostImage {
             blob: BlobRef {
                 kind: "blob".into(),
-                link: BlobLink { cid: "bafyJPG".into() },
+                link: BlobLink {
+                    cid: "bafyJPG".into(),
+                },
                 mime_type: "image/jpeg".into(),
                 size: 1234,
             },
             alt: "a cat sitting on a keyboard".into(),
-            aspect_ratio: Some(AspectRatio { width: 1600, height: 900 }),
+            aspect_ratio: Some(AspectRatio {
+                width: 1600,
+                height: 900,
+            }),
         };
         let rec = client
             .create_post_full("look at this cat", None, std::slice::from_ref(&img))
@@ -1005,8 +1021,18 @@ mod tests {
             alt: "".into(),
             aspect_ratio: None,
         };
-        let many = vec![img.clone(), img.clone(), img.clone(), img.clone(), img.clone(), img];
-        client.create_post_full("six images", None, &many).await.unwrap();
+        let many = vec![
+            img.clone(),
+            img.clone(),
+            img.clone(),
+            img.clone(),
+            img.clone(),
+            img,
+        ];
+        client
+            .create_post_full("six images", None, &many)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1110,7 +1136,10 @@ mod tests {
         let replies = replies.as_ref().unwrap();
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[0].post().unwrap().uri, "at://reply1");
-        assert!(matches!(replies[1], crate::feed::ThreadView::NotFound { .. }));
+        assert!(matches!(
+            replies[1],
+            crate::feed::ThreadView::NotFound { .. }
+        ));
     }
 
     #[tokio::test]

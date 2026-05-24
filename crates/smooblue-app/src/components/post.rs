@@ -32,7 +32,11 @@ pub fn PostCard(post: PostView) -> Element {
     // Combine server state + optimistic intent. Optimistic always wins
     // for `liked`/`reposted` while it has an explicit Some(_) — that's the
     // whole point of the optimistic flip. The next poll cycle reconciles.
-    let opt_state = optimistic.read().get(&post_uri).cloned().unwrap_or_default();
+    let opt_state = optimistic
+        .read()
+        .get(&post_uri)
+        .cloned()
+        .unwrap_or_default();
 
     let is_liked = match opt_state.liked {
         Some(b) => b,
@@ -78,17 +82,23 @@ pub fn PostCard(post: PostView) -> Element {
     let uri_for_likes = post_uri.clone();
     let open_likes = move |evt: MouseEvent| {
         evt.stop_propagation();
-        engagement_focus.set(EngagementFocus(Some(Engagement::Likes(uri_for_likes.clone()))));
+        engagement_focus.set(EngagementFocus(Some(Engagement::Likes(
+            uri_for_likes.clone(),
+        ))));
     };
     let uri_for_reposters = post_uri.clone();
     let open_reposters = move |evt: MouseEvent| {
         evt.stop_propagation();
-        engagement_focus.set(EngagementFocus(Some(Engagement::Reposters(uri_for_reposters.clone()))));
+        engagement_focus.set(EngagementFocus(Some(Engagement::Reposters(
+            uri_for_reposters.clone(),
+        ))));
     };
     let uri_for_quotes = post_uri.clone();
     let open_quotes = move |evt: MouseEvent| {
         evt.stop_propagation();
-        engagement_focus.set(EngagementFocus(Some(Engagement::Quotes(uri_for_quotes.clone()))));
+        engagement_focus.set(EngagementFocus(Some(Engagement::Quotes(
+            uri_for_quotes.clone(),
+        ))));
     };
 
     // Click an avatar → open the profile sheet (modal with banner +
@@ -114,7 +124,9 @@ pub fn PostCard(post: PostView) -> Element {
     let mut toggle_like = move |_evt: MouseEvent| {
         // Just need to know we *have* a session here — fresh_client
         // inside the spawn will re-read + refresh if needed.
-        if session.read().is_none() { return };
+        if session.read().is_none() {
+            return;
+        };
         let want_liked = !is_liked;
         let known_like_uri = opt_state_l
             .like_uri
@@ -129,7 +141,9 @@ pub fn PostCard(post: PostView) -> Element {
         let post_uri_owned = post_uri_l.clone();
         let post_cid_owned = post_cid_l.clone();
         spawn(async move {
-            let Some(client) = fresh_client(session).await else { return };
+            let Some(client) = fresh_client(session).await else {
+                return;
+            };
             if want_liked {
                 match client.create_like(&post_uri_owned, &post_cid_owned).await {
                     Ok(rec) => {
@@ -172,7 +186,9 @@ pub fn PostCard(post: PostView) -> Element {
     let server_repost_uri_r = server_repost_uri.clone();
     let opt_state_r = opt_state.clone();
     let mut toggle_repost = move |_evt: MouseEvent| {
-        if session.read().is_none() { return };
+        if session.read().is_none() {
+            return;
+        };
         let want_reposted = !is_reposted;
         let known_repost_uri = opt_state_r
             .repost_uri
@@ -187,7 +203,9 @@ pub fn PostCard(post: PostView) -> Element {
         let post_uri_owned = post_uri_r.clone();
         let post_cid_owned = post_cid_r.clone();
         spawn(async move {
-            let Some(client) = fresh_client(session).await else { return };
+            let Some(client) = fresh_client(session).await else {
+                return;
+            };
             if want_reposted {
                 match client.create_repost(&post_uri_owned, &post_cid_owned).await {
                     Ok(rec) => {

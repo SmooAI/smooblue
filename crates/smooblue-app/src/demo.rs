@@ -38,7 +38,7 @@ pub fn fake_session() -> Session {
         expires_at: chrono::Utc::now().timestamp() + 86_400,
         dpop_pem: k.to_pkcs8_pem().unwrap_or_default(),
         dpop_nonce: None,
-            token_endpoint: None,
+        token_endpoint: None,
     }
 }
 
@@ -244,7 +244,10 @@ pub fn home_feed() -> Vec<FeedItem> {
 /// Demo notifications + a hydrated subject-post lookup. The compose
 /// Notifications column expects both so each card can render the
 /// post that gives the notification its context.
-pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::HashMap<String, PostView>) {
+pub fn notifications_with_subjects() -> (
+    Vec<Notification>,
+    std::collections::HashMap<String, PostView>,
+) {
     use std::collections::HashMap;
     let now = chrono::Utc::now();
     let m = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
@@ -308,43 +311,162 @@ pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::Ha
     // a 3-actor follow group.
     let items = vec![
         // ── Group: 6 likes on your_post_alt → one card with avatar stack
-        notif("alice.bsky.social", "Alice Mendez", Some("https://picsum.photos/seed/alice/80"),
-              "like", &m(1), false, Some(your_post_alt.uri.clone()), None),
-        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
-              "like", &m(3), false, Some(your_post_alt.uri.clone()), None),
-        notif("rustlang.bsky.social", "Rust", Some("https://picsum.photos/seed/rust/80"),
-              "like", &m(5), false, Some(your_post_alt.uri.clone()), None),
-        notif("photo.bsky.social", "Photographer", Some("https://picsum.photos/seed/photog/80"),
-              "like", &m(6), false, Some(your_post_alt.uri.clone()), None),
-        notif("duo.bsky.social", "Duo", Some("https://picsum.photos/seed/duo/80"),
-              "like", &m(8), true, Some(your_post_alt.uri.clone()), None),
-        notif("smoo.ai", "Smoo AI", Some("https://picsum.photos/seed/smoo/80"),
-              "like", &m(10), true, Some(your_post_alt.uri.clone()), None),
+        notif(
+            "alice.bsky.social",
+            "Alice Mendez",
+            Some("https://picsum.photos/seed/alice/80"),
+            "like",
+            &m(1),
+            false,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
+        notif(
+            "dioxuslabs.com",
+            "Dioxus",
+            Some("https://picsum.photos/seed/dx/80"),
+            "like",
+            &m(3),
+            false,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
+        notif(
+            "rustlang.bsky.social",
+            "Rust",
+            Some("https://picsum.photos/seed/rust/80"),
+            "like",
+            &m(5),
+            false,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
+        notif(
+            "photo.bsky.social",
+            "Photographer",
+            Some("https://picsum.photos/seed/photog/80"),
+            "like",
+            &m(6),
+            false,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
+        notif(
+            "duo.bsky.social",
+            "Duo",
+            Some("https://picsum.photos/seed/duo/80"),
+            "like",
+            &m(8),
+            true,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
+        notif(
+            "smoo.ai",
+            "Smoo AI",
+            Some("https://picsum.photos/seed/smoo/80"),
+            "like",
+            &m(10),
+            true,
+            Some(your_post_alt.uri.clone()),
+            None,
+        ),
         // ── Group: 2 reposts of your_post_rust
-        notif("rustlang.bsky.social", "Rust", Some("https://picsum.photos/seed/rust/80"),
-              "repost", &m(15), false, Some(your_post_rust.uri.clone()), None),
-        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
-              "repost", &m(18), false, Some(your_post_rust.uri.clone()), None),
+        notif(
+            "rustlang.bsky.social",
+            "Rust",
+            Some("https://picsum.photos/seed/rust/80"),
+            "repost",
+            &m(15),
+            false,
+            Some(your_post_rust.uri.clone()),
+            None,
+        ),
+        notif(
+            "dioxuslabs.com",
+            "Dioxus",
+            Some("https://picsum.photos/seed/dx/80"),
+            "repost",
+            &m(18),
+            false,
+            Some(your_post_rust.uri.clone()),
+            None,
+        ),
         // ── Singleton: reply
-        notif("carol.bsky.social", "Carol", Some("https://picsum.photos/seed/carol/80"),
-              "reply", &m(48), true, Some(your_post_alt.uri.clone()), Some(carol_reply.uri.clone())),
+        notif(
+            "carol.bsky.social",
+            "Carol",
+            Some("https://picsum.photos/seed/carol/80"),
+            "reply",
+            &m(48),
+            true,
+            Some(your_post_alt.uri.clone()),
+            Some(carol_reply.uri.clone()),
+        ),
         // ── Group: 3 follows
-        notif("bob.bsky.social", "Bob", Some("https://picsum.photos/seed/bob/80"),
-              "follow", &m(60), false, None, None),
-        notif("triptych.bsky.social", "Triptych", Some("https://picsum.photos/seed/trip/80"),
-              "follow", &m(65), false, None, None),
-        notif("blog.bsky.social", "Blog", Some("https://picsum.photos/seed/blog/80"),
-              "follow", &m(70), true, None, None),
+        notif(
+            "bob.bsky.social",
+            "Bob",
+            Some("https://picsum.photos/seed/bob/80"),
+            "follow",
+            &m(60),
+            false,
+            None,
+            None,
+        ),
+        notif(
+            "triptych.bsky.social",
+            "Triptych",
+            Some("https://picsum.photos/seed/trip/80"),
+            "follow",
+            &m(65),
+            false,
+            None,
+            None,
+        ),
+        notif(
+            "blog.bsky.social",
+            "Blog",
+            Some("https://picsum.photos/seed/blog/80"),
+            "follow",
+            &m(70),
+            true,
+            None,
+            None,
+        ),
         // ── Singleton: mention
-        notif("devinivy.com", "Devin Ivy", Some("https://picsum.photos/seed/devin/80"),
-              "mention", &m(140), true, None, Some(devin_mention.uri.clone())),
+        notif(
+            "devinivy.com",
+            "Devin Ivy",
+            Some("https://picsum.photos/seed/devin/80"),
+            "mention",
+            &m(140),
+            true,
+            None,
+            Some(devin_mention.uri.clone()),
+        ),
         // ── Singleton: quote
-        notif("smoo.ai", "Smoo AI", Some("https://picsum.photos/seed/smoo/80"),
-              "quote", &m(220), true, Some(your_post_ship.uri.clone()), Some(smoo_quote.uri.clone())),
+        notif(
+            "smoo.ai",
+            "Smoo AI",
+            Some("https://picsum.photos/seed/smoo/80"),
+            "quote",
+            &m(220),
+            true,
+            Some(your_post_ship.uri.clone()),
+            Some(smoo_quote.uri.clone()),
+        ),
     ];
 
     let mut subjects: HashMap<String, PostView> = HashMap::new();
-    for p in [your_post_alt, your_post_ship, your_post_rust, carol_reply, devin_mention, smoo_quote] {
+    for p in [
+        your_post_alt,
+        your_post_ship,
+        your_post_rust,
+        carol_reply,
+        devin_mention,
+        smoo_quote,
+    ] {
         subjects.insert(p.uri.clone(), p);
     }
     (items, subjects)
@@ -352,7 +474,10 @@ pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::Ha
 
 fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
     PostView {
-        uri: format!("at://did:plc:demo-{handle}/app.bsky.feed.post/{}", ts.replace(':', "-")),
+        uri: format!(
+            "at://did:plc:demo-{handle}/app.bsky.feed.post/{}",
+            ts.replace(':', "-")
+        ),
         cid: "bafy-demo".into(),
         author: PostAuthor {
             did: format!("did:plc:demo-{handle}"),
@@ -368,7 +493,7 @@ fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
         reply_count: 0,
         repost_count: 0,
         like_count: 0,
-            quote_count: 0,
+        quote_count: 0,
         indexed_at: Some(ts.to_string()),
         viewer: None,
     }
@@ -390,8 +515,7 @@ fn notif(
     reason_subject: Option<String>,
     notif_uri: Option<String>,
 ) -> Notification {
-    let uri = notif_uri
-        .unwrap_or_else(|| format!("at://did:plc:demo/{reason}/{handle}-{ts}"));
+    let uri = notif_uri.unwrap_or_else(|| format!("at://did:plc:demo/{reason}/{handle}-{ts}"));
     Notification {
         uri,
         cid: "bafy-demo".into(),
@@ -547,7 +671,9 @@ pub fn thread_for(focus_uri: &str) -> ThreadView {
         &m(3),
     );
 
-    let make_post = |post: PostView, parent: Option<Box<ThreadView>>, replies: Option<Vec<ThreadView>>| ThreadView::Post {
+    let make_post = |post: PostView,
+                     parent: Option<Box<ThreadView>>,
+                     replies: Option<Vec<ThreadView>>| ThreadView::Post {
         post,
         parent,
         replies,
@@ -559,7 +685,11 @@ pub fn thread_for(focus_uri: &str) -> ThreadView {
         focused,
         Some(Box::new(parent_node)),
         Some(vec![
-            make_post(reply1, None, Some(vec![make_post(reply1_child, None, None)])),
+            make_post(
+                reply1,
+                None,
+                Some(vec![make_post(reply1_child, None, None)]),
+            ),
             make_post(reply2, None, None),
             make_post(reply3, None, None),
         ]),

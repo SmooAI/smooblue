@@ -293,14 +293,10 @@ pub enum ThreadView {
     },
     /// Parent / reply was deleted.
     #[serde(rename = "app.bsky.feed.defs#notFoundPost")]
-    NotFound {
-        uri: String,
-    },
+    NotFound { uri: String },
     /// Viewer is blocked from seeing this part of the thread.
     #[serde(rename = "app.bsky.feed.defs#blockedPost")]
-    Blocked {
-        uri: String,
-    },
+    Blocked { uri: String },
     /// Future-proof — any unknown `$type` collapses here. Renderer
     /// treats it as a silent terminator.
     #[serde(other)]
@@ -313,13 +309,17 @@ impl ThreadView {
     pub fn parent_chain(&self) -> Vec<&ThreadView> {
         let mut out = Vec::new();
         let mut cur = match self {
-            ThreadView::Post { parent: Some(p), .. } => Some(p.as_ref()),
+            ThreadView::Post {
+                parent: Some(p), ..
+            } => Some(p.as_ref()),
             _ => None,
         };
         while let Some(node) = cur {
             out.push(node);
             cur = match node {
-                ThreadView::Post { parent: Some(p), .. } => Some(p.as_ref()),
+                ThreadView::Post {
+                    parent: Some(p), ..
+                } => Some(p.as_ref()),
                 _ => None,
             };
         }
@@ -490,7 +490,9 @@ mod tests {
         })).unwrap();
         match p.embed {
             Some(Embed::Known(EmbedKind::Record { record })) => match record {
-                EmbedRecordView::View { uri, author, value, .. } => {
+                EmbedRecordView::View {
+                    uri, author, value, ..
+                } => {
                     assert_eq!(uri, "at://did:plc:q/app.bsky.feed.post/1");
                     assert_eq!(author.handle, "quoted.bsky.social");
                     assert_eq!(value.text, "the quoted text");
@@ -523,7 +525,8 @@ mod tests {
                     "images": [{ "thumb": "https://t", "fullsize": "https://f", "alt": "a" }]
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let Some(Embed::Known(EmbedKind::RecordWithMedia { record, media })) = p.embed else {
             panic!("expected RecordWithMedia");
         };
@@ -554,7 +557,8 @@ mod tests {
                     "notFound": true
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let Some(Embed::Known(EmbedKind::Record { record })) = p.embed else {
             panic!("expected Record embed");
         };
@@ -573,8 +577,14 @@ mod tests {
                 "thumbnail": "https://cdn/thumb.jpg",
                 "aspectRatio": { "width": 1920, "height": 1080 }
             }
-        })).unwrap();
-        let Some(Embed::Known(EmbedKind::Video { playlist, thumbnail, aspect_ratio })) = p.embed else {
+        }))
+        .unwrap();
+        let Some(Embed::Known(EmbedKind::Video {
+            playlist,
+            thumbnail,
+            aspect_ratio,
+        })) = p.embed
+        else {
             panic!("expected Video embed");
         };
         assert_eq!(playlist, "https://cdn/video.m3u8");

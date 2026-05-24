@@ -55,7 +55,10 @@ pub fn ProfileSheet() -> Element {
                 return Err("not signed in".into());
             };
             // Sequential is fine — profile load is one-off, not a poll.
-            let profile = client.get_profile(&actor).await.map_err(|e| e.to_string())?;
+            let profile = client
+                .get_profile(&actor)
+                .await
+                .map_err(|e| e.to_string())?;
             let feed = client
                 .get_author_feed(&actor, None, 30)
                 .await
@@ -173,11 +176,16 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
     let did_for_column = did.clone();
     let name_for_column = name.clone();
     let add_column = move |_| {
-        on_add_column.call(ColumnSpec::author(did_for_column.clone(), name_for_column.clone()));
+        on_add_column.call(ColumnSpec::author(
+            did_for_column.clone(),
+            name_for_column.clone(),
+        ));
     };
 
     let banner_style = match banner.as_deref() {
-        Some(url) if !url.is_empty() => format!("background-image: url('{url}'); background-size: cover; background-position: center;"),
+        Some(url) if !url.is_empty() => format!(
+            "background-image: url('{url}'); background-size: cover; background-position: center;"
+        ),
         _ => "background: var(--gradient-brand);".to_string(),
     };
     let follow_button_class = if is_following {

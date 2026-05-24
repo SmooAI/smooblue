@@ -103,7 +103,11 @@ impl AttachedImage {
             return None;
         }
         let merged = merge_descriptions(llm, ocr);
-        if merged.is_empty() { None } else { Some(merged) }
+        if merged.is_empty() {
+            None
+        } else {
+            Some(merged)
+        }
     }
 }
 
@@ -218,10 +222,7 @@ pub fn ComposeSheet() -> Element {
             // half-attached post.
             let mut images: Vec<PostImage> = Vec::with_capacity(to_upload.len());
             for (prep, alt) in to_upload {
-                let blob: BlobRef = match client
-                    .upload_blob(prep.bytes.clone(), &prep.mime)
-                    .await
-                {
+                let blob: BlobRef = match client.upload_blob(prep.bytes.clone(), &prep.mime).await {
                     Ok(b) => b,
                     Err(e) => {
                         posting.set(false);
@@ -290,8 +291,8 @@ pub fn ComposeSheet() -> Element {
             .unwrap_or_default();
             // Resolve once per pick — the env-derived endpoint can't
             // change mid-session anyway.
-            let llm: Option<Arc<dyn AltTextProvider>> = SmooLlmAltText::from_env()
-                .map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+            let llm: Option<Arc<dyn AltTextProvider>> =
+                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
             for path in files.into_iter().take(remaining_slots) {
                 let att = AttachedImage::new(path.clone());
                 let id = att.id;
@@ -432,7 +433,11 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
 
     let mut atts_for_use_suggestion = attachments;
     let use_suggestion = move |_| {
-        if let Some(slot) = atts_for_use_suggestion.write().iter_mut().find(|a| a.id == id) {
+        if let Some(slot) = atts_for_use_suggestion
+            .write()
+            .iter_mut()
+            .find(|a| a.id == id)
+        {
             // Reset to the best auto-fill (merged LLM+OCR when both
             // exist, otherwise whichever single source we have).
             if let Some(merged) = slot.computed_alt() {
@@ -475,17 +480,21 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
     let has_llm = att.ai_suggestion.is_some();
     let has_ocr = att.ocr_text.is_some();
     let merged_alt = att.computed_alt().unwrap_or_default();
-    let llm_text = att.ai_suggestion.as_ref().map(|s| s.text.clone()).unwrap_or_default();
+    let llm_text = att
+        .ai_suggestion
+        .as_ref()
+        .map(|s| s.text.clone())
+        .unwrap_or_default();
     let ocr_text_clone = att.ocr_text.clone().unwrap_or_default();
     enum ChipState {
-        Combined,    // alt = merged LLM+OCR
-        AiOnly,      // alt = LLM-only suggestion
-        OcrOnly,     // alt = OCR-only text
-        UseAi { combined: bool },  // user edited, offer revert
-        None,        // nothing to show
+        Combined,                 // alt = merged LLM+OCR
+        AiOnly,                   // alt = LLM-only suggestion
+        OcrOnly,                  // alt = OCR-only text
+        UseAi { combined: bool }, // user edited, offer revert
+        None,                     // nothing to show
     }
     let chip = if att.ai_in_flight || att.ocr_in_flight {
-        ChipState::None  // busy state rendered separately
+        ChipState::None // busy state rendered separately
     } else if has_llm && has_ocr && !merged_alt.is_empty() && att.alt == merged_alt {
         ChipState::Combined
     } else if has_llm && !llm_text.is_empty() && att.alt == llm_text {
@@ -493,7 +502,9 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
     } else if has_ocr && !ocr_text_clone.is_empty() && att.alt == ocr_text_clone {
         ChipState::OcrOnly
     } else if has_llm || has_ocr {
-        ChipState::UseAi { combined: has_llm && has_ocr }
+        ChipState::UseAi {
+            combined: has_llm && has_ocr,
+        }
     } else {
         ChipState::None
     };
@@ -577,10 +588,7 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
 /// Debug-only: synthesize an AttachedImage from a path on disk, run
 /// the same pipeline as the real picker. Used by
 /// SMOOBLUE_DEBUG_ATTACH for screenshots.
-async fn inject_synthetic_attachment(
-    attachments: &mut Signal<Vec<AttachedImage>>,
-    path: PathBuf,
-) {
+async fn inject_synthetic_attachment(attachments: &mut Signal<Vec<AttachedImage>>, path: PathBuf) {
     let llm: Option<Arc<dyn AltTextProvider>> =
         SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
     let att = AttachedImage::new(path.clone());
@@ -602,8 +610,7 @@ async fn process_attachment(
 ) {
     let mut atts = attachments;
     let path_for_prep = path.clone();
-    let prep_result =
-        tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
+    let prep_result = tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
     let (state, ready_bytes) = match prep_result {
         Ok(Ok(prep)) => {
             let bytes = prep.bytes.clone();
@@ -611,7 +618,10 @@ async fn process_attachment(
             (AttachmentState::Ready(prep), Some((bytes, mime)))
         }
         Ok(Err(e)) => (AttachmentState::Failed(format!("{e:#}")), None),
-        Err(e) => (AttachmentState::Failed(format!("prep task panicked: {e}")), None),
+        Err(e) => (
+            AttachmentState::Failed(format!("prep task panicked: {e}")),
+            None,
+        ),
     };
     let has_llm = llm.is_some();
     let cfg_ocr = cfg!(target_os = "macos");
@@ -624,7 +634,9 @@ async fn process_attachment(
             slot.ocr_in_flight = true;
         }
     }
-    let Some((bytes, mime)) = ready_bytes else { return };
+    let Some((bytes, mime)) = ready_bytes else {
+        return;
+    };
 
     // Kick off LLM + OCR in parallel. Two tokio joins so either can
     // complete independently and update the alt incrementally.

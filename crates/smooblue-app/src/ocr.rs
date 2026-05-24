@@ -66,7 +66,9 @@ mod backend {
             );
 
             let requests: Retained<NSArray<VNRequest>> =
-                NSArray::from_retained_slice(&[Retained::cast_unchecked::<VNRequest>(request.clone())]);
+                NSArray::from_retained_slice(&[Retained::cast_unchecked::<VNRequest>(
+                    request.clone(),
+                )]);
             handler
                 .performRequests_error(&requests)
                 .map_err(|e| anyhow::anyhow!("Vision performRequests failed: {e}"))?;

@@ -14,9 +14,7 @@
 //! Unknown / forward-compat embeds render nothing (silent).
 
 use dioxus::prelude::*;
-use smooblue_atproto::{
-    Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedMedia, EmbedRecordView,
-};
+use smooblue_atproto::{Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedMedia, EmbedRecordView};
 use url::Url;
 
 #[component]
@@ -39,7 +37,11 @@ fn EmbedKindView(kind: EmbedKind) -> Element {
                 QuoteCard { record: record.record }
             }
         },
-        EmbedKind::Video { playlist, thumbnail, aspect_ratio } => rsx! {
+        EmbedKind::Video {
+            playlist,
+            thumbnail,
+            aspect_ratio,
+        } => rsx! {
             VideoPlayer {
                 playlist,
                 thumb: thumbnail,
@@ -57,7 +59,11 @@ fn MediaView(media: EmbedMedia) -> Element {
     match media {
         EmbedMedia::Images { images } => rsx! { ImageGrid { images } },
         EmbedMedia::External { external } => rsx! { LinkCard { ext: external } },
-        EmbedMedia::Video { playlist, thumbnail, aspect_ratio } => rsx! {
+        EmbedMedia::Video {
+            playlist,
+            thumbnail,
+            aspect_ratio,
+        } => rsx! {
             VideoPlayer {
                 playlist,
                 thumb: thumbnail,
@@ -131,7 +137,10 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
 fn LinkCard(ext: EmbedExternal) -> Element {
     let domain = Url::parse(&ext.uri)
         .ok()
-        .and_then(|u| u.host_str().map(|s| s.trim_start_matches("www.").to_string()))
+        .and_then(|u| {
+            u.host_str()
+                .map(|s| s.trim_start_matches("www.").to_string())
+        })
         .unwrap_or_else(|| ext.uri.clone());
     let uri = ext.uri.clone();
     let open = move |_| {
@@ -161,7 +170,13 @@ fn LinkCard(ext: EmbedExternal) -> Element {
 #[component]
 fn QuoteCard(record: EmbedRecordView) -> Element {
     match record {
-        EmbedRecordView::View { uri: _, author, value, embeds, .. } => {
+        EmbedRecordView::View {
+            uri: _,
+            author,
+            value,
+            embeds,
+            ..
+        } => {
             let name = author
                 .display_name
                 .as_deref()

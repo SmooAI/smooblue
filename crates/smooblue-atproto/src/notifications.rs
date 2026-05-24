@@ -263,7 +263,7 @@ mod tests {
             notif("like", Some("at://post-A"), "alice"),
             notif("like", Some("at://post-A"), "bob"),
             notif("reply", Some("at://post-A"), "carol"),
-            notif("like", Some("at://post-A"), "dave"),  // post-reply break
+            notif("like", Some("at://post-A"), "dave"), // post-reply break
             notif("repost", Some("at://post-A"), "eve"),
         ];
         let groups = group_notifications(items);
@@ -285,7 +285,10 @@ mod tests {
         n2.is_read = false;
         let groups = group_notifications(vec![n1, n2]);
         assert_eq!(groups.len(), 1);
-        assert!(groups[0].any_unread(), "should be unread because bob is unread");
+        assert!(
+            groups[0].any_unread(),
+            "should be unread because bob is unread"
+        );
     }
 
     #[test]

@@ -106,7 +106,12 @@ fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(64 * 1024);
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
     encoder
-        .write_image(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
+        .write_image(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
         .context("encoding jpeg")?;
     Ok(buf)
 }
@@ -123,7 +128,11 @@ mod tests {
                 img.put_pixel(
                     x,
                     y,
-                    Rgb([((x * 7) % 255) as u8, ((y * 11) % 255) as u8, ((x + y) % 255) as u8]),
+                    Rgb([
+                        ((x * 7) % 255) as u8,
+                        ((y * 11) % 255) as u8,
+                        ((x + y) % 255) as u8,
+                    ]),
                 );
             }
         }
@@ -136,9 +145,15 @@ mod tests {
         let prepped = prepare_from_image(huge).unwrap();
         assert!(prepped.width <= MAX_DIM);
         assert!(prepped.height <= MAX_DIM);
-        assert!(prepped.bytes.len() <= MAX_BYTES, "got {} bytes", prepped.bytes.len());
+        assert!(
+            prepped.bytes.len() <= MAX_BYTES,
+            "got {} bytes",
+            prepped.bytes.len()
+        );
         assert_eq!(prepped.mime, "image/jpeg");
-        assert!(prepped.thumb_data_uri.starts_with("data:image/jpeg;base64,"));
+        assert!(prepped
+            .thumb_data_uri
+            .starts_with("data:image/jpeg;base64,"));
     }
 
     #[test]
