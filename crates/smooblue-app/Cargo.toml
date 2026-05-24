@@ -26,12 +26,14 @@ dioxus-desktop = { workspace = true }
 dioxus-free-icons = { workspace = true }
 
 tokio = { workspace = true }
+reqwest = { workspace = true }
 url = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+async-trait = { workspace = true }
 
 keyring = { workspace = true }
 directories = { workspace = true }

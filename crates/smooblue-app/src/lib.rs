@@ -2,6 +2,7 @@
 //! constructs the Dioxus window and calls [`App`]. Everything testable
 //! (components, view models, persistence helpers) lives here.
 
+pub mod alt_text;
 pub mod components;
 pub mod demo;
 pub mod icons;

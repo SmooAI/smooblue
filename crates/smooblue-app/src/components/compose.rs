@@ -18,6 +18,7 @@
 //!   thumbnail grid, per-image alt-text input. Hooks (in follow-up
 //!   pearls) for Apple Vision OCR + Smoo LLM auto-alt seeding.
 
+use crate::alt_text::{AltSuggestion, AltTextProvider, SmooLlmAltText};
 use crate::icons;
 use crate::image_prep::{prepare_from_path, PreparedImage};
 use crate::state::ComposeContext;
@@ -28,6 +29,7 @@ use smooblue_atproto::{
 use smooblue_oauth::Session;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use url::Url;
 
 /// Bluesky's hard post length cap (graphemes, but we count chars as a proxy).
@@ -61,7 +63,16 @@ pub struct AttachedImage {
     /// Screen-reader description. Starts empty; the user types it
     /// (and in follow-up pearls, OCR/LLM seed it).
     pub alt: String,
+    /// `true` once the user has typed in the alt field — locks out
+    /// AI-suggested overwrites so we don't fight their edits.
+    pub alt_user_edited: bool,
     pub state: AttachmentState,
+    /// AI-suggested alt-text (LLM scene description). Filled in
+    /// asynchronously after the image becomes Ready.
+    pub ai_suggestion: Option<AltSuggestion>,
+    /// `true` while the LLM describe call is in flight — shows a small
+    /// spinner badge on the alt input.
+    pub ai_in_flight: bool,
 }
 
 impl AttachedImage {
@@ -70,7 +81,10 @@ impl AttachedImage {
             id: ATTACHMENT_ID.fetch_add(1, Ordering::SeqCst),
             source_path: path,
             alt: String::new(),
+            alt_user_edited: false,
             state: AttachmentState::Preparing,
+            ai_suggestion: None,
+            ai_in_flight: false,
         }
     }
 }
@@ -245,25 +259,53 @@ pub fn ComposeSheet() -> Element {
             .ok()
             .flatten()
             .unwrap_or_default();
+            // Resolve once per pick — the env-derived endpoint can't
+            // change mid-session anyway.
+            let llm: Option<Arc<dyn AltTextProvider>> = SmooLlmAltText::from_env()
+                .map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
             for path in files.into_iter().take(remaining_slots) {
                 let att = AttachedImage::new(path.clone());
                 let id = att.id;
                 attachments.write().push(att);
-                // Kick off CPU-bound prep on the blocking pool.
                 let mut atts = attachments;
                 let path_for_prep = path.clone();
+                let llm_for_image = llm.clone();
                 spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
                         prepare_from_path(&path_for_prep)
                     })
                     .await;
-                    let state = match result {
-                        Ok(Ok(prep)) => AttachmentState::Ready(prep),
-                        Ok(Err(e)) => AttachmentState::Failed(format!("{e:#}")),
-                        Err(e) => AttachmentState::Failed(format!("prep task panicked: {e}")),
+                    let (state, ready_bytes) = match result {
+                        Ok(Ok(prep)) => {
+                            let bytes = prep.bytes.clone();
+                            let mime = prep.mime.clone();
+                            (AttachmentState::Ready(prep), Some((bytes, mime)))
+                        }
+                        Ok(Err(e)) => (AttachmentState::Failed(format!("{e:#}")), None),
+                        Err(e) => (AttachmentState::Failed(format!("prep task panicked: {e}")), None),
                     };
                     if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
                         slot.state = state;
+                        if ready_bytes.is_some() && llm_for_image.is_some() {
+                            slot.ai_in_flight = true;
+                        }
+                    }
+                    // If prep succeeded AND we have an LLM provider, ask it
+                    // to describe the image. Failures are silent.
+                    if let (Some((bytes, mime)), Some(provider)) = (ready_bytes, llm_for_image) {
+                        let suggestion = provider.describe(&bytes, &mime).await.ok();
+                        if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
+                            slot.ai_in_flight = false;
+                            if let Some(sugg) = suggestion {
+                                // Auto-fill the alt input unless the user
+                                // has already started typing — they own
+                                // their text the moment they touch the box.
+                                if !slot.alt_user_edited && slot.alt.is_empty() {
+                                    slot.alt = sugg.text.clone();
+                                }
+                                slot.ai_suggestion = Some(sugg);
+                            }
+                        }
                     }
                 });
             }
@@ -391,6 +433,17 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
         let new_alt = evt.value();
         if let Some(slot) = atts_for_alt.write().iter_mut().find(|a| a.id == id) {
             slot.alt = new_alt;
+            slot.alt_user_edited = true;
+        }
+    };
+
+    let mut atts_for_use_suggestion = attachments;
+    let use_suggestion = move |_| {
+        if let Some(slot) = atts_for_use_suggestion.write().iter_mut().find(|a| a.id == id) {
+            if let Some(sugg) = slot.ai_suggestion.clone() {
+                slot.alt = sugg.text;
+                slot.alt_user_edited = true;
+            }
         }
     };
 
@@ -434,6 +487,32 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                 }
             }
             div { class: "compose__attachment-meta",
+                div { class: "compose__alt-label",
+                    span { "Alt text" }
+                    if att.ai_in_flight {
+                        span { class: "compose__alt-ai compose__alt-ai--busy",
+                            icons::Sparkles { size: icons::Size::Sm }
+                            "AI describing…"
+                        }
+                    } else if let Some(sugg) = att.ai_suggestion.as_ref() {
+                        // If the user has typed something different than
+                        // the AI suggestion, offer a one-click revert.
+                        if att.alt != sugg.text {
+                            button {
+                                class: "compose__alt-ai compose__alt-ai--use",
+                                title: "Use AI-suggested alt text",
+                                onclick: use_suggestion,
+                                icons::Sparkles { size: icons::Size::Sm }
+                                "Use AI"
+                            }
+                        } else {
+                            span { class: "compose__alt-ai compose__alt-ai--seeded",
+                                icons::Sparkles { size: icons::Size::Sm }
+                                "AI suggested"
+                            }
+                        }
+                    }
+                }
                 textarea {
                     class: "input compose__alt-input",
                     placeholder: "{placeholder_text}",
@@ -443,7 +522,7 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                 }
                 div { class: "compose__alt-meta",
                     span { class: "compose__alt-counter", "{alt_len}" }
-                    if alt.trim().is_empty() && matches!(att.state, AttachmentState::Ready(_)) {
+                    if alt.trim().is_empty() && matches!(att.state, AttachmentState::Ready(_)) && !att.ai_in_flight {
                         span { class: "compose__alt-hint", "alt text helps screen readers" }
                     }
                 }

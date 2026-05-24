@@ -44,7 +44,7 @@ pub fn DeckShell() -> Element {
             Sidebar { search_open }
             div { class: "deck-columns",
                 for spec in columns {
-                    Column { key: "{spec.id}", spec: spec }
+                    Column { key: "{spec.id}", spec: spec.clone() }
                 }
             }
             button {

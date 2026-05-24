@@ -768,6 +768,59 @@ a {
     font-style: italic;
 }
 
+.compose__alt-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.compose__alt-ai {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-weight: 500;
+}
+
+.compose__alt-ai--busy {
+    color: var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.12);
+    animation: alt-ai-pulse 1.4s ease-in-out infinite;
+}
+
+.compose__alt-ai--seeded {
+    color: var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.12);
+}
+
+.compose__alt-ai--use {
+    background: var(--gradient-brand);
+    color: #fff;
+    border: 0;
+    cursor: pointer;
+    transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.compose__alt-ai--use:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(244, 159, 10, 0.4);
+}
+
+@keyframes alt-ai-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+}
+
 /* ===========================================================
  *  Login view (smooblue-specific full-screen sign-in)
  * =========================================================== */

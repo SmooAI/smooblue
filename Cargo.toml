@@ -51,7 +51,7 @@ futures = "0.3"
 async-trait = "0.1"
 
 # HTTP / network
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
 url = { version = "2", features = ["serde"] }
 
 # Serialization
