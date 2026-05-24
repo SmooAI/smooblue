@@ -5,7 +5,7 @@ use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
     ComposeContext, Engagement, EngagementFocus, OptimisticMap, ProfileFocus, ReplyTarget,
-    ThreadFocus, Tick,
+    ThreadFocus,
 };
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
@@ -13,10 +13,13 @@ use smooblue_oauth::Session;
 
 #[component]
 pub fn PostCard(post: PostView) -> Element {
-    // Subscribe to the global tick so the relative timestamp re-renders
-    // every second ("11s" → "12s" → "1m"). The read itself does the work
-    // — Dioxus tracks the signal access as a render dependency.
-    let _tick = use_context::<Signal<Tick>>().read().0;
+    // NOTE: this component does NOT subscribe to the global Tick
+    // signal — the relative timestamp ("11s" → "12s") is rendered
+    // via icons::TimeAgo, which has its own tick subscription. With
+    // a 500-post column, full-card re-renders every second pegged
+    // a CPU core; lifting the subscription into the tiny text node
+    // dropped steady-state CPU to ~0% (scale=large smoke-tested
+    // 2026-05-24).
     let mut optimistic = use_context::<Signal<OptimisticMap>>();
     let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let mut thread_focus = use_context::<Signal<ThreadFocus>>();
@@ -66,7 +69,11 @@ pub fn PostCard(post: PostView) -> Element {
 
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
-    let time = post.relative_time();
+    let time_initial = post.relative_time();
+    let time_source = post
+        .indexed_at
+        .clone()
+        .or_else(|| post.record.created_at.clone());
     let text = post.record.text.clone();
     let avatar = post.author.avatar.clone();
     let embed = post.embed.clone();
@@ -278,7 +285,7 @@ pub fn PostCard(post: PostView) -> Element {
                 onclick: open_profile,
                 title: "Open profile column",
                 if let Some(url) = avatar {
-                    img { src: "{url}", alt: "{handle}" }
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
                 }
             }
             div { class: "post__body",
@@ -288,7 +295,9 @@ pub fn PostCard(post: PostView) -> Element {
                     div { class: "post__head",
                         span { class: "post__name", "{name}" }
                         span { class: "post__handle", "@{handle}" }
-                        span { class: "post__time", "{time}" }
+                        span { class: "post__time",
+                            icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
+                        }
                     }
                     if !text.is_empty() {
                         p { class: "post__text", "{text}" }

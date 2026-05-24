@@ -74,11 +74,13 @@ pub fn EngagementSheet() -> Element {
         }
     });
 
-    if snap.is_none() {
+    // `let Some(kind)` binds + early-returns in one step so a future
+    // refactor that moves code above this point can't accidentally
+    // reach the `.unwrap()` on None.
+    let Some(ref kind) = snap else {
         return rsx! { Fragment {} };
-    }
-
-    let title = match snap.as_ref().unwrap() {
+    };
+    let title = match kind {
         Engagement::Likes(_) => "Likes",
         Engagement::Reposters(_) => "Reposts",
         Engagement::Quotes(_) => "Quotes",
@@ -158,7 +160,7 @@ fn ActorRow(actor: PostAuthor) -> Element {
         button { class: "actor-row", onclick: onclick,
             div { class: "actor-row__avatar",
                 if let Some(url) = avatar {
-                    img { src: "{url}", alt: "{handle}" }
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
                 } else {
                     div { class: "actor-row__avatar-placeholder",
                         icons::User { size: icons::Size::Sm }

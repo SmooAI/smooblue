@@ -166,6 +166,49 @@ pub fn Sparkles(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdSparkles } }
 }
 
+/// Small relative-time text ("11s", "1h", "3d") that updates every
+/// second by subscribing to the global `Tick` signal. Lifted out of
+/// PostCard / NotificationCard so the 1Hz tick re-renders only this
+/// tiny text node instead of every full card — a 500-post Home
+/// column otherwise burns 100% CPU just keeping the timestamps
+/// fresh (measured 2026-05-24 in scale=large demo mode).
+#[component]
+pub fn TimeAgo(text_at_render: String, source_ts: Option<String>) -> Element {
+    use crate::state::Tick;
+    use dioxus::prelude::*;
+    let _tick = use_context::<Signal<Tick>>().read().0;
+    // Re-compute relative time from the canonical timestamp on each
+    // tick. Falls back to the value the parent passed at render time
+    // if the timestamp is missing (e.g., notifications without
+    // indexedAt) — that's stable but stale, which is fine.
+    let rendered = match source_ts.as_deref() {
+        Some(s) => relative_time_from(s).unwrap_or(text_at_render),
+        None => text_at_render,
+    };
+    rsx! { span { "{rendered}" } }
+}
+
+/// Compact "Ns/Nm/Nh/Nd/Nmo" formatting matching PostView::relative_time.
+/// Lives here so the TimeAgo helper above doesn't have to cross
+/// crate boundaries to compute its own text.
+fn relative_time_from(rfc3339: &str) -> Option<String> {
+    let ts = chrono::DateTime::parse_from_rfc3339(rfc3339).ok()?;
+    let now = chrono::Utc::now();
+    let delta = now.signed_duration_since(ts.with_timezone(&chrono::Utc));
+    let out = if delta.num_seconds() < 60 {
+        format!("{}s", delta.num_seconds().max(0))
+    } else if delta.num_minutes() < 60 {
+        format!("{}m", delta.num_minutes())
+    } else if delta.num_hours() < 24 {
+        format!("{}h", delta.num_hours())
+    } else if delta.num_days() < 30 {
+        format!("{}d", delta.num_days())
+    } else {
+        format!("{}mo", delta.num_days() / 30)
+    };
+    Some(out)
+}
+
 #[component]
 pub fn Play(size: Size) -> Element {
     let px = size.px();

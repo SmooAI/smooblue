@@ -104,7 +104,7 @@ pub fn SuggestionRow(actor: ActorProfile) -> Element {
                 onclick: open_profile_avatar,
                 title: "Open profile",
                 if let Some(url) = avatar {
-                    img { src: "{url}", alt: "{handle}" }
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
                 } else {
                     div { class: "suggestion__avatar-placeholder",
                         icons::User { size: icons::Size::Md }

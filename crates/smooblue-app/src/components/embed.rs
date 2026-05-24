@@ -122,7 +122,7 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
             class: "embed__image{pos_class}",
             title: "{alt}",
             onclick: open_fullsize,
-            img { src: "{img.thumb}", alt: "{alt}" }
+            img { loading: "lazy", decoding: "async", src: "{img.thumb}", alt: "{alt}" }
             if !img.alt.is_empty() {
                 span { class: "embed__image-alt-badge", title: "{alt}", "ALT" }
             }
@@ -150,7 +150,7 @@ fn LinkCard(ext: EmbedExternal) -> Element {
         button { class: "embed__link", onclick: open, title: "{ext.uri}",
             if let Some(thumb) = ext.thumb.as_ref() {
                 div { class: "embed__link-thumb",
-                    img { src: "{thumb}", alt: "" }
+                    img { loading: "lazy", decoding: "async", src: "{thumb}", alt: "" }
                 }
             }
             div { class: "embed__link-meta",
@@ -193,7 +193,7 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
                 div { class: "embed__quote",
                     div { class: "embed__quote-head",
                         if let Some(av) = &author.avatar {
-                            img { class: "embed__quote-avatar", src: "{av}", alt: "{author.handle}" }
+                            img { loading: "lazy", decoding: "async", class: "embed__quote-avatar", src: "{av}", alt: "{author.handle}" }
                         }
                         span { class: "embed__quote-name", "{name}" }
                         span { class: "embed__quote-handle", "@{author.handle}" }

@@ -11,21 +11,22 @@
 
 use crate::components::embed::EmbedView;
 use crate::icons;
-use crate::state::{ProfileFocus, Tick};
+use crate::state::ProfileFocus;
 use dioxus::prelude::*;
 use smooblue_atproto::{NotificationGroup, PostAuthor, PostView};
 
 #[component]
 pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> Element {
-    // Subscribe to the global tick so `relative_time()` text refreshes.
-    let _tick = use_context::<Signal<Tick>>().read().0;
+    // Same pattern as PostCard: relative-time text is rendered by
+    // icons::TimeAgo (which has its own tick subscription) so a
+    // long Notifications column doesn't full-card re-render once
+    // a second. See post.rs for the cost analysis.
 
-    let first = group.items.first().cloned().unwrap_or_else(|| {
-        // Defensive: an empty group shouldn't reach the renderer, but
-        // if it does, fall back to a blank card rather than panicking.
-        // Build a placeholder so the rsx still compiles.
-        unreachable!("NotificationGroup::items is invariant non-empty")
-    });
+    // group.items SHOULD be non-empty by invariant of group_notifications,
+    // but render nothing rather than panic if a future refactor violates it.
+    let Some(first) = group.items.first().cloned() else {
+        return rsx! { Fragment {} };
+    };
     let reason = group.reason.clone();
     let unread = group.any_unread();
     let unread_class = if unread {
@@ -39,7 +40,8 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
         "follow" => "notif__icon notif__icon--follow",
         _ => "notif__icon",
     };
-    let time = first.relative_time();
+    let time_initial = first.relative_time();
+    let time_source = first.indexed_at.clone();
 
     rsx! {
         article { class: "{unread_class}",
@@ -64,7 +66,9 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
             div { class: "notif__body",
                 div { class: "notif__head",
                     NotifPhrase { group: group.clone() }
-                    span { class: "notif__time", "{time}" }
+                    span { class: "notif__time",
+                        icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
+                    }
                 }
                 // Subject quote (for likes/reposts of your post, or
                 // for the inbound text of a reply/mention/quote).
@@ -177,7 +181,7 @@ fn AvatarStack(actors: Vec<PostAuthor>) -> Element {
                                 class: "notif__avatar-btn",
                                 title: "{a.handle}",
                                 onclick: on_click,
-                                img { class: "notif__avatar-img", src: "{url}", alt: "{a.handle}" }
+                                img { loading: "lazy", decoding: "async", class: "notif__avatar-img", src: "{url}", alt: "{a.handle}" }
                             }
                         }
                     } else {

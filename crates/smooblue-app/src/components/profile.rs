@@ -206,7 +206,7 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         div { class: "profile__head",
             div { class: "profile__avatar-frame",
                 if let Some(url) = avatar.as_ref() {
-                    img { class: "profile__avatar", src: "{url}", alt: "{handle}" }
+                    img { loading: "lazy", decoding: "async", class: "profile__avatar", src: "{url}", alt: "{handle}" }
                 } else {
                     div { class: "profile__avatar profile__avatar--placeholder",
                         icons::User { size: icons::Size::Lg }

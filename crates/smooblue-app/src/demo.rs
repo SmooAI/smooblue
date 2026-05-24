@@ -24,6 +24,58 @@ pub fn is_active() -> bool {
     )
 }
 
+/// Scale-test tiers for demo data. Controlled by
+/// `SMOOBLUE_DEMO_SCALE=small|medium|large|huge|insane`. Default is
+/// `small` (the realistic-looking 14-post timeline).
+///
+/// Used to stress-test the deck rendering / signal-subscription /
+/// image-loading pipelines without needing a real test account
+/// with thousands of posts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scale {
+    /// 14 posts, 14 notifications — the curated showcase set.
+    Small,
+    /// 100 posts/column, 100 notifications.
+    Medium,
+    /// 500 posts/column, 500 notifications — exposes signal-subscription
+    /// re-render cost (tick-driven timestamps).
+    Large,
+    /// 2000 posts/column, 2000 notifications — exposes image fan-out
+    /// and Dioxus diff cost.
+    Huge,
+    /// 5000 posts/column, 5000 notifications — for "does it OOM?"
+    /// curiosity. Not realistic but smoke-tests the worst case.
+    Insane,
+}
+
+impl Scale {
+    pub fn from_env() -> Self {
+        match std::env::var("SMOOBLUE_DEMO_SCALE").as_deref() {
+            Ok("medium") => Scale::Medium,
+            Ok("large") => Scale::Large,
+            Ok("huge") => Scale::Huge,
+            Ok("insane") => Scale::Insane,
+            _ => Scale::Small,
+        }
+    }
+
+    /// How many posts each feed column should return.
+    pub fn posts_per_column(self) -> usize {
+        match self {
+            Scale::Small => 14,
+            Scale::Medium => 100,
+            Scale::Large => 500,
+            Scale::Huge => 2000,
+            Scale::Insane => 5000,
+        }
+    }
+
+    /// How many notifications to synthesize.
+    pub fn notifications(self) -> usize {
+        self.posts_per_column()
+    }
+}
+
 /// A throwaway session for demo mode — never used for real network calls.
 pub fn fake_session() -> Session {
     let k = DpopKey::generate();
@@ -48,6 +100,32 @@ pub fn fake_session() -> Session {
 /// reads as authentic. Timestamps are relative to *now* so they always render
 /// as "2m" / "14m" / etc, never "yesterday".
 pub fn home_feed() -> Vec<FeedItem> {
+    let scale = Scale::from_env();
+    let base = curated_home_feed();
+    if scale == Scale::Small {
+        return base;
+    }
+    // Scale up by repeating the curated set with unique IDs. Each
+    // duplicate gets a fresh URI + slightly newer timestamp so the
+    // tick-driven re-render and key-based diffing both have to do
+    // real work.
+    let target = scale.posts_per_column();
+    let mut out = Vec::with_capacity(target);
+    let now = chrono::Utc::now();
+    for i in 0..target {
+        let template = &base[i % base.len()];
+        let mut item = template.clone();
+        let ts = now - chrono::Duration::seconds((i as i64) * 7);
+        item.post.uri = format!("at://did:plc:scale/app.bsky.feed.post/{i:06}");
+        item.post.cid = format!("bafy-scale-{i}");
+        item.post.indexed_at = Some(ts.to_rfc3339());
+        item.post.record.created_at = Some(ts.to_rfc3339());
+        out.push(item);
+    }
+    out
+}
+
+fn curated_home_feed() -> Vec<FeedItem> {
     let now = chrono::Utc::now();
     let m = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
 
