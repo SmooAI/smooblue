@@ -233,6 +233,42 @@ impl AtClient {
         })
     }
 
+    /// `app.bsky.feed.getPosts` — batch hydrate up to 25 posts by
+    /// AT-URI in one round trip. Used by the Notifications column to
+    /// render the subject post under each "liked / replied to / etc."
+    /// notification.
+    ///
+    /// If more than 25 URIs are passed, makes multiple calls and
+    /// concatenates. Silently drops any URIs the server can't
+    /// resolve — the caller looks up by URI so missing entries just
+    /// render unhydrated.
+    pub async fn get_posts(&self, uris: &[String]) -> Result<Vec<crate::feed::PostView>, AtError> {
+        if uris.is_empty() {
+            return Ok(Vec::new());
+        }
+        #[derive(serde::Deserialize)]
+        struct R {
+            #[serde(default)]
+            posts: Vec<crate::feed::PostView>,
+        }
+        let mut out: Vec<crate::feed::PostView> = Vec::with_capacity(uris.len());
+        for chunk in uris.chunks(25) {
+            let mut url = self
+                .appview
+                .join("/xrpc/app.bsky.feed.getPosts")
+                .map_err(|e| AtError::Decode(e.to_string()))?;
+            {
+                let mut q = url.query_pairs_mut();
+                for u in chunk {
+                    q.append_pair("uris", u);
+                }
+            }
+            let r: R = self.get_json(&url).await?;
+            out.extend(r.posts);
+        }
+        Ok(out)
+    }
+
     /// `app.bsky.feed.getFeed` — fetch a custom feed (e.g. "Indianapolis
     /// Sports 1"). `feed_uri` is the AT-URI of the feed generator record.
     pub async fn get_feed(
@@ -819,6 +855,54 @@ mod tests {
         };
         let many = vec![img.clone(), img.clone(), img.clone(), img.clone(), img.clone(), img];
         client.create_post_full("six images", None, &many).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn get_posts_batches_to_25_per_call() {
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicU32::new(0));
+        let calls_c = calls.clone();
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getPosts"))
+            .respond_with(move |req: &Request| {
+                calls_c.fetch_add(1, Ordering::SeqCst);
+                let q = req.url.query_pairs().filter(|(k, _)| k == "uris").count();
+                assert!(q <= 25, "must split into ≤25 URIs per call, got {q}");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "posts": [
+                        {
+                            "uri": "at://x", "cid": "c",
+                            "author": { "did": "d", "handle": "alice.bsky.test" },
+                            "record": { "text": "yo" }
+                        }
+                    ]
+                }))
+            })
+            .mount(&server)
+            .await;
+        let client = AtClient::new(
+            fake_session(&server.uri()),
+            Url::parse(&server.uri()).unwrap(),
+        );
+        // 30 URIs → expect 2 calls (25 + 5).
+        let uris: Vec<String> = (0..30)
+            .map(|i| format!("at://did:plc:x/app.bsky.feed.post/{i}"))
+            .collect();
+        let out = client.get_posts(&uris).await.unwrap();
+        // Two pages × 1 post each in the mock = 2 posts.
+        assert_eq!(out.len(), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn get_posts_no_op_on_empty_input() {
+        let server = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&server.uri()),
+            Url::parse(&server.uri()).unwrap(),
+        );
+        let out = client.get_posts(&[]).await.unwrap();
+        assert!(out.is_empty());
     }
 
     #[tokio::test]

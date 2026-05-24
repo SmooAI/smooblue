@@ -21,5 +21,6 @@ pub use client::{
 pub use error::AtError;
 pub use feed::{
     ActorProfile, Embed, EmbedImage, EmbedKind, FeedItem, FeedResponse, PostAuthor, PostRecord,
+    PostView, PostViewerState,
 };
 pub use notifications::{Notification, NotificationsResponse};

@@ -134,70 +134,94 @@ pub fn home_feed() -> Vec<FeedItem> {
     ]
 }
 
-/// Demo notifications for the Notifications column.
-pub fn notifications() -> Vec<Notification> {
+/// Demo notifications + a hydrated subject-post lookup. The compose
+/// Notifications column expects both so each card can render the
+/// post that gives the notification its context.
+pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::HashMap<String, PostView>) {
+    use std::collections::HashMap;
     let now = chrono::Utc::now();
     let m = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
-    vec![
-        notif(
-            "alice.bsky.social",
-            "Alice Mendez",
-            Some("https://picsum.photos/seed/alice/80"),
-            "like",
-            &m(1),
-            false,
-        ),
-        notif(
-            "rustlang.bsky.social",
-            "Rust",
-            Some("https://picsum.photos/seed/rust/80"),
-            "repost",
-            &m(7),
-            false,
-        ),
-        notif(
-            "bob.bsky.social",
-            "Bob",
-            Some("https://picsum.photos/seed/bob/80"),
-            "follow",
-            &m(22),
-            false,
-        ),
-        notif(
-            "carol.bsky.social",
-            "Carol",
-            Some("https://picsum.photos/seed/carol/80"),
-            "reply",
-            &m(48),
-            true,
-        ),
-        notif(
-            "dioxuslabs.com",
-            "Dioxus",
-            Some("https://picsum.photos/seed/dx/80"),
-            "like",
-            &m(95),
-            true,
-        ),
-        notif(
-            "devinivy.com",
-            "Devin Ivy",
-            Some("https://picsum.photos/seed/devin/80"),
-            "mention",
-            &m(140),
-            true,
-        ),
-        notif(
-            "smoo.ai",
-            "Smoo AI",
-            Some("https://picsum.photos/seed/smoo/80"),
-            "quote",
-            &m(220),
-            true,
-        ),
-    ]
+
+    // Three "your posts" that others engaged with — referenced by
+    // multiple like/repost/quote notifications so we exercise the
+    // many-likes-on-one-post case the real API hits hard.
+    let your_post_alt = synth_post("you.bsky.social", "You",
+        "Shipped Apple Vision OCR + LLM scene description in smooblue compose today. Alt text is now one-click. 🎉",
+        &m(15));
+    let your_post_ship = synth_post("you.bsky.social", "You",
+        "Made smooblue auto-fill alt text for screenshots and photos. Smoo LLM describes the scene, Apple Vision reads any text.",
+        &m(60));
+    let your_post_rust = synth_post("you.bsky.social", "You",
+        "Dioxus 0.6 + objc2-vision = native macOS UI calling Vision.framework in a dozen lines. The objc2 family is excellent.",
+        &m(180));
+
+    // Reply / mention posts come from THEIR repo (not yours), keyed
+    // by the notification.uri.
+    let carol_reply = synth_post("carol.bsky.social", "Carol",
+        "This is incredible — finally an alt-text workflow that doesn't feel like a chore. Are you open-sourcing?",
+        &m(48));
+    let devin_mention = synth_post("devinivy.com", "Devin Ivy",
+        "@you the DPoP scheme handling in your atproto client is the cleanest Rust impl I've seen. Mind if I link it from the ATproto Rust thread?",
+        &m(140));
+    let smoo_quote = synth_post("smoo.ai", "Smoo AI",
+        "Built on top of our open observability stack — the OCR + LLM merge here is exactly the kind of agent-shaped UX we want everywhere.",
+        &m(220));
+
+    // Build the notification list.  Each item points at a specific
+    // subject URI so the hydration map actually matches.
+    let items = vec![
+        notif("alice.bsky.social", "Alice Mendez", Some("https://picsum.photos/seed/alice/80"),
+              "like", &m(1), false, Some(your_post_alt.uri.clone()), None),
+        notif("rustlang.bsky.social", "Rust", Some("https://picsum.photos/seed/rust/80"),
+              "repost", &m(7), false, Some(your_post_rust.uri.clone()), None),
+        notif("bob.bsky.social", "Bob", Some("https://picsum.photos/seed/bob/80"),
+              "follow", &m(22), false, None, None),
+        notif("carol.bsky.social", "Carol", Some("https://picsum.photos/seed/carol/80"),
+              "reply", &m(48), true, Some(your_post_alt.uri.clone()), Some(carol_reply.uri.clone())),
+        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
+              "like", &m(95), true, Some(your_post_ship.uri.clone()), None),
+        notif("devinivy.com", "Devin Ivy", Some("https://picsum.photos/seed/devin/80"),
+              "mention", &m(140), true, None, Some(devin_mention.uri.clone())),
+        notif("smoo.ai", "Smoo AI", Some("https://picsum.photos/seed/smoo/80"),
+              "quote", &m(220), true, Some(your_post_ship.uri.clone()), Some(smoo_quote.uri.clone())),
+    ];
+
+    let mut subjects: HashMap<String, PostView> = HashMap::new();
+    for p in [your_post_alt, your_post_ship, your_post_rust, carol_reply, devin_mention, smoo_quote] {
+        subjects.insert(p.uri.clone(), p);
+    }
+    (items, subjects)
 }
 
+fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
+    PostView {
+        uri: format!("at://did:plc:demo-{handle}/app.bsky.feed.post/{}", ts.replace(':', "-")),
+        cid: "bafy-demo".into(),
+        author: PostAuthor {
+            did: format!("did:plc:demo-{handle}"),
+            handle: handle.to_string(),
+            display_name: Some(display.to_string()),
+            avatar: Some(format!("https://picsum.photos/seed/{handle}/80")),
+        },
+        record: smooblue_atproto::PostRecord {
+            text: text.to_string(),
+            created_at: Some(ts.to_string()),
+        },
+        embed: None,
+        reply_count: 0,
+        repost_count: 0,
+        like_count: 0,
+        indexed_at: Some(ts.to_string()),
+        viewer: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+// `reason_subject` — for like/repost/quote: AT-URI of YOUR post they
+// engaged with. For reply: AT-URI of YOUR parent post.
+// `notif_uri` — override the notification's own URI so the hydration
+// lookup finds a specific synthetic post (for reply/mention/quote
+// where we want to render their text).
 fn notif(
     handle: &str,
     display: &str,
@@ -205,9 +229,13 @@ fn notif(
     reason: &str,
     ts: &str,
     is_read: bool,
+    reason_subject: Option<String>,
+    notif_uri: Option<String>,
 ) -> Notification {
+    let uri = notif_uri
+        .unwrap_or_else(|| format!("at://did:plc:demo/{reason}/{handle}-{ts}"));
     Notification {
-        uri: format!("at://did:plc:demo/{reason}/{handle}-{ts}"),
+        uri,
         cid: "bafy-demo".into(),
         author: PostAuthor {
             did: format!("did:plc:demo-{handle}"),
@@ -216,7 +244,7 @@ fn notif(
             avatar: avatar.map(String::from),
         },
         reason: reason.to_string(),
-        reason_subject: Some("at://did:plc:demo/app.bsky.feed.post/sample".into()),
+        reason_subject,
         indexed_at: Some(ts.to_string()),
         is_read,
     }

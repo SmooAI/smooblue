@@ -495,6 +495,45 @@ a {
     margin-top: 2px;
 }
 
+/* ── Subject quote (the post that gives a notification context) ── */
+.notif__quote {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--foreground);
+    /* Clamp the height of long quotes — the user already knows the gist,
+       three lines is plenty before they click through to the thread. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* "Their" content — reply, mention, quote. Left border in smoo-orange
+   so it visually signals "this is inbound text you should actually read". */
+.notif__quote--inbound {
+    border-left: 3px solid var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.06);
+}
+
+/* "Your" content echoed back — the post they liked/reposted. Subtler;
+   you already know what you wrote, the quote is just the reminder. */
+.notif__quote--own {
+    color: var(--muted-foreground);
+    background: transparent;
+    border: 1px dashed var(--border);
+}
+
+.notif__quote-text {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 /* ===========================================================
  *  Compose sheet — small extensions on top of the shared .modal__*
  * =========================================================== */

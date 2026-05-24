@@ -18,8 +18,9 @@ use crate::components::post::PostCard;
 use crate::icons;
 use crate::state::{ColumnKind, ColumnSpec};
 use dioxus::prelude::*;
-use smooblue_atproto::{AtClient, FeedItem, Notification};
+use smooblue_atproto::{AtClient, FeedItem, Notification, PostView};
 use smooblue_oauth::Session;
+use std::collections::HashMap;
 use std::time::Duration;
 use url::Url;
 
@@ -28,7 +29,14 @@ enum ColumnData {
     #[default]
     Empty,
     Posts(Vec<FeedItem>),
-    Notifications(Vec<Notification>),
+    /// Notifications + a side-table of hydrated subject posts, keyed
+    /// by AT-URI. For a "like" notification, the subject is your post
+    /// they liked; for a "reply", the subject is the reply text.
+    /// Missing entries just render unhydrated.
+    Notifications {
+        items: Vec<Notification>,
+        subjects: HashMap<String, PostView>,
+    },
 }
 
 impl ColumnData {
@@ -36,7 +44,7 @@ impl ColumnData {
         match self {
             Self::Empty => true,
             Self::Posts(p) => p.is_empty(),
-            Self::Notifications(n) => n.is_empty(),
+            Self::Notifications { items, .. } => items.is_empty(),
         }
     }
 }
@@ -101,9 +109,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             PostCard { key: "{item.post.uri}", post: item.post.clone() }
                         }
                     },
-                    (ColumnData::Notifications(items), _, _) => rsx! {
+                    (ColumnData::Notifications { items, subjects }, _, _) => rsx! {
                         for n in items.iter() {
-                            NotificationCard { key: "{n.uri}", notif: n.clone() }
+                            NotificationCard {
+                                key: "{n.uri}",
+                                notif: n.clone(),
+                                subject: subject_for(n, subjects).cloned(),
+                            }
                         }
                     },
                     _ => rsx! {},
@@ -130,7 +142,10 @@ async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<Colum
     // Demo mode: canned data with no network.
     if crate::demo::is_active() {
         return Ok(match kind {
-            ColumnKind::Notifications => ColumnData::Notifications(crate::demo::notifications()),
+            ColumnKind::Notifications => {
+                let (items, subjects) = crate::demo::notifications_with_subjects();
+                ColumnData::Notifications { items, subjects }
+            }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
             ColumnKind::Home | ColumnKind::Search { .. } | ColumnKind::Feed { .. } => {
                 ColumnData::Posts(crate::demo::home_feed())
@@ -156,11 +171,26 @@ async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<Colum
             .await
             .map(|r| ColumnData::Posts(r.feed))
             .map_err(|e| e.to_string()),
-        ColumnKind::Notifications => client
-            .list_notifications(None, 30)
-            .await
-            .map(|r| ColumnData::Notifications(r.notifications))
-            .map_err(|e| e.to_string()),
+        ColumnKind::Notifications => {
+            let items = client
+                .list_notifications(None, 30)
+                .await
+                .map(|r| r.notifications)
+                .map_err(|e| e.to_string())?;
+            // Hydrate subject posts in one batched call. Failures here
+            // shouldn't blank the notifications — fall back to an empty
+            // map and the cards just render without quoted context.
+            let uris = collect_subject_uris(&items);
+            let subjects = if uris.is_empty() {
+                HashMap::new()
+            } else {
+                match client.get_posts(&uris).await {
+                    Ok(posts) => posts.into_iter().map(|p| (p.uri.clone(), p)).collect(),
+                    Err(_) => HashMap::new(),
+                }
+            };
+            Ok(ColumnData::Notifications { items, subjects })
+        }
         ColumnKind::Search { query } => client
             .search_posts(query, None, 30)
             .await
@@ -172,6 +202,45 @@ async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<Colum
             .map(|r| ColumnData::Posts(r.feed))
             .map_err(|e| e.to_string()),
     }
+}
+
+/// Which AT-URIs do we need hydrated to give each notification context?
+///
+/// - like / repost / quote: the user's post they engaged with → `reason_subject`
+/// - reply: the reply post itself (lives at `notif.uri`)
+/// - mention: the post that mentioned us (also `notif.uri`)
+/// - follow / starterpack-joined: nothing
+///
+/// Deduped — list_notifications often has many likes of the same post.
+fn collect_subject_uris(items: &[Notification]) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for n in items {
+        let want = match n.reason.as_str() {
+            "like" | "repost" | "quote" => n.reason_subject.clone(),
+            "reply" | "mention" => Some(n.uri.clone()),
+            _ => None,
+        };
+        if let Some(uri) = want {
+            if seen.insert(uri.clone()) {
+                out.push(uri);
+            }
+        }
+    }
+    out
+}
+
+/// Look up the PostView that gives context to a single notification.
+/// Returns `None` for follows / starterpack notifications (no subject)
+/// or when hydration didn't find the post (deleted, blocked, etc.).
+fn subject_for<'a>(n: &Notification, subjects: &'a HashMap<String, PostView>) -> Option<&'a PostView> {
+    let key = match n.reason.as_str() {
+        "like" | "repost" | "quote" => n.reason_subject.as_deref()?,
+        "reply" | "mention" => &n.uri,
+        _ => return None,
+    };
+    subjects.get(key)
 }
 
 #[component]
