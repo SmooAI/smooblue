@@ -3,6 +3,7 @@
 //! (components, view models, persistence helpers) lives here.
 
 pub mod alt_text;
+pub mod auth_refresh;
 pub mod components;
 pub mod demo;
 pub mod icons;

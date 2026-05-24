@@ -28,6 +28,13 @@ pub struct Session {
     pub dpop_pem: String,
     /// Most recent server-issued DPoP nonce (mutated on each response).
     pub dpop_nonce: Option<String>,
+    /// Cached token endpoint URL — populated by `exchange_code` on
+    /// sign-in so `refresh_session` doesn't have to re-fetch the auth
+    /// server metadata on every refresh. Optional so sessions
+    /// persisted by older builds still load (we fall back to
+    /// re-fetching metadata when None).
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
 }
 
 impl Session {

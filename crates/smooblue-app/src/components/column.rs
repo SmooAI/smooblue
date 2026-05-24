@@ -13,16 +13,16 @@
 //! - No jetstream / firehose — pure XRPC polling against the AppView via
 //!   the user's PDS, mirroring what deck.blue does.
 
+use crate::auth_refresh::fresh_client;
 use crate::components::notification_card::NotificationCard;
 use crate::components::post::PostCard;
 use crate::icons;
 use crate::state::{ColumnKind, ColumnSpec};
 use dioxus::prelude::*;
-use smooblue_atproto::{AtClient, FeedItem, Notification, PostView};
+use smooblue_atproto::{FeedItem, Notification, PostView};
 use smooblue_oauth::Session;
 use std::collections::HashMap;
 use std::time::Duration;
-use url::Url;
 
 #[derive(Clone, PartialEq, Default)]
 enum ColumnData {
@@ -80,8 +80,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
         async move {
             let interval = poll_interval(&kind);
             loop {
-                let session_now = session_sig.read().clone();
-                match fetch_once(&kind, session_now).await {
+                match fetch_once(&kind, session_sig).await {
                     Ok(fresh) => {
                         error.set(None);
                         loading.set(false);
@@ -138,7 +137,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
 
 /// One fetch cycle for the column. Returns the freshest page of items;
 /// the caller decides whether to install them or stash them as pending.
-async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<ColumnData, String> {
+async fn fetch_once(
+    kind: &ColumnKind,
+    session_sig: Signal<Option<Session>>,
+) -> Result<ColumnData, String> {
     // Demo mode: canned data with no network.
     if crate::demo::is_active() {
         return Ok(match kind {
@@ -152,14 +154,16 @@ async fn fetch_once(kind: &ColumnKind, session: Option<Session>) -> Result<Colum
             }
         });
     }
-    let Some(s) = session else {
-        return Err("not signed in".into());
-    };
     // OAuth-authenticated calls hit the user's PDS (which proxies app.bsky.*
     // to the AppView with service-auth on our behalf). Hitting the AppView
     // directly with a user token returns 401 AuthMissing.
-    let base = Url::parse(&s.pds).map_err(|e| e.to_string())?;
-    let client = AtClient::new(s, base);
+    //
+    // fresh_client transparently refreshes the access token if it's
+    // expired/expiring so long-running polling loops survive across
+    // the ~2h token TTL without the user getting silently booted.
+    let Some(client) = fresh_client(session_sig).await else {
+        return Err("not signed in".into());
+    };
     match kind {
         ColumnKind::Home => client
             .get_timeline(None, 30)

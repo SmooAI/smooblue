@@ -1,5 +1,6 @@
 //! Single post card.
 
+use crate::auth_refresh::fresh_client;
 use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
@@ -7,9 +8,7 @@ use crate::state::{
 };
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
-use smooblue_atproto::AtClient;
 use smooblue_oauth::Session;
-use url::Url;
 
 #[component]
 pub fn PostCard(post: PostView) -> Element {
@@ -93,7 +92,9 @@ pub fn PostCard(post: PostView) -> Element {
     let server_like_uri_l = server_like_uri.clone();
     let opt_state_l = opt_state.clone();
     let mut toggle_like = move |_evt: MouseEvent| {
-        let Some(sess) = session.read().clone() else { return };
+        // Just need to know we *have* a session here — fresh_client
+        // inside the spawn will re-read + refresh if needed.
+        if session.read().is_none() { return };
         let want_liked = !is_liked;
         let known_like_uri = opt_state_l
             .like_uri
@@ -108,11 +109,7 @@ pub fn PostCard(post: PostView) -> Element {
         let post_uri_owned = post_uri_l.clone();
         let post_cid_owned = post_cid_l.clone();
         spawn(async move {
-            let base = match Url::parse(&sess.pds) {
-                Ok(u) => u,
-                Err(_) => return,
-            };
-            let client = AtClient::new(sess, base);
+            let Some(client) = fresh_client(session).await else { return };
             if want_liked {
                 match client.create_like(&post_uri_owned, &post_cid_owned).await {
                     Ok(rec) => {
@@ -155,7 +152,7 @@ pub fn PostCard(post: PostView) -> Element {
     let server_repost_uri_r = server_repost_uri.clone();
     let opt_state_r = opt_state.clone();
     let mut toggle_repost = move |_evt: MouseEvent| {
-        let Some(sess) = session.read().clone() else { return };
+        if session.read().is_none() { return };
         let want_reposted = !is_reposted;
         let known_repost_uri = opt_state_r
             .repost_uri
@@ -170,11 +167,7 @@ pub fn PostCard(post: PostView) -> Element {
         let post_uri_owned = post_uri_r.clone();
         let post_cid_owned = post_cid_r.clone();
         spawn(async move {
-            let base = match Url::parse(&sess.pds) {
-                Ok(u) => u,
-                Err(_) => return,
-            };
-            let client = AtClient::new(sess, base);
+            let Some(client) = fresh_client(session).await else { return };
             if want_reposted {
                 match client.create_repost(&post_uri_owned, &post_cid_owned).await {
                     Ok(rec) => {

@@ -262,6 +262,7 @@ impl OAuthClient {
                     expires_at: now + parsed.expires_in,
                     dpop_pem: pem,
                     dpop_nonce: server_nonce,
+                    token_endpoint: Some(auth.token_endpoint.clone()),
                 });
             }
 

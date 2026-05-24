@@ -18,6 +18,7 @@ pub mod dpop;
 pub mod loopback;
 pub mod metadata;
 pub mod pkce;
+pub mod refresh;
 pub mod session;
 
 mod client;
@@ -25,4 +26,5 @@ mod error;
 
 pub use client::{OAuthClient, OAuthClientConfig};
 pub use error::OAuthError;
+pub use refresh::refresh_session;
 pub use session::Session;

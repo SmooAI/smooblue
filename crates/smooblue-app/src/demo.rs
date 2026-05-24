@@ -38,6 +38,7 @@ pub fn fake_session() -> Session {
         expires_at: chrono::Utc::now().timestamp() + 86_400,
         dpop_pem: k.to_pkcs8_pem().unwrap_or_default(),
         dpop_nonce: None,
+            token_endpoint: None,
     }
 }
 

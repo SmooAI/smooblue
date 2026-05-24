@@ -18,14 +18,14 @@
 //! in feed columns. Clicking a post inside the thread re-focuses to
 //! that post (mutates the same `ThreadFocus` signal).
 
+use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
 use crate::demo;
 use crate::icons;
 use crate::state::ThreadFocus;
 use dioxus::prelude::*;
-use smooblue_atproto::{AtClient, ThreadView};
+use smooblue_atproto::ThreadView;
 use smooblue_oauth::Session;
-use url::Url;
 
 /// Indent (px) per reply depth — cumulative left-padding on the
 /// replies tree.
@@ -62,11 +62,9 @@ pub fn ThreadSheet() -> Element {
             if demo::is_active() {
                 return Ok(demo::thread_for(&uri));
             }
-            let Some(sess) = session_sig.read().clone() else {
+            let Some(client) = fresh_client(session_sig).await else {
                 return Err("not signed in".into());
             };
-            let base = Url::parse(&sess.pds).map_err(|e| e.to_string())?;
-            let client = AtClient::new(sess, base);
             client
                 .get_post_thread(&uri, DEPTH, PARENT_HEIGHT)
                 .await

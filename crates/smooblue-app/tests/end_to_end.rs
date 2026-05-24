@@ -29,6 +29,7 @@ fn session_for(server: &MockServer) -> Session {
         expires_at: chrono::Utc::now().timestamp() + 3600,
         dpop_pem: key.to_pkcs8_pem().unwrap(),
         dpop_nonce: None,
+            token_endpoint: None,
     }
 }
 

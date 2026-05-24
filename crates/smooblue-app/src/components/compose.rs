@@ -19,19 +19,17 @@
 //!   pearls) for Apple Vision OCR + Smoo LLM auto-alt seeding.
 
 use crate::alt_text::{merge_descriptions, AltSuggestion, AltTextProvider, SmooLlmAltText};
+use crate::auth_refresh::fresh_client;
 use crate::icons;
 use crate::image_prep::{prepare_from_path, PreparedImage};
 use crate::ocr;
 use crate::state::ComposeContext;
 use dioxus::prelude::*;
-use smooblue_atproto::{
-    AspectRatio, AtClient, BlobRef, PostImage, ReplyRef, StrongRef,
-};
+use smooblue_atproto::{AspectRatio, BlobRef, PostImage, ReplyRef, StrongRef};
 use smooblue_oauth::Session;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use url::Url;
 
 /// Bluesky's hard post length cap (graphemes, but we count chars as a proxy).
 pub const MAX_LEN: usize = 300;
@@ -209,16 +207,11 @@ pub fn ComposeSheet() -> Element {
                 w.open = false;
                 return;
             }
-            let s = sess.unwrap();
-            let base = match Url::parse(&s.pds) {
-                Ok(u) => u,
-                Err(e) => {
-                    posting.set(false);
-                    error.set(Some(format!("Bad PDS URL: {e}")));
-                    return;
-                }
+            let Some(client) = fresh_client(session).await else {
+                posting.set(false);
+                error.set(Some("Session expired — please sign in again.".into()));
+                return;
             };
-            let client = AtClient::new(s, base);
 
             // Upload each prepared image, building up a PostImage list.
             // We stop at the first failure so the user doesn't get a
