@@ -528,32 +528,85 @@ a {
 }
 
 /* Compose-specific overrides on top of the shared `.input` / `.input--lg`
-   classes — just a taller min-height since the compose box is the main
-   action on the sheet. */
+   classes. */
+.compose__sheet {
+    width: min(560px, 92vw);
+    padding: 22px 22px 18px;
+}
+
 .compose__textarea {
-    min-height: 140px;
+    min-height: 180px;
+    line-height: 1.45;
+    font-size: 15px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+    resize: vertical;
+}
+
+.compose__textarea:focus {
+    outline: none;
+    border-color: var(--color-smooai-orange);
+    box-shadow: 0 0 0 3px rgba(244, 159, 10, 0.18);
+}
+
+.compose__textarea--over {
+    border-color: var(--color-smooai-red) !important;
+    box-shadow: 0 0 0 3px rgba(255, 107, 108, 0.18) !important;
 }
 
 .compose__bar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-top: 12px;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.compose__ring {
+    flex: 0 0 auto;
+    display: block;
+    transition: opacity 140ms ease;
 }
 
 .compose__counter {
     color: var(--muted-foreground);
     font-size: 13px;
     font-variant-numeric: tabular-nums;
+    min-width: 26px;
 }
 
 .compose__counter--over {
     color: var(--color-smooai-red);
-    font-weight: 600;
+    font-weight: 700;
+}
+
+.compose__hint {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
+    margin-left: 2px;
+    user-select: none;
 }
 
 .compose__post {
     margin-left: auto;
+    min-width: 96px;
+    background: var(--gradient-brand);
+    box-shadow: 0 4px 14px rgba(244, 159, 10, 0.35);
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.compose__post:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(244, 159, 10, 0.45);
+}
+
+.compose__post:disabled {
+    opacity: 0.55;
+    background: var(--muted);
+    box-shadow: none;
+    cursor: not-allowed;
 }
 
 .compose__error {
