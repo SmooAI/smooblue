@@ -33,6 +33,10 @@ pub enum ColumnKind {
     Feed {
         uri: String,
     },
+    /// `app.bsky.actor.getSuggestions` — personalized list of actors
+    /// the AppView thinks the viewer might want to follow. Renders as
+    /// follow-row cards rather than posts.
+    Suggestions,
 }
 
 impl ColumnSpec {
@@ -71,6 +75,14 @@ impl ColumnSpec {
             id: format!("search:{}", q),
             kind: ColumnKind::Search { query: q.clone() },
             title: format!("Search · {q}"),
+        }
+    }
+
+    pub fn suggestions() -> Self {
+        Self {
+            id: "suggestions".into(),
+            kind: ColumnKind::Suggestions,
+            title: "Suggested follows".into(),
         }
     }
 

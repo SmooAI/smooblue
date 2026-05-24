@@ -46,6 +46,7 @@ pub fn Sidebar(search_open: Signal<bool>) -> Element {
     let add_home = move |_| add_column_unique(&mut cols, ColumnSpec::home());
     let add_notif = move |_| add_column_unique(&mut cols, ColumnSpec::notifications());
     let add_discover = move |_| add_column_unique(&mut cols, ColumnSpec::discover());
+    let add_suggestions = move |_| add_column_unique(&mut cols, ColumnSpec::suggestions());
     let open_search = move |_| search_open.set(true);
     let add_self_profile = move |_| {
         if let Some(s) = session.read().clone() {
@@ -70,6 +71,7 @@ pub fn Sidebar(search_open: Signal<bool>) -> Element {
             RailBtn { label: "Search", active: false, kind: RailKind::Search, badge: 0, onclick: open_search }
             RailBtn { label: "Notifications", active: false, kind: RailKind::Bell, badge: unread_count, onclick: add_notif }
             RailBtn { label: "Discover", active: false, kind: RailKind::Compass, badge: 0, onclick: add_discover }
+            RailBtn { label: "Suggested follows", active: false, kind: RailKind::Sparkles, badge: 0, onclick: add_suggestions }
             div { class: "rail__divider" }
             RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_search }
             div { class: "rail__spacer" }
@@ -85,6 +87,7 @@ pub enum RailKind {
     Search,
     Bell,
     Compass,
+    Sparkles,
     Add,
     Profile,
     Settings,
@@ -120,6 +123,7 @@ fn RailBtn(
                 RailKind::Search => rsx! { icons::Search { size: icons::Size::Md } },
                 RailKind::Bell => rsx! { icons::Bell { size: icons::Size::Md } },
                 RailKind::Compass => rsx! { icons::Compass { size: icons::Size::Md } },
+                RailKind::Sparkles => rsx! { icons::Sparkles { size: icons::Size::Md } },
                 RailKind::Add => rsx! { icons::Plus { size: icons::Size::Md } },
                 RailKind::Profile => rsx! { icons::User { size: icons::Size::Md } },
                 RailKind::Settings => rsx! { icons::Settings { size: icons::Size::Md } },

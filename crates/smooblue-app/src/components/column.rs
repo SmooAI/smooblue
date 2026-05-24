@@ -19,7 +19,9 @@ use crate::components::post::PostCard;
 use crate::icons;
 use crate::state::{ColumnDrag, ColumnKind, ColumnSpec};
 use dioxus::prelude::*;
-use smooblue_atproto::{group_notifications, FeedItem, Notification, NotificationGroup, PostView};
+use smooblue_atproto::{
+    group_notifications, ActorProfile, FeedItem, Notification, NotificationGroup, PostView,
+};
 use smooblue_oauth::Session;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -39,6 +41,9 @@ enum ColumnData {
         groups: Vec<NotificationGroup>,
         subjects: HashMap<String, PostView>,
     },
+    /// List of actors the AppView suggests the viewer follows. Each
+    /// is rendered as a follow-row card with bio + Follow button.
+    Suggestions(Vec<ActorProfile>),
 }
 
 impl ColumnData {
@@ -47,6 +52,7 @@ impl ColumnData {
             Self::Empty => true,
             Self::Posts(p) => p.is_empty(),
             Self::Notifications { groups, .. } => groups.is_empty(),
+            Self::Suggestions(actors) => actors.is_empty(),
         }
     }
 }
@@ -60,6 +66,9 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         ColumnKind::Search { .. } => Duration::from_secs(30),
         ColumnKind::Feed { .. } => Duration::from_secs(25),
         ColumnKind::AuthorFeed { .. } => Duration::from_secs(45),
+        // Suggestions are personalized; refresh slowly — the user
+        // doesn't want their suggested-follows list flickering.
+        ColumnKind::Suggestions => Duration::from_secs(300),
     }
 }
 
@@ -149,6 +158,11 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             }
                         }
                     },
+                    (ColumnData::Suggestions(actors), _, _) => rsx! {
+                        for a in actors.iter() {
+                            crate::components::suggestion::SuggestionRow { key: "{a.did}", actor: a.clone() }
+                        }
+                    },
                     _ => rsx! {},
                 }
                 if let Some(msg) = &*error.read() {
@@ -182,6 +196,7 @@ async fn fetch_once(
                 ColumnData::Notifications { groups, subjects }
             }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
+            ColumnKind::Suggestions => ColumnData::Suggestions(crate::demo::suggestions()),
             ColumnKind::Home | ColumnKind::Search { .. } | ColumnKind::Feed { .. } => {
                 ColumnData::Posts(crate::demo::home_feed())
             }
@@ -240,6 +255,11 @@ async fn fetch_once(
             .get_feed(uri, None, 30)
             .await
             .map(|r| ColumnData::Posts(r.feed))
+            .map_err(|e| e.to_string()),
+        ColumnKind::Suggestions => client
+            .get_suggestions(None, 25)
+            .await
+            .map(|r| ColumnData::Suggestions(r.actors))
             .map_err(|e| e.to_string()),
     }
 }
@@ -365,6 +385,7 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
                     ColumnKind::Search { .. } => rsx! { icons::Search { size: icons::Size::Sm } },
                     ColumnKind::AuthorFeed { .. } => rsx! { icons::User { size: icons::Size::Sm } },
                     ColumnKind::Feed { .. } => rsx! { icons::Compass { size: icons::Size::Sm } },
+                    ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
                     ColumnKind::Home => rsx! { icons::Home { size: icons::Size::Sm } },
                 }
             }

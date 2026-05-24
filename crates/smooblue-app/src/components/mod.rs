@@ -8,4 +8,5 @@ pub mod post;
 pub mod profile;
 pub mod search_sheet;
 pub mod sidebar;
+pub mod suggestion;
 pub mod thread;

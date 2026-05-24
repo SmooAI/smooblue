@@ -23,7 +23,7 @@ pub use feed::{
     ActorProfile, ActorViewerState, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind,
     EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FeedItem, FeedResponse, GetPostThreadResponse,
     KnownFollowersResponse, LikeView, LikesResponse, PostAuthor, PostRecord, PostView,
-    PostViewerState, QuotesResponse, RepostedByResponse, ThreadView,
+    PostViewerState, QuotesResponse, RepostedByResponse, SuggestionsResponse, ThreadView,
 };
 pub use notifications::{
     group_notifications, Notification, NotificationGroup, NotificationsResponse,

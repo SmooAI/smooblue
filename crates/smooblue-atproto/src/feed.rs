@@ -220,6 +220,19 @@ pub struct EmbedAspectRatio {
     pub height: u32,
 }
 
+/// `app.bsky.actor.getSuggestions` response — personalized list of
+/// actors the AppView thinks the viewer might want to follow.
+/// `ActorProfile` (the detailed view) is what the AppView returns,
+/// so this carries description + counts + viewer state for the
+/// Follow button to render correctly.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SuggestionsResponse {
+    #[serde(default)]
+    pub actors: Vec<ActorProfile>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
 /// Paginated list of actors who liked a post — backs the "tap heart
 /// count → see who liked" modal. The `Like` view is the like *record*
 /// (with createdAt etc.), but the only field we actually render is

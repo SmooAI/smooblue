@@ -727,6 +727,43 @@ pub fn engagement_for(kind: &crate::state::Engagement) -> crate::components::eng
     }
 }
 
+/// Demo: a handful of suggested actors for the Suggestions column,
+/// shaped like the real getSuggestions response so the
+/// SuggestionRow renders end-to-end (avatar + name + handle + bio +
+/// Follow button) without network.
+pub fn suggestions() -> Vec<ActorProfile> {
+    let make = |handle: &str, display: &str, seed: &str, bio: &str| ActorProfile {
+        did: format!("did:plc:demo-suggest-{handle}"),
+        handle: handle.to_string(),
+        display_name: Some(display.to_string()),
+        description: Some(bio.to_string()),
+        avatar: Some(format!("https://picsum.photos/seed/{seed}/80")),
+        banner: None,
+        followers_count: Some(0),
+        follows_count: Some(0),
+        posts_count: Some(0),
+        viewer: Some(ActorViewerState::default()),
+    };
+    vec![
+        make("paul.frazee.com", "Paul Frazee", "paul",
+             "ATproto core — bsky.app eng. Toolsmith."),
+        make("emily.bsky.team", "Emily L", "emily",
+             "Bluesky engineer working on the social graph + moderation."),
+        make("rsms.me", "Rasmus Andersson", "rasmus",
+             "Designer, programmer. Inter font, Figma alumni. Currently building stuff."),
+        make("jay.bsky.team", "Jay Graber", "jay",
+             "Bluesky CEO. Federated social since before it was cool."),
+        make("dan.abramov.fyi", "Dan Abramov", "dan",
+             "React, Redux. Currently independent. Trying to understand things."),
+        make("simonw.bsky.social", "Simon Willison", "simon",
+             "Co-creator of Django, creator of Datasette + sqlite-utils. Lots of writing about LLMs."),
+        make("rustlang.bsky.social", "Rust", "rustlang",
+             "The Rust Programming Language. github.com/rust-lang."),
+        make("dioxuslabs.com", "Dioxus", "dioxus",
+             "React-style Rust GUI. Web + desktop + mobile + LiveView from one codebase."),
+    ]
+}
+
 /// Demo: known-followers list ("mutuals") for the profile sheet.
 /// Used when SMOOBLUE_DEMO=1 — returns a handful of fake mutuals so
 /// the social-proof row renders without network.

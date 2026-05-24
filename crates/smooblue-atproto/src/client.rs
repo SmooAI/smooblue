@@ -302,6 +302,26 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.actor.getSuggestions` — a personalized list of
+    /// actors the AppView thinks the viewer might want to follow.
+    /// Backs the "Suggested follows" column.
+    pub async fn get_suggestions(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::SuggestionsResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.actor.getSuggestions")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.graph.getKnownFollowers` — actors followed by the
     /// signed-in viewer who also follow the given subject. The
     /// "mutuals" set, used for the "Followed by alice, bob and N
