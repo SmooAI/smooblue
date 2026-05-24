@@ -230,9 +230,12 @@ pub fn home_feed() -> Vec<FeedItem> {
             &m(280),
             3, 9, 41,
             Embed::Known(EmbedKind::Video {
-                playlist: "https://cdn.bsky.app/v1/playlist/did:plc:vid/3kr/playlist.m3u8".to_string(),
+                // Mux's public test HLS stream — small (256×144), 60s,
+                // CORS-allowed, stable. Lets demo mode actually play
+                // instead of poking at a fake bsky CDN URL.
+                playlist: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8".to_string(),
                 thumbnail: Some(img("vid-thumb")),
-                aspect_ratio: Some(smooblue_atproto::EmbedAspectRatio { width: 1920, height: 1080 }),
+                aspect_ratio: Some(smooblue_atproto::EmbedAspectRatio { width: 16, height: 9 }),
             }),
         ),
     ]

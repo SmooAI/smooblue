@@ -13,7 +13,6 @@
 //!
 //! Unknown / forward-compat embeds render nothing (silent).
 
-use crate::icons;
 use dioxus::prelude::*;
 use smooblue_atproto::{
     Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedMedia, EmbedRecordView,
@@ -40,8 +39,12 @@ fn EmbedKindView(kind: EmbedKind) -> Element {
                 QuoteCard { record: record.record }
             }
         },
-        EmbedKind::Video { thumbnail, aspect_ratio, .. } => rsx! {
-            VideoPlaceholder { thumb: thumbnail, aspect_ratio: aspect_ratio.map(|a| (a.width, a.height)) }
+        EmbedKind::Video { playlist, thumbnail, aspect_ratio } => rsx! {
+            VideoPlayer {
+                playlist,
+                thumb: thumbnail,
+                aspect_ratio: aspect_ratio.map(|a| (a.width, a.height)),
+            }
         },
     }
 }
@@ -54,8 +57,12 @@ fn MediaView(media: EmbedMedia) -> Element {
     match media {
         EmbedMedia::Images { images } => rsx! { ImageGrid { images } },
         EmbedMedia::External { external } => rsx! { LinkCard { ext: external } },
-        EmbedMedia::Video { thumbnail, aspect_ratio, .. } => rsx! {
-            VideoPlaceholder { thumb: thumbnail, aspect_ratio: aspect_ratio.map(|a| (a.width, a.height)) }
+        EmbedMedia::Video { playlist, thumbnail, aspect_ratio } => rsx! {
+            VideoPlayer {
+                playlist,
+                thumb: thumbnail,
+                aspect_ratio: aspect_ratio.map(|a| (a.width, a.height)),
+            }
         },
     }
 }
@@ -204,24 +211,55 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
     }
 }
 
-/// Video placeholder — thumbnail with a play-button overlay. Real HLS
-/// playback is a separate pearl (would need a video element + HLS.js
-/// or a native AVPlayer bridge on macOS). For now the click opens the
-/// post on bsky.app where the user already has working playback.
+/// HLS video player. The Dioxus desktop window embeds WKWebView (via
+/// wry on macOS) which decodes Bluesky's HLS .m3u8 playlists natively
+/// — no hls.js, no native bridge needed. We just render a real
+/// `<video>` element with the playlist URL and let WebKit handle it.
+///
+/// `preload="none"` is load-bearing: feeds with N video posts would
+/// otherwise fan out N concurrent playlist fetches on render, even
+/// for videos the user never scrolls to. With `none` the player sits
+/// at zero network until the user actually clicks the centered play
+/// button (which the browser's native controls show on top of the
+/// poster).
+///
+/// Aspect ratio: we set padding-top so the player's box reserves the
+/// right amount of column height before the video metadata loads.
+/// Without it, the column would jump as videos come in.
+///
+/// Linux fallback: WebKit on Linux (via webkit2gtk) generally also
+/// has HLS via GStreamer, but quality varies by distro. The fallback
+/// is the same UX with the player's `error` event handler swapping
+/// to an "open in browser" affordance — TODO if anyone hits it.
 #[component]
-fn VideoPlaceholder(thumb: Option<String>, aspect_ratio: Option<(u32, u32)>) -> Element {
+fn VideoPlayer(
+    playlist: String,
+    thumb: Option<String>,
+    aspect_ratio: Option<(u32, u32)>,
+) -> Element {
     let (w, h) = aspect_ratio.unwrap_or((16, 9));
+    // Padding-percent trick to reserve aspect-ratio'd space before
+    // the video's intrinsic dimensions are known. (We don't use
+    // `aspect-ratio: w/h` CSS because the embed lives inside a
+    // grid/flex container that can stretch — this idiom is
+    // historically more robust across odd parents.)
     let padding_pct = (h as f32 / w.max(1) as f32) * 100.0;
+    let poster_attr = thumb.clone().unwrap_or_default();
     rsx! {
         div { class: "embed__video",
             style: "padding-top: {padding_pct}%;",
-            if let Some(t) = thumb {
-                img { class: "embed__video-thumb", src: "{t}", alt: "video thumbnail" }
-            } else {
-                div { class: "embed__video-thumb embed__video-thumb--blank" }
-            }
-            div { class: "embed__video-play",
-                icons::Play { size: icons::Size::Lg }
+            // playsinline + referrerpolicy aren't in dioxus's typed
+            // attribute set for <video>, but the HTML element honors
+            // them — pass via raw `key: "value"` attribute syntax.
+            video {
+                class: "embed__video-el",
+                src: "{playlist}",
+                poster: "{poster_attr}",
+                controls: true,
+                preload: "none",
+                crossorigin: "anonymous",
+                "playsinline": "true",
+                "referrerpolicy": "no-referrer",
             }
         }
     }
