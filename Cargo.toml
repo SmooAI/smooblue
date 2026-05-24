@@ -72,6 +72,12 @@ jsonwebtoken = "9"
 keyring = "3"
 directories = "5"
 
+# Synchronization — parking_lot's Mutex skips std's poison concept,
+# which means we don't have to `.lock().unwrap()` everywhere and risk
+# a panic-in-flight poisoning the lock forever. Used by AtClient for
+# its shared session state.
+parking_lot = "0.12"
+
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 

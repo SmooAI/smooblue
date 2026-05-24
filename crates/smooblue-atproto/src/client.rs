@@ -2,10 +2,11 @@
 
 use crate::error::AtError;
 use crate::feed::FeedResponse;
+use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use smooblue_oauth::Session;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
@@ -126,7 +127,7 @@ impl AtClient {
 
     /// Read-only access to the current session (e.g., DID for display).
     pub fn session(&self) -> Session {
-        self.session.lock().unwrap().clone()
+        self.session.lock().clone()
     }
 
     /// `app.bsky.feed.getTimeline` — the Home column feed.
@@ -356,7 +357,7 @@ impl AtClient {
         reply: Option<&ReplyRef>,
         images: &[PostImage],
     ) -> Result<CreatedRecord, AtError> {
-        let did = self.session.lock().unwrap().did.clone();
+        let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let mut record = serde_json::json!({
             "$type": "app.bsky.feed.post",
@@ -408,7 +409,7 @@ impl AtClient {
     /// Create a like (`app.bsky.feed.like`). Returns the new record's URI so
     /// the caller can pass it back to [`Self::delete_record`] to unlike.
     pub async fn create_like(&self, post_uri: &str, post_cid: &str) -> Result<CreatedRecord, AtError> {
-        let did = self.session.lock().unwrap().did.clone();
+        let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let body = serde_json::json!({
             "repo": did,
@@ -430,7 +431,7 @@ impl AtClient {
     /// [`Self::delete_record`] to unfollow. `subject_did` is the DID
     /// of the actor being followed.
     pub async fn create_follow(&self, subject_did: &str) -> Result<CreatedRecord, AtError> {
-        let did = self.session.lock().unwrap().did.clone();
+        let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let body = serde_json::json!({
             "repo": did,
@@ -449,7 +450,7 @@ impl AtClient {
 
     /// Create a repost (`app.bsky.feed.repost`). Symmetric with [`Self::create_like`].
     pub async fn create_repost(&self, post_uri: &str, post_cid: &str) -> Result<CreatedRecord, AtError> {
-        let did = self.session.lock().unwrap().did.clone();
+        let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
         let body = serde_json::json!({
             "repo": did,
@@ -485,7 +486,7 @@ impl AtClient {
     /// Build a URL against the session's PDS (writes must go to the PDS,
     /// not the AppView).
     fn session_pds_url(&self, path: &str) -> Result<Url, url::ParseError> {
-        let pds = self.session.lock().unwrap().pds.clone();
+        let pds = self.session.lock().pds.clone();
         Url::parse(&pds)?.join(path)
     }
 
@@ -498,10 +499,10 @@ impl AtClient {
         bytes: Vec<u8>,
         content_type: &str,
     ) -> Result<T, AtError> {
-        let mut nonce = self.session.lock().unwrap().dpop_nonce.clone();
+        let mut nonce = self.session.lock().dpop_nonce.clone();
         for _ in 0..2 {
             let (access, dpop_key) = {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock();
                 if s.is_expired() {
                     return Err(AtError::SessionExpired);
                 }
@@ -525,13 +526,19 @@ impl AtClient {
                 .and_then(|h| h.to_str().ok())
                 .map(String::from);
             if let Some(n) = &server_nonce {
-                self.session.lock().unwrap().dpop_nonce = Some(n.clone());
+                self.session.lock().dpop_nonce = Some(n.clone());
             }
             if status.is_success() {
                 let body = resp.text().await?;
                 return serde_json::from_str(&body).map_err(AtError::from);
             }
-            let resp_body = resp.text().await.unwrap_or_default();
+            let resp_body = match resp.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = %e, status = %status, "smooblue: failed reading response body");
+                    String::new()
+                }
+            };
             if (status == 401 || status == 400) && resp_body.contains("use_dpop_nonce") {
                 if server_nonce.is_some() {
                     nonce = server_nonce;
@@ -552,10 +559,10 @@ impl AtClient {
         url: &Url,
         body: &serde_json::Value,
     ) -> Result<T, AtError> {
-        let mut nonce = self.session.lock().unwrap().dpop_nonce.clone();
+        let mut nonce = self.session.lock().dpop_nonce.clone();
         for _ in 0..2 {
             let (access, dpop_key) = {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock();
                 if s.is_expired() {
                     return Err(AtError::SessionExpired);
                 }
@@ -578,13 +585,19 @@ impl AtClient {
                 .and_then(|h| h.to_str().ok())
                 .map(String::from);
             if let Some(n) = &server_nonce {
-                self.session.lock().unwrap().dpop_nonce = Some(n.clone());
+                self.session.lock().dpop_nonce = Some(n.clone());
             }
             if status.is_success() {
                 let body = resp.text().await?;
                 return serde_json::from_str(&body).map_err(AtError::from);
             }
-            let resp_body = resp.text().await.unwrap_or_default();
+            let resp_body = match resp.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = %e, status = %status, "smooblue: failed reading response body");
+                    String::new()
+                }
+            };
             if (status == 401 || status == 400) && resp_body.contains("use_dpop_nonce") {
                 if server_nonce.is_some() {
                     nonce = server_nonce;
@@ -601,11 +614,11 @@ impl AtClient {
     }
 
     async fn get_json<T: DeserializeOwned>(&self, url: &Url) -> Result<T, AtError> {
-        let mut nonce = self.session.lock().unwrap().dpop_nonce.clone();
+        let mut nonce = self.session.lock().dpop_nonce.clone();
 
         for _ in 0..2 {
             let (access, dpop_key) = {
-                let s = self.session.lock().unwrap();
+                let s = self.session.lock();
                 if s.is_expired() {
                     return Err(AtError::SessionExpired);
                 }
@@ -632,7 +645,7 @@ impl AtClient {
                 .and_then(|h| h.to_str().ok())
                 .map(String::from);
             if let Some(n) = &server_nonce {
-                self.session.lock().unwrap().dpop_nonce = Some(n.clone());
+                self.session.lock().dpop_nonce = Some(n.clone());
             }
 
             if status.is_success() {
@@ -640,7 +653,13 @@ impl AtClient {
                 return serde_json::from_str(&body).map_err(AtError::from);
             }
 
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(error = %e, status = %status, "smooblue: failed reading response body");
+                    String::new()
+                }
+            };
             if (status == 401 || status == 400) && body.contains("use_dpop_nonce") {
                 if server_nonce.is_some() {
                     nonce = server_nonce;
