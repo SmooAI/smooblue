@@ -91,8 +91,12 @@ impl OAuthClient {
         let dpop = DpopKey::generate();
         let state = uuid::Uuid::new_v4().to_string();
 
+        // Pass the user-entered handle as login_hint (not the DID). Bluesky's
+        // auth server pre-fills its handle input from this, so the user lands
+        // on a login page with their handle already populated instead of
+        // having to retype it.
         let par = self
-            .push_authorization_request(&auth, &pkce, &dpop, &state, &redirect_uri, &identity.did)
+            .push_authorization_request(&auth, &pkce, &dpop, &state, &redirect_uri, handle)
             .await?;
 
         // Step 4: browser + callback
@@ -139,7 +143,7 @@ impl OAuthClient {
         dpop: &DpopKey,
         state: &str,
         redirect_uri: &str,
-        did: &str,
+        login_hint: &str,
     ) -> Result<ParResponse, OAuthError> {
         let mut nonce: Option<String> = None;
 
@@ -159,7 +163,7 @@ impl OAuthClient {
                 ("code_challenge_method", pkce.method()),
                 ("scope", &self.cfg.scopes.join(" ")),
                 ("state", state),
-                ("login_hint", did),
+                ("login_hint", login_hint),
             ];
 
             let resp = self

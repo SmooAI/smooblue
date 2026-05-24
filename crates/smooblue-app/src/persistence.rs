@@ -3,12 +3,16 @@
 //! - Session (which includes the DPoP PKCS8 PEM) → OS keyring under
 //!   service `ai.smoo.smooblue`, account `oauth-session`.
 //! - Column layout → JSON in the app's config dir.
+//! - Last handle → plaintext in the app's config dir. Non-secret;
+//!   used to pre-fill the login input so users don't retype after
+//!   sign-out.
 
 use smooblue_oauth::Session;
 
 const KEYRING_SERVICE: &str = "ai.smoo.smooblue";
 const KEYRING_ACCOUNT: &str = "oauth-session";
 const COLUMNS_FILE: &str = "columns.json";
+const LAST_HANDLE_FILE: &str = "last_handle.txt";
 
 /// Persist the OAuth session.
 pub fn save_session(session: &Session) -> Result<(), String> {
@@ -44,6 +48,23 @@ pub fn load_columns() -> Option<Vec<crate::state::ColumnSpec>> {
     let path = dir.config_dir().join(COLUMNS_FILE);
     let json = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&json).ok()
+}
+
+/// Remember the handle the user signed in with. Plain text, non-secret.
+/// Used to pre-fill the login input after sign-out so they don't retype.
+pub fn save_last_handle(handle: &str) -> Result<(), String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
+        .ok_or_else(|| "no config dir".to_string())?;
+    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
+    let path = dir.config_dir().join(LAST_HANDLE_FILE);
+    std::fs::write(path, handle.trim()).map_err(|e| e.to_string())
+}
+
+pub fn load_last_handle() -> Option<String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")?;
+    let path = dir.config_dir().join(LAST_HANDLE_FILE);
+    let s = std::fs::read_to_string(path).ok()?.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }
 
 #[cfg(test)]

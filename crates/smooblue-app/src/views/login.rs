@@ -15,13 +15,18 @@ use url::Url;
 
 #[component]
 pub fn LoginView() -> Element {
-    let mut handle = use_signal(String::new);
+    let mut handle = use_signal(|| crate::persistence::load_last_handle().unwrap_or_default());
     let mut status = use_signal(|| Status::Idle);
     let mut share_with_smoo = use_signal(|| false);
     let session = use_context::<Signal<Option<Session>>>();
 
     let start_signin = move |_evt: MouseEvent| {
-        let entered = handle.read().trim().to_string();
+        // Strip a leading @ in case the user types "@alice.bsky.social".
+        let entered = handle
+            .read()
+            .trim()
+            .trim_start_matches('@')
+            .to_string();
         if entered.is_empty() {
             status.set(Status::Error(
                 "Enter your handle (e.g., alice.bsky.social)".into(),
@@ -44,6 +49,8 @@ pub fn LoginView() -> Element {
                         )));
                         return;
                     }
+                    // Remember handle so the next login pre-fills.
+                    let _ = crate::persistence::save_last_handle(&entered);
                     // Opt-in CRM sync. Non-blocking — if it fails, the user is
                     // still signed in; we just log + show a soft toast.
                     if consented {
@@ -70,10 +77,9 @@ pub fn LoginView() -> Element {
                 h1 { class: "login__title login__title--wordmark",
                     dangerous_inner_html: "{smooblue_theme::LOGO_HORIZONTAL_SVG}",
                 }
-                p { class: "login__sub", "Sign in with your Bluesky handle" }
                 input {
                     class: "input input--lg login__input",
-                    placeholder: "alice.bsky.social",
+                    placeholder: "@you.bsky.social",
                     autofocus: true,
                     value: "{handle}",
                     oninput: move |e| handle.set(e.value()),
