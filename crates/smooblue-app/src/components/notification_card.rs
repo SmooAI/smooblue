@@ -5,7 +5,15 @@
 //! subject is YOUR post (so you can see WHICH post was liked). For
 //! replies and mentions, the subject is THEIR post (so you can read
 //! what they said).
+//!
+//! The subject quote renders the full text (no truncation) AND any
+//! embed the subject post carries — if your post had an image, the
+//! image shows; if the reply quoted another post, that quote nests
+//! one level. Nesting stops there (QuoteCard inside embed.rs only
+//! shallow-renders nested embeds), so a thread of quotes-of-quotes
+//! doesn't run away.
 
+use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::Tick;
 use dioxus::prelude::*;
@@ -80,10 +88,10 @@ pub fn NotificationCard(notif: Notification, subject: Option<PostView>) -> Eleme
 #[component]
 fn SubjectQuote(post: PostView, reason: String) -> Element {
     let text = post.record.text.clone();
-    if text.trim().is_empty() {
-        // Image-only or otherwise text-less post — skip rendering so
-        // we don't show an empty quote block. (Rich-media renderer
-        // will fill this in via a follow-up pearl.)
+    let embed = post.embed.clone();
+    // Skip the whole block only if there's NEITHER text NOR an embed —
+    // an image-only post still deserves rendering via the embed view.
+    if text.trim().is_empty() && embed.is_none() {
         return rsx! { Fragment {} };
     }
     let is_inbound = matches!(reason.as_str(), "reply" | "mention" | "quote");
@@ -94,7 +102,19 @@ fn SubjectQuote(post: PostView, reason: String) -> Element {
     };
     rsx! {
         div { class: "{class}",
-            p { class: "notif__quote-text", "{text}" }
+            if !text.is_empty() {
+                p { class: "notif__quote-text", "{text}" }
+            }
+            // Render the subject's own embed — images, link cards, and
+            // (most usefully) nested quotes show inline. EmbedView's
+            // QuoteCard shallow-renders, so a quote-of-a-quote-of-a-quote
+            // collapses to "quote of (quote with text)" rather than
+            // an infinite tower.
+            if let Some(e) = embed {
+                div { class: "notif__quote-embed",
+                    EmbedView { embed: e }
+                }
+            }
         }
     }
 }

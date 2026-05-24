@@ -165,3 +165,9 @@ pub fn Sparkles(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdSparkles } }
 }
+
+#[component]
+pub fn Play(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdPlay } }
+}

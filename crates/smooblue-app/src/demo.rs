@@ -10,7 +10,8 @@
 //! what we want for demos, screenshots, and UI screen-recording.
 
 use smooblue_atproto::feed::{
-    Embed, EmbedImage, EmbedKind, FeedItem, PostAuthor, PostRecord, PostView,
+    Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView, FeedItem, PostAuthor,
+    PostRecord, PostView,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -131,6 +132,108 @@ pub fn home_feed() -> Vec<FeedItem> {
             11,
             48,
         ),
+        // ── Rich-media exercise — one of each embed flavor so the
+        // renderer's variants all get on-screen during demo screenshots.
+        item_with_embed(
+            "photo.bsky.social",
+            "Photographer",
+            Some("https://picsum.photos/seed/photog/80"),
+            "Four-up grid from yesterday's walk. The 2x2 layout matches Bluesky's exactly.",
+            &m(45),
+            3, 7, 22,
+            Embed::Known(EmbedKind::Images {
+                images: vec![
+                    embed_image(&img("wal1"), "Sunset over the bay"),
+                    embed_image(&img("wal2"), "Mossy stone path"),
+                    embed_image(&img("wal3"), "Birds on a wire"),
+                    embed_image(&img("wal4"), "Coffee on a bench"),
+                ],
+            }),
+        ),
+        item_with_embed(
+            "duo.bsky.social",
+            "Duo",
+            Some("https://picsum.photos/seed/duo/80"),
+            "Side-by-side before/after — Apple Vision OCR vs the LLM scene description on the same image.",
+            &m(72),
+            5, 18, 84,
+            Embed::Known(EmbedKind::Images {
+                images: vec![
+                    embed_image(&img("ocr-before"), "OCR result with the literal text"),
+                    embed_image(&img("ocr-after"), "LLM description of the same image"),
+                ],
+            }),
+        ),
+        item_with_embed(
+            "triptych.bsky.social",
+            "Triptych",
+            Some("https://picsum.photos/seed/trip/80"),
+            "Three frames: tall left, two stacked on the right. Bluesky's 3-up layout in the wild.",
+            &m(110),
+            2, 4, 19,
+            Embed::Known(EmbedKind::Images {
+                images: vec![
+                    embed_image(&img("frame-tall"), "Tall portrait"),
+                    embed_image(&img("frame-mid"), "Mid landscape"),
+                    embed_image(&img("frame-bot"), "Detail shot"),
+                ],
+            }),
+        ),
+        item_with_embed(
+            "blog.bsky.social",
+            "Blog",
+            Some("https://picsum.photos/seed/blog/80"),
+            "Wrote up the DPoP nonce loop pattern — gnarly the first time but ~30 lines once you see it.",
+            &m(180),
+            1, 6, 33,
+            Embed::Known(EmbedKind::External {
+                external: EmbedExternal {
+                    uri: "https://smoo.ai/blog/atproto-dpop-rust".to_string(),
+                    title: "ATproto DPoP-bound OAuth in Rust — the missing how-to".to_string(),
+                    description: "Every public bsky example uses opaque tokens. Here's the DPoP-nonce retry loop in 30 lines of reqwest, plus the gotchas we hit shipping smooblue.".to_string(),
+                    thumb: Some(img("ogimage")),
+                },
+            }),
+        ),
+        item_with_embed(
+            "quoter.bsky.social",
+            "Quoter",
+            Some("https://picsum.photos/seed/quoter/80"),
+            "This thread is gold:",
+            &m(220),
+            0, 12, 45,
+            Embed::Known(EmbedKind::Record {
+                record: EmbedRecordView::View {
+                    uri: "at://did:plc:original/app.bsky.feed.post/q1".to_string(),
+                    cid: "bafy-quoted".to_string(),
+                    author: PostAuthor {
+                        did: "did:plc:original".to_string(),
+                        handle: "original.bsky.social".to_string(),
+                        display_name: Some("Original Poster".to_string()),
+                        avatar: Some("https://picsum.photos/seed/og/80".to_string()),
+                    },
+                    value: PostRecord {
+                        text: "The thing nobody tells you about open-source desktop clients is that the build pipeline IS the product. Get cross-compilation + auto-update + signing right and you have a chance; get any one wrong and nobody installs.".to_string(),
+                        created_at: Some(m(240)),
+                    },
+                    indexed_at: Some(m(240)),
+                    embeds: Vec::new(),
+                },
+            }),
+        ),
+        item_with_embed(
+            "videoer.bsky.social",
+            "Videoer",
+            Some("https://picsum.photos/seed/vid/80"),
+            "Quick screen-cap of the alt-text auto-fill in action.",
+            &m(280),
+            3, 9, 41,
+            Embed::Known(EmbedKind::Video {
+                playlist: "https://cdn.bsky.app/v1/playlist/did:plc:vid/3kr/playlist.m3u8".to_string(),
+                thumbnail: Some(img("vid-thumb")),
+                aspect_ratio: Some(smooblue_atproto::EmbedAspectRatio { width: 1920, height: 1080 }),
+            }),
+        ),
     ]
 }
 
@@ -142,12 +245,21 @@ pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::Ha
     let now = chrono::Utc::now();
     let m = |mins: i64| (now - chrono::Duration::minutes(mins)).to_rfc3339();
 
+    let img = |seed: &str| format!("https://picsum.photos/seed/{seed}/600/400");
+
     // Three "your posts" that others engaged with — referenced by
     // multiple like/repost/quote notifications so we exercise the
     // many-likes-on-one-post case the real API hits hard.
-    let your_post_alt = synth_post("you.bsky.social", "You",
+    // The Apple-Vision post has an attached screenshot so the
+    // notifications column shows that the embedded image renders
+    // inside the quoted subject.
+    let mut your_post_alt = synth_post("you.bsky.social", "You",
         "Shipped Apple Vision OCR + LLM scene description in smooblue compose today. Alt text is now one-click. 🎉",
         &m(15));
+    your_post_alt.embed = Some(Embed::Known(EmbedKind::Images {
+        images: vec![embed_image(&img("ocr-shot"), "Screenshot of smooblue compose with the AI-suggested alt text auto-filled in the textarea.")],
+    }));
+
     let your_post_ship = synth_post("you.bsky.social", "You",
         "Made smooblue auto-fill alt text for screenshots and photos. Smoo LLM describes the scene, Apple Vision reads any text.",
         &m(60));
@@ -160,12 +272,28 @@ pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::Ha
     let carol_reply = synth_post("carol.bsky.social", "Carol",
         "This is incredible — finally an alt-text workflow that doesn't feel like a chore. Are you open-sourcing?",
         &m(48));
+
     let devin_mention = synth_post("devinivy.com", "Devin Ivy",
         "@you the DPoP scheme handling in your atproto client is the cleanest Rust impl I've seen. Mind if I link it from the ATproto Rust thread?",
         &m(140));
-    let smoo_quote = synth_post("smoo.ai", "Smoo AI",
+
+    // Smoo's quote notification — their post text + an embedded
+    // record of YOUR post that they quoted. Renders as: outer card
+    // (their text, orange-bordered) → inner dashed-border card
+    // (your quoted post). Exercises the nested-quote case end-to-end.
+    let mut smoo_quote = synth_post("smoo.ai", "Smoo AI",
         "Built on top of our open observability stack — the OCR + LLM merge here is exactly the kind of agent-shaped UX we want everywhere.",
         &m(220));
+    smoo_quote.embed = Some(Embed::Known(EmbedKind::Record {
+        record: EmbedRecordView::View {
+            uri: your_post_ship.uri.clone(),
+            cid: your_post_ship.cid.clone(),
+            author: your_post_ship.author.clone(),
+            value: your_post_ship.record.clone(),
+            indexed_at: your_post_ship.indexed_at.clone(),
+            embeds: Vec::new(),
+        },
+    }));
 
     // Build the notification list.  Each item points at a specific
     // subject URI so the hydration map actually matches.
@@ -292,6 +420,50 @@ fn item(
             like_count: likes,
             viewer: None,
         },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn item_with_embed(
+    handle: &str,
+    display: &str,
+    avatar: Option<&str>,
+    text: &str,
+    ts: &str,
+    replies: i64,
+    reposts: i64,
+    likes: i64,
+    embed: Embed,
+) -> FeedItem {
+    FeedItem {
+        post: PostView {
+            uri: format!("at://did:plc:demo/app.bsky.feed.post/{handle}-{ts}"),
+            cid: "bafy-demo".into(),
+            author: PostAuthor {
+                did: format!("did:plc:demo-{handle}"),
+                handle: handle.to_string(),
+                display_name: Some(display.to_string()),
+                avatar: avatar.map(String::from),
+            },
+            record: PostRecord {
+                text: text.to_string(),
+                created_at: Some(ts.to_string()),
+            },
+            embed: Some(embed),
+            indexed_at: Some(ts.to_string()),
+            reply_count: replies,
+            repost_count: reposts,
+            like_count: likes,
+            viewer: None,
+        },
+    }
+}
+
+fn embed_image(url: &str, alt: &str) -> EmbedImage {
+    EmbedImage {
+        thumb: url.to_string(),
+        fullsize: url.to_string(),
+        alt: alt.to_string(),
     }
 }
 

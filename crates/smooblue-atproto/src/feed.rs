@@ -101,14 +101,93 @@ pub enum EmbedKind {
     #[serde(rename = "app.bsky.embed.external#view")]
     External { external: EmbedExternal },
     #[serde(rename = "app.bsky.embed.record#view")]
-    Record(serde_json::Value),
+    Record { record: EmbedRecordView },
     #[serde(rename = "app.bsky.embed.recordWithMedia#view")]
-    RecordWithMedia(serde_json::Value),
+    RecordWithMedia {
+        record: EmbedRecordWrapper,
+        media: Box<EmbedMedia>,
+    },
     #[serde(rename = "app.bsky.embed.video#view")]
     Video {
         playlist: String,
         thumbnail: Option<String>,
+        #[serde(rename = "aspectRatio", default)]
+        aspect_ratio: Option<EmbedAspectRatio>,
     },
+}
+
+/// Inner-media variant for `recordWithMedia` (a quoted post that
+/// itself has images/video/link attached to the *outer* post). Same
+/// shape as the top-level [`EmbedKind`] but without the record/quote
+/// branches — no triple-nested quotes.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "$type")]
+pub enum EmbedMedia {
+    #[serde(rename = "app.bsky.embed.images#view")]
+    Images {
+        #[serde(default)]
+        images: Vec<EmbedImage>,
+    },
+    #[serde(rename = "app.bsky.embed.external#view")]
+    External { external: EmbedExternal },
+    #[serde(rename = "app.bsky.embed.video#view")]
+    Video {
+        playlist: String,
+        thumbnail: Option<String>,
+        #[serde(rename = "aspectRatio", default)]
+        aspect_ratio: Option<EmbedAspectRatio>,
+    },
+}
+
+/// Wrapper that mirrors `app.bsky.embed.recordWithMedia#view`'s inner
+/// `record` shape: `{ "$type": "app.bsky.embed.record#view", "record": ... }`.
+/// Keeping it as a struct (rather than flattening) so the JSON path
+/// matches the lexicon 1:1.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct EmbedRecordWrapper {
+    pub record: EmbedRecordView,
+}
+
+/// `app.bsky.embed.record#view`'s inner `record` field. The lexicon
+/// has several variants depending on whether the quoted record is a
+/// regular post, deleted, blocked, etc.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "$type")]
+pub enum EmbedRecordView {
+    /// Successfully resolved quoted post.
+    #[serde(rename = "app.bsky.embed.record#viewRecord")]
+    View {
+        uri: String,
+        cid: String,
+        author: PostAuthor,
+        value: PostRecord,
+        #[serde(rename = "indexedAt", default)]
+        indexed_at: Option<String>,
+        /// Embeds nested inside the quoted post. Renderer should
+        /// handle ONLY images / external links here (no double-quotes)
+        /// to avoid runaway nesting.
+        #[serde(default)]
+        embeds: Vec<EmbedKind>,
+    },
+    /// Quoted post was deleted.
+    #[serde(rename = "app.bsky.embed.record#viewNotFound")]
+    NotFound { uri: String },
+    /// Viewer is blocked from seeing the quoted post.
+    #[serde(rename = "app.bsky.embed.record#viewBlocked")]
+    Blocked { uri: String },
+    /// Author detached the quote.
+    #[serde(rename = "app.bsky.embed.record#viewDetached")]
+    Detached { uri: String },
+    /// Unknown variant (forward-compat — e.g. quoted feed generators,
+    /// lists, starter packs). Caller renders a generic fallback.
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct EmbedAspectRatio {
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -244,6 +323,120 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(p.relative_time(), "5m");
+    }
+
+    #[test]
+    fn record_embed_decodes_quoted_post() {
+        let p: PostView = serde_json::from_value(serde_json::json!({
+            "uri": "at://x", "cid": "y",
+            "author": { "did": "d", "handle": "h" },
+            "record": { "text": "look at this quote" },
+            "embed": {
+                "$type": "app.bsky.embed.record#view",
+                "record": {
+                    "$type": "app.bsky.embed.record#viewRecord",
+                    "uri": "at://did:plc:q/app.bsky.feed.post/1",
+                    "cid": "qcid",
+                    "author": { "did": "did:plc:q", "handle": "quoted.bsky.social", "displayName": "Quoted" },
+                    "value": { "text": "the quoted text", "createdAt": "2026-05-01T00:00:00Z" },
+                    "indexedAt": "2026-05-01T00:00:01Z"
+                }
+            }
+        })).unwrap();
+        match p.embed {
+            Some(Embed::Known(EmbedKind::Record { record })) => match record {
+                EmbedRecordView::View { uri, author, value, .. } => {
+                    assert_eq!(uri, "at://did:plc:q/app.bsky.feed.post/1");
+                    assert_eq!(author.handle, "quoted.bsky.social");
+                    assert_eq!(value.text, "the quoted text");
+                }
+                _ => panic!("expected View variant"),
+            },
+            other => panic!("expected Record embed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn record_with_media_decodes_quote_plus_image() {
+        let p: PostView = serde_json::from_value(serde_json::json!({
+            "uri": "at://x", "cid": "y",
+            "author": { "did": "d", "handle": "h" },
+            "record": { "text": "quoted with my own image" },
+            "embed": {
+                "$type": "app.bsky.embed.recordWithMedia#view",
+                "record": {
+                    "record": {
+                        "$type": "app.bsky.embed.record#viewRecord",
+                        "uri": "at://q",
+                        "cid": "qcid",
+                        "author": { "did": "did:plc:q", "handle": "qa.bsky.social" },
+                        "value": { "text": "inside quote" }
+                    }
+                },
+                "media": {
+                    "$type": "app.bsky.embed.images#view",
+                    "images": [{ "thumb": "https://t", "fullsize": "https://f", "alt": "a" }]
+                }
+            }
+        })).unwrap();
+        let Some(Embed::Known(EmbedKind::RecordWithMedia { record, media })) = p.embed else {
+            panic!("expected RecordWithMedia");
+        };
+        let EmbedRecordView::View { value, .. } = record.record else {
+            panic!("expected View variant");
+        };
+        assert_eq!(value.text, "inside quote");
+        match *media {
+            EmbedMedia::Images { images } => {
+                assert_eq!(images.len(), 1);
+                assert_eq!(images[0].fullsize, "https://f");
+            }
+            other => panic!("expected Images media, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn record_embed_not_found_decodes() {
+        let p: PostView = serde_json::from_value(serde_json::json!({
+            "uri": "at://x", "cid": "y",
+            "author": { "did": "d", "handle": "h" },
+            "record": { "text": "this quoted post was deleted" },
+            "embed": {
+                "$type": "app.bsky.embed.record#view",
+                "record": {
+                    "$type": "app.bsky.embed.record#viewNotFound",
+                    "uri": "at://deleted",
+                    "notFound": true
+                }
+            }
+        })).unwrap();
+        let Some(Embed::Known(EmbedKind::Record { record })) = p.embed else {
+            panic!("expected Record embed");
+        };
+        assert!(matches!(record, EmbedRecordView::NotFound { .. }));
+    }
+
+    #[test]
+    fn video_embed_decodes_with_aspect_ratio() {
+        let p: PostView = serde_json::from_value(serde_json::json!({
+            "uri": "at://x", "cid": "y",
+            "author": { "did": "d", "handle": "h" },
+            "record": { "text": "" },
+            "embed": {
+                "$type": "app.bsky.embed.video#view",
+                "playlist": "https://cdn/video.m3u8",
+                "thumbnail": "https://cdn/thumb.jpg",
+                "aspectRatio": { "width": 1920, "height": 1080 }
+            }
+        })).unwrap();
+        let Some(Embed::Known(EmbedKind::Video { playlist, thumbnail, aspect_ratio })) = p.embed else {
+            panic!("expected Video embed");
+        };
+        assert_eq!(playlist, "https://cdn/video.m3u8");
+        assert_eq!(thumbnail.as_deref(), Some("https://cdn/thumb.jpg"));
+        let ar = aspect_ratio.unwrap();
+        assert_eq!(ar.width, 1920);
+        assert_eq!(ar.height, 1080);
     }
 
     #[test]

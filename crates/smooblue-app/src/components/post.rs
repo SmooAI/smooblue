@@ -1,5 +1,6 @@
 //! Single post card.
 
+use crate::components::embed::EmbedView;
 use crate::icons;
 use crate::state::{
     add_column_unique, ColumnSpec, ComposeContext, OptimisticMap, ReplyTarget, Tick,
@@ -62,7 +63,7 @@ pub fn PostCard(post: PostView) -> Element {
     let time = post.relative_time();
     let text = post.record.text.clone();
     let avatar = post.author.avatar.clone();
-    let thumb = post.first_image_thumb().map(String::from);
+    let embed = post.embed.clone();
     let replies = post.reply_count;
     let actor_did = post.author.did.clone();
     let actor_handle = post.author.handle.clone();
@@ -249,9 +250,9 @@ pub fn PostCard(post: PostView) -> Element {
                 if !text.is_empty() {
                     p { class: "post__text", "{text}" }
                 }
-                if let Some(url) = thumb {
+                if let Some(e) = embed {
                     div { class: "post__embed",
-                        img { src: "{url}", alt: "embed" }
+                        EmbedView { embed: e }
                     }
                 }
                 div { class: "post__actions",
