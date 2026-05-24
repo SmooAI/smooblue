@@ -19,7 +19,7 @@ use crate::components::post::PostCard;
 use crate::icons;
 use crate::state::{ColumnDrag, ColumnKind, ColumnSpec};
 use dioxus::prelude::*;
-use smooblue_atproto::{FeedItem, Notification, PostView};
+use smooblue_atproto::{group_notifications, FeedItem, Notification, NotificationGroup, PostView};
 use smooblue_oauth::Session;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -29,12 +29,14 @@ enum ColumnData {
     #[default]
     Empty,
     Posts(Vec<FeedItem>),
-    /// Notifications + a side-table of hydrated subject posts, keyed
-    /// by AT-URI. For a "like" notification, the subject is your post
-    /// they liked; for a "reply", the subject is the reply text.
-    /// Missing entries just render unhydrated.
+    /// Pre-grouped notifications + a side-table of hydrated subject
+    /// posts (keyed by AT-URI). Groups collapse e.g. 20 likes on the
+    /// same post into one card; non-grouping reasons (reply, mention,
+    /// quote) stay as singletons. The hydration map serves both the
+    /// grouped subject (likes/reposts) and the per-item subject
+    /// (replies/mentions/quotes).
     Notifications {
-        items: Vec<Notification>,
+        groups: Vec<NotificationGroup>,
         subjects: HashMap<String, PostView>,
     },
 }
@@ -44,7 +46,7 @@ impl ColumnData {
         match self {
             Self::Empty => true,
             Self::Posts(p) => p.is_empty(),
-            Self::Notifications { items, .. } => items.is_empty(),
+            Self::Notifications { groups, .. } => groups.is_empty(),
         }
     }
 }
@@ -124,12 +126,12 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             PostCard { key: "{item.post.uri}", post: item.post.clone() }
                         }
                     },
-                    (ColumnData::Notifications { items, subjects }, _, _) => rsx! {
-                        for n in items.iter() {
+                    (ColumnData::Notifications { groups, subjects }, _, _) => rsx! {
+                        for (i, g) in groups.iter().enumerate() {
                             NotificationCard {
-                                key: "{n.uri}",
-                                notif: n.clone(),
-                                subject: subject_for(n, subjects).cloned(),
+                                key: "{group_key(g, i)}",
+                                group: g.clone(),
+                                subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
                             }
                         }
                     },
@@ -162,7 +164,8 @@ async fn fetch_once(
         return Ok(match kind {
             ColumnKind::Notifications => {
                 let (items, subjects) = crate::demo::notifications_with_subjects();
-                ColumnData::Notifications { items, subjects }
+                let groups = group_notifications(items);
+                ColumnData::Notifications { groups, subjects }
             }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
             ColumnKind::Home | ColumnKind::Search { .. } | ColumnKind::Feed { .. } => {
@@ -193,7 +196,7 @@ async fn fetch_once(
             .map_err(|e| e.to_string()),
         ColumnKind::Notifications => {
             let items = client
-                .list_notifications(None, 30)
+                .list_notifications(None, 50)
                 .await
                 .map(|r| r.notifications)
                 .map_err(|e| e.to_string())?;
@@ -209,7 +212,10 @@ async fn fetch_once(
                     Err(_) => HashMap::new(),
                 }
             };
-            Ok(ColumnData::Notifications { items, subjects })
+            // Collapse 20 likes on the same post into one card etc.
+            // Done after hydration so the same subjects map keys still work.
+            let groups = group_notifications(items);
+            Ok(ColumnData::Notifications { groups, subjects })
         }
         ColumnKind::Search { query } => client
             .search_posts(query, None, 30)
@@ -222,6 +228,20 @@ async fn fetch_once(
             .map(|r| ColumnData::Posts(r.feed))
             .map_err(|e| e.to_string()),
     }
+}
+
+/// Stable key for a notification group — used by Dioxus's `key:`
+/// attribute on the render loop. Built from (reason, subject, first
+/// item uri) + the loop index as a tiebreaker so two adjacent groups
+/// with identical reason+subject (which can happen across pagination
+/// boundaries) still get distinct keys.
+fn group_key(g: &NotificationGroup, idx: usize) -> String {
+    let first_uri = g.items.first().map(|n| n.uri.as_str()).unwrap_or("");
+    format!(
+        "{idx}:{r}:{s}:{first_uri}",
+        r = g.reason,
+        s = g.reason_subject.as_deref().unwrap_or(""),
+    )
 }
 
 /// Which AT-URIs do we need hydrated to give each notification context?

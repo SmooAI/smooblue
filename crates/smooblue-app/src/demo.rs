@@ -298,19 +298,44 @@ pub fn notifications_with_subjects() -> (Vec<Notification>, std::collections::Ha
 
     // Build the notification list.  Each item points at a specific
     // subject URI so the hydration map actually matches.
+    // Build a sequence that exercises grouping: 6 consecutive likes on
+    // the same post (the alt-text screenshot post) collapse into one
+    // card "Alice, Dioxus and 4 others liked your post" with stacked
+    // avatars. Then mix in singletons (reply / mention / quote) +
+    // a 3-actor follow group.
     let items = vec![
+        // ── Group: 6 likes on your_post_alt → one card with avatar stack
         notif("alice.bsky.social", "Alice Mendez", Some("https://picsum.photos/seed/alice/80"),
               "like", &m(1), false, Some(your_post_alt.uri.clone()), None),
+        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
+              "like", &m(3), false, Some(your_post_alt.uri.clone()), None),
         notif("rustlang.bsky.social", "Rust", Some("https://picsum.photos/seed/rust/80"),
-              "repost", &m(7), false, Some(your_post_rust.uri.clone()), None),
-        notif("bob.bsky.social", "Bob", Some("https://picsum.photos/seed/bob/80"),
-              "follow", &m(22), false, None, None),
+              "like", &m(5), false, Some(your_post_alt.uri.clone()), None),
+        notif("photo.bsky.social", "Photographer", Some("https://picsum.photos/seed/photog/80"),
+              "like", &m(6), false, Some(your_post_alt.uri.clone()), None),
+        notif("duo.bsky.social", "Duo", Some("https://picsum.photos/seed/duo/80"),
+              "like", &m(8), true, Some(your_post_alt.uri.clone()), None),
+        notif("smoo.ai", "Smoo AI", Some("https://picsum.photos/seed/smoo/80"),
+              "like", &m(10), true, Some(your_post_alt.uri.clone()), None),
+        // ── Group: 2 reposts of your_post_rust
+        notif("rustlang.bsky.social", "Rust", Some("https://picsum.photos/seed/rust/80"),
+              "repost", &m(15), false, Some(your_post_rust.uri.clone()), None),
+        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
+              "repost", &m(18), false, Some(your_post_rust.uri.clone()), None),
+        // ── Singleton: reply
         notif("carol.bsky.social", "Carol", Some("https://picsum.photos/seed/carol/80"),
               "reply", &m(48), true, Some(your_post_alt.uri.clone()), Some(carol_reply.uri.clone())),
-        notif("dioxuslabs.com", "Dioxus", Some("https://picsum.photos/seed/dx/80"),
-              "like", &m(95), true, Some(your_post_ship.uri.clone()), None),
+        // ── Group: 3 follows
+        notif("bob.bsky.social", "Bob", Some("https://picsum.photos/seed/bob/80"),
+              "follow", &m(60), false, None, None),
+        notif("triptych.bsky.social", "Triptych", Some("https://picsum.photos/seed/trip/80"),
+              "follow", &m(65), false, None, None),
+        notif("blog.bsky.social", "Blog", Some("https://picsum.photos/seed/blog/80"),
+              "follow", &m(70), true, None, None),
+        // ── Singleton: mention
         notif("devinivy.com", "Devin Ivy", Some("https://picsum.photos/seed/devin/80"),
               "mention", &m(140), true, None, Some(devin_mention.uri.clone())),
+        // ── Singleton: quote
         notif("smoo.ai", "Smoo AI", Some("https://picsum.photos/seed/smoo/80"),
               "quote", &m(220), true, Some(your_post_ship.uri.clone()), Some(smoo_quote.uri.clone())),
     ];

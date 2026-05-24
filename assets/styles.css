@@ -718,6 +718,73 @@ a {
     display: block;
 }
 
+/* New: avatar stack used inside the grouped notification card.
+   Replaces .notif__avatar wholesale — sits in the same column. */
+.notif__avatars {
+    flex: 0 0 auto;
+}
+
+.notif__avatar-stack {
+    display: flex;
+    align-items: center;
+}
+
+.notif__avatar-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--background);
+    margin-left: -8px;
+    padding: 0;
+    background: var(--muted);
+    cursor: pointer;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+    transition: transform 100ms ease, z-index 0s linear 0s;
+    position: relative;
+}
+
+.notif__avatar-btn:first-child {
+    margin-left: 0;
+}
+
+.notif__avatar-btn:hover {
+    transform: scale(1.12);
+    z-index: 2;
+}
+
+.notif__avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.notif__avatar-btn--placeholder {
+    background: var(--muted);
+}
+
+/* Clickable actor name inside the phrase ("Alice liked your post"). */
+.notif__name-link {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    color: var(--foreground);
+    font-weight: 700;
+    font-size: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.notif__name-link:hover {
+    color: var(--color-smooai-orange);
+    text-decoration: underline;
+}
+
 .notif__body {
     flex: 1;
     min-width: 0;

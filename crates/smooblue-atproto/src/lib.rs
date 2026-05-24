@@ -25,4 +25,4 @@ pub use feed::{
     GetPostThreadResponse, KnownFollowersResponse, LikeView, LikesResponse, PostAuthor, PostRecord,
     PostView, PostViewerState, QuotesResponse, RepostedByResponse, ThreadView,
 };
-pub use notifications::{Notification, NotificationsResponse};
+pub use notifications::{group_notifications, Notification, NotificationGroup, NotificationsResponse};
