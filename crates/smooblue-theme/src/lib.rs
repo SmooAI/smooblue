@@ -24,6 +24,12 @@ pub const MONOGRAM_SVG: &str = smooai_ui::MONOGRAM_SVG;
 /// smoo apps.
 pub const BRAND_SVG: &str = include_str!("../../../assets/icon.svg");
 
+/// Smooblue horizontal wordmark — "Smooblue" rendered with the warm
+/// `Smoo` gradient + the teal-to-blue `blue` gradient. Use when
+/// there's horizontal room (login card, splash) and the name should
+/// read alongside the mark.
+pub const LOGO_HORIZONTAL_SVG: &str = include_str!("../../../assets/smooblue-logo-horizontal.svg");
+
 /// Smooblue-only component CSS — the bits no other app needs.
 const APP_STYLES: &str = include_str!("../../../assets/styles.css");
 

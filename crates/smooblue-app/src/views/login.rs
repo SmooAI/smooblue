@@ -67,7 +67,9 @@ pub fn LoginView() -> Element {
                 div { class: "login__logo",
                     dangerous_inner_html: "{smooblue_theme::BRAND_SVG}",
                 }
-                h1 { class: "login__title", "Smooblue" }
+                h1 { class: "login__title login__title--wordmark",
+                    dangerous_inner_html: "{smooblue_theme::LOGO_HORIZONTAL_SVG}",
+                }
                 p { class: "login__sub", "Sign in with your Bluesky handle" }
                 input {
                     class: "input input--lg login__input",

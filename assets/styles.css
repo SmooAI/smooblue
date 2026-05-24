@@ -501,6 +501,22 @@ a {
     color: transparent;
 }
 
+.login__title--wordmark {
+    height: 38px;
+    margin: 2px auto 6px;
+    background: none;
+    color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.login__title--wordmark svg {
+    height: 100%;
+    width: auto;
+    display: block;
+}
+
 .login__sub {
     color: var(--muted-foreground);
     margin-bottom: 24px;
