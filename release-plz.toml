@@ -1,0 +1,106 @@
+# release-plz configuration.
+#
+# release-plz is the Rust equivalent of @changesets/cli (used in the
+# smoo monorepo). It watches `main`, parses conventional-commit
+# messages since the last release, opens a "release v0.X.0" PR with
+# version bumps + an auto-generated CHANGELOG.md entry, and once that
+# PR is merged it tags the commit + creates the GitHub release.
+#
+# We do NOT publish smooblue's crates to crates.io — it's an app,
+# not a library. `publish = false` is set per-package below.
+#
+# Docs: https://release-plz.dev/docs/config
+
+[workspace]
+# Bump every workspace crate's version together — smooblue is one
+# product and shipping mismatched per-crate versions would just
+# confuse users.
+dependencies_update = true
+
+# Run on every push to main, but only open the release PR when there
+# are actually user-visible commits since the last release.
+release_always = false
+
+# Create the GitHub release when the PR merges + the tag is pushed.
+git_release_enable = true
+git_release_draft = false
+git_release_type = "auto"
+
+# Don't try to push to crates.io.
+publish = false
+
+# Don't fail when a crate has no changelog-worthy commits — common
+# in our setup where one PR can touch multiple crates but only the
+# workspace-wide version bumps.
+publish_no_verify = true
+
+# Per-package overrides. None of these get crates.io-published; the
+# release flow is purely "tag + GitHub release with .app artifact".
+[[package]]
+name = "smooblue-app"
+publish = false
+
+[[package]]
+name = "smooblue-atproto"
+publish = false
+
+[[package]]
+name = "smooblue-crm"
+publish = false
+
+[[package]]
+name = "smooblue-oauth"
+publish = false
+
+[[package]]
+name = "smooblue-theme"
+publish = false
+
+[changelog]
+# Keep-a-Changelog header with a smoo touch.
+header = """# Changelog
+
+All notable changes to Smooblue. Generated from conventional-commit
+messages by release-plz; see [release-plz.dev](https://release-plz.dev)
+for the format.
+
+"""
+
+# Group commits by conventional-commit prefix. The display group
+# is what shows under each version in CHANGELOG.md.
+body = """
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | upper_first | trim }}\
+{% if commit.breaking %} **(BREAKING)**{% endif %}
+{% endfor %}\
+{% endfor %}\n
+"""
+
+# Conventional-commit prefix → changelog group.
+commit_parsers = [
+    { message = "^feat",     group = "Added" },
+    { message = "^fix",      group = "Fixed" },
+    { message = "^perf",     group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs",     group = "Documentation" },
+    { message = "^chore",    group = "Changed" },
+    # Skip noise that wouldn't help a user — CI tweaks, formatting,
+    # test-only commits, dependency bumps, version bumps themselves.
+    { message = "^test",     skip = true },
+    { message = "^ci",       skip = true },
+    { message = "^build",    skip = true },
+    { message = "^style",    skip = true },
+    { message = "^pearl",    skip = true },
+    { message = "^release",  skip = true },
+    # SMOODEV-tickets without a conventional prefix → still keep them
+    # in "Changed" so nothing slips through silently.
+    { message = ".*",        group = "Changed" },
+]
+
+# Strip the "BREAKING CHANGE:" footer markers from the rendered text
+# (we promote them via `commit.breaking` instead).
+protect_breaking_commits = true
+sort_commits = "newest"
