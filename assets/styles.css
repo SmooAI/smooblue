@@ -357,6 +357,49 @@ a {
     opacity: 1;
 }
 
+.post__action--reposted {
+    color: var(--color-smooai-green);
+}
+
+.post__action--reposted svg {
+    fill: var(--color-smooai-green);
+    opacity: 1;
+}
+
+/* Reply context block above the compose textarea — shows what we're
+   replying to so the user has the parent in view as they type. */
+.compose__reply-context {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--color-smooai-orange);
+    background: var(--card);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.compose__reply-author {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    margin-bottom: 4px;
+}
+
+.compose__reply-handle {
+    color: var(--foreground);
+    font-weight: 600;
+}
+
+.compose__reply-text {
+    font-size: 13px;
+    color: var(--foreground);
+    margin: 0;
+    line-height: 1.4;
+    max-height: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+}
+
 /* ===========================================================
  *  Notification card
  * =========================================================== */

@@ -5,7 +5,7 @@ use crate::components::{
     column::Column, compose::ComposeSheet, search_sheet::SearchSheet, sidebar::Sidebar,
 };
 use crate::icons;
-use crate::state::{ColumnSpec, Tick};
+use crate::state::{ColumnSpec, ComposeContext, Tick};
 use dioxus::prelude::*;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ use std::time::Duration;
 pub fn DeckShell() -> Element {
     let cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let columns = cols.read().clone();
-    let mut compose_open = use_signal(|| false);
+    let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let search_open = use_signal(|| false);
 
     // 1-second tick that drives time-relative re-renders (post timestamps
@@ -33,6 +33,12 @@ pub fn DeckShell() -> Element {
         }
     });
 
+    let open_compose = move |_| {
+        let mut w = compose_ctx.write();
+        w.reply_to = None;
+        w.open = true;
+    };
+
     rsx! {
         div { class: "deck-shell",
             Sidebar { search_open }
@@ -44,10 +50,10 @@ pub fn DeckShell() -> Element {
             button {
                 class: "fab",
                 title: "New post",
-                onclick: move |_| compose_open.set(true),
+                onclick: open_compose,
                 icons::Plus { size: icons::Size::Lg }
             }
-            ComposeSheet { open: compose_open }
+            ComposeSheet {}
             SearchSheet { open: search_open }
         }
     }

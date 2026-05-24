@@ -1,7 +1,9 @@
 //! Single post card.
 
 use crate::icons;
-use crate::state::{add_column_unique, ColumnSpec, OptimisticMap, OptimisticPostState, Tick};
+use crate::state::{
+    add_column_unique, ColumnSpec, ComposeContext, OptimisticMap, ReplyTarget, Tick,
+};
 use dioxus::prelude::*;
 use smooblue_atproto::feed::PostView;
 use smooblue_atproto::AtClient;
@@ -16,29 +18,44 @@ pub fn PostCard(post: PostView) -> Element {
     let _tick = use_context::<Signal<Tick>>().read().0;
     let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let mut optimistic = use_context::<Signal<OptimisticMap>>();
+    let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
     let post_cid = post.cid.clone();
     let server_like_uri = post.viewer.as_ref().and_then(|v| v.like.clone());
+    let server_repost_uri = post.viewer.as_ref().and_then(|v| v.repost.clone());
 
     // Combine server state + optimistic intent. Optimistic always wins
-    // for `liked` while it has an explicit Some(_) — that's the whole
-    // point of the optimistic flip. When the next poll catches up, the
-    // optimistic entry can be cleared.
+    // for `liked`/`reposted` while it has an explicit Some(_) — that's the
+    // whole point of the optimistic flip. The next poll cycle reconciles.
     let opt_state = optimistic.read().get(&post_uri).cloned().unwrap_or_default();
+
     let is_liked = match opt_state.liked {
         Some(b) => b,
         None => server_like_uri.is_some(),
     };
-    // Adjust the displayed count to reflect any optimistic delta.
+    let is_reposted = match opt_state.reposted {
+        Some(b) => b,
+        None => server_repost_uri.is_some(),
+    };
+
+    // Adjust displayed counts to reflect optimistic deltas.
     let server_was_liked = server_like_uri.is_some();
-    let count_delta: i64 = match (server_was_liked, opt_state.liked) {
+    let like_delta: i64 = match (server_was_liked, opt_state.liked) {
         (false, Some(true)) => 1,
         (true, Some(false)) => -1,
         _ => 0,
     };
-    let display_likes = (post.like_count + count_delta).max(0);
+    let display_likes = (post.like_count + like_delta).max(0);
+
+    let server_was_reposted = server_repost_uri.is_some();
+    let repost_delta: i64 = match (server_was_reposted, opt_state.reposted) {
+        (false, Some(true)) => 1,
+        (true, Some(false)) => -1,
+        _ => 0,
+    };
+    let display_reposts = (post.repost_count + repost_delta).max(0);
 
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
@@ -46,11 +63,11 @@ pub fn PostCard(post: PostView) -> Element {
     let text = post.record.text.clone();
     let avatar = post.author.avatar.clone();
     let thumb = post.first_image_thumb().map(String::from);
-    let reposts = post.repost_count;
     let replies = post.reply_count;
     let actor_did = post.author.did.clone();
     let actor_handle = post.author.handle.clone();
     let actor_name = post.display_name().to_string();
+
     let open_profile = move |_evt: MouseEvent| {
         let title = if actor_name.is_empty() {
             format!("@{}", actor_handle)
@@ -60,24 +77,26 @@ pub fn PostCard(post: PostView) -> Element {
         add_column_unique(&mut cols, ColumnSpec::author(actor_did.clone(), title));
     };
 
+    // ── Like ────────────────────────────────────────────────────────
+    let post_uri_l = post_uri.clone();
+    let post_cid_l = post_cid.clone();
+    let server_like_uri_l = server_like_uri.clone();
+    let opt_state_l = opt_state.clone();
     let toggle_like = move |_evt: MouseEvent| {
         let Some(sess) = session.read().clone() else { return };
-        // Compute what we want the new state to be, optimistically.
         let want_liked = !is_liked;
-        let known_like_uri = opt_state.like_uri.clone().or_else(|| server_like_uri.clone());
-
-        // Flip locally first.
+        let known_like_uri = opt_state_l
+            .like_uri
+            .clone()
+            .or_else(|| server_like_uri_l.clone());
         {
             let mut map = optimistic.write();
-            let entry = map.entry(post_uri.clone()).or_default();
+            let entry = map.entry(post_uri_l.clone()).or_default();
             entry.liked = Some(want_liked);
-            // We don't know the new like_uri yet (server hasn't replied);
-            // keep whatever we knew so the un-like path still has a URI.
             entry.like_uri = known_like_uri.clone();
         }
-
-        let post_uri_owned = post_uri.clone();
-        let post_cid_owned = post_cid.clone();
+        let post_uri_owned = post_uri_l.clone();
+        let post_cid_owned = post_cid_l.clone();
         spawn(async move {
             let base = match Url::parse(&sess.pds) {
                 Ok(u) => u,
@@ -88,45 +107,126 @@ pub fn PostCard(post: PostView) -> Element {
                 match client.create_like(&post_uri_owned, &post_cid_owned).await {
                     Ok(rec) => {
                         let mut map = optimistic.write();
-                        map.insert(
-                            post_uri_owned.clone(),
-                            OptimisticPostState {
-                                liked: Some(true),
-                                like_uri: Some(rec.uri),
-                            },
-                        );
+                        let entry = map.entry(post_uri_owned.clone()).or_default();
+                        entry.liked = Some(true);
+                        entry.like_uri = Some(rec.uri);
                     }
                     Err(e) => {
-                        // Revert.
                         tracing::warn!(error = %e, "smooblue: create_like failed");
                         let mut map = optimistic.write();
-                        map.remove(&post_uri_owned);
+                        if let Some(entry) = map.get_mut(&post_uri_owned) {
+                            entry.liked = None;
+                        }
                     }
                 }
             } else if let Some(uri) = known_like_uri {
                 match client.delete_record(&uri).await {
                     Ok(_) => {
                         let mut map = optimistic.write();
-                        map.insert(
-                            post_uri_owned.clone(),
-                            OptimisticPostState {
-                                liked: Some(false),
-                                like_uri: None,
-                            },
-                        );
+                        let entry = map.entry(post_uri_owned.clone()).or_default();
+                        entry.liked = Some(false);
+                        entry.like_uri = None;
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "smooblue: delete_record (unlike) failed");
                         let mut map = optimistic.write();
-                        map.remove(&post_uri_owned);
+                        if let Some(entry) = map.get_mut(&post_uri_owned) {
+                            entry.liked = None;
+                        }
                     }
                 }
             }
         });
     };
 
+    // ── Repost ─────────────────────────────────────────────────────
+    let post_uri_r = post_uri.clone();
+    let post_cid_r = post_cid.clone();
+    let server_repost_uri_r = server_repost_uri.clone();
+    let opt_state_r = opt_state.clone();
+    let toggle_repost = move |_evt: MouseEvent| {
+        let Some(sess) = session.read().clone() else { return };
+        let want_reposted = !is_reposted;
+        let known_repost_uri = opt_state_r
+            .repost_uri
+            .clone()
+            .or_else(|| server_repost_uri_r.clone());
+        {
+            let mut map = optimistic.write();
+            let entry = map.entry(post_uri_r.clone()).or_default();
+            entry.reposted = Some(want_reposted);
+            entry.repost_uri = known_repost_uri.clone();
+        }
+        let post_uri_owned = post_uri_r.clone();
+        let post_cid_owned = post_cid_r.clone();
+        spawn(async move {
+            let base = match Url::parse(&sess.pds) {
+                Ok(u) => u,
+                Err(_) => return,
+            };
+            let client = AtClient::new(sess, base);
+            if want_reposted {
+                match client.create_repost(&post_uri_owned, &post_cid_owned).await {
+                    Ok(rec) => {
+                        let mut map = optimistic.write();
+                        let entry = map.entry(post_uri_owned.clone()).or_default();
+                        entry.reposted = Some(true);
+                        entry.repost_uri = Some(rec.uri);
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "smooblue: create_repost failed");
+                        let mut map = optimistic.write();
+                        if let Some(entry) = map.get_mut(&post_uri_owned) {
+                            entry.reposted = None;
+                        }
+                    }
+                }
+            } else if let Some(uri) = known_repost_uri {
+                match client.delete_record(&uri).await {
+                    Ok(_) => {
+                        let mut map = optimistic.write();
+                        let entry = map.entry(post_uri_owned.clone()).or_default();
+                        entry.reposted = Some(false);
+                        entry.repost_uri = None;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "smooblue: delete_record (unrepost) failed");
+                        let mut map = optimistic.write();
+                        if let Some(entry) = map.get_mut(&post_uri_owned) {
+                            entry.reposted = None;
+                        }
+                    }
+                }
+            }
+        });
+    };
+
+    // ── Reply ──────────────────────────────────────────────────────
+    // Opens the compose sheet with the parent post in context. The
+    // ComposeSheet itself is mounted at the deck level, so reply just
+    // needs to set the compose context + flip the open signal there.
+    let post_uri_reply = post_uri.clone();
+    let post_cid_reply = post_cid.clone();
+    let handle_reply = handle.clone();
+    let text_reply = text.clone();
+    let open_reply = move |_evt: MouseEvent| {
+        let mut w = compose_ctx.write();
+        w.reply_to = Some(ReplyTarget {
+            uri: post_uri_reply.clone(),
+            cid: post_cid_reply.clone(),
+            handle: handle_reply.clone(),
+            text: text_reply.clone(),
+        });
+        w.open = true;
+    };
+
     let like_class = if is_liked {
         "post__action post__action--clickable post__action--liked"
+    } else {
+        "post__action post__action--clickable"
+    };
+    let repost_class = if is_reposted {
+        "post__action post__action--clickable post__action--reposted"
     } else {
         "post__action post__action--clickable"
     };
@@ -155,13 +255,15 @@ pub fn PostCard(post: PostView) -> Element {
                     }
                 }
                 div { class: "post__actions",
-                    span { class: "post__action",
+                    button { class: "post__action post__action--clickable", onclick: open_reply,
+                        title: "Reply",
                         icons::MessageCircle { size: icons::Size::Sm }
                         span { "{replies}" }
                     }
-                    span { class: "post__action",
+                    button { class: "{repost_class}", onclick: toggle_repost,
+                        title: if is_reposted { "Undo repost" } else { "Repost" },
                         icons::Repeat2 { size: icons::Size::Sm }
-                        span { "{reposts}" }
+                        span { "{display_reposts}" }
                     }
                     button { class: "{like_class}", onclick: toggle_like,
                         title: if is_liked { "Unlike" } else { "Like" },

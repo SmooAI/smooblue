@@ -17,6 +17,24 @@ pub struct CreatedRecord {
     pub cid: String,
 }
 
+/// Strong reference to a post (AT-URI + CID) — used wherever the bsky
+/// lexicon needs to cite an existing record (reply parents, repost
+/// subjects, like subjects).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StrongRef {
+    pub uri: String,
+    pub cid: String,
+}
+
+/// Reply context (`reply.root` + `reply.parent` per the
+/// `app.bsky.feed.post` lexicon). For first-level replies the root and
+/// parent are usually the same post.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplyRef {
+    pub root: StrongRef,
+    pub parent: StrongRef,
+}
+
 /// Lightweight AT-URI breakdown: `at://<did>/<collection>/<rkey>`.
 pub(crate) struct AtUriParts<'a> {
     pub did: &'a str,
@@ -214,16 +232,34 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
+        self.create_post_with_reply(text, None).await
+    }
+
+    /// Same as [`Self::create_post`] but adds a reply context. The
+    /// `root` is the top of the thread; the `parent` is the post being
+    /// directly replied to (often the same for first-level replies).
+    pub async fn create_post_with_reply(
+        &self,
+        text: &str,
+        reply: Option<&ReplyRef>,
+    ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().unwrap().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
+        let mut record = serde_json::json!({
+            "$type": "app.bsky.feed.post",
+            "text": text,
+            "createdAt": created_at,
+        });
+        if let Some(r) = reply {
+            record["reply"] = serde_json::json!({
+                "root":   { "uri": r.root.uri,   "cid": r.root.cid },
+                "parent": { "uri": r.parent.uri, "cid": r.parent.cid },
+            });
+        }
         let body = serde_json::json!({
             "repo": did,
             "collection": "app.bsky.feed.post",
-            "record": {
-                "$type": "app.bsky.feed.post",
-                "text": text,
-                "createdAt": created_at,
-            }
+            "record": record,
         });
         let url = self
             .session_pds_url("/xrpc/com.atproto.repo.createRecord")

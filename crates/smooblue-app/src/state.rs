@@ -102,12 +102,12 @@ pub fn remove_column(cols: &mut Signal<Vec<ColumnSpec>>, id: &str) {
     let _ = crate::persistence::save_columns(&list);
 }
 
-/// Per-post optimistic state for likes (and later reposts). Lives in a
+/// Per-post optimistic state for likes + reposts. Lives in a
 /// context-shared map keyed by the post's AT-URI so the optimistic flip
 /// survives column re-renders triggered by polling.
 ///
-/// We track the *intended* server state (liked + the like-record URI we
-/// got back) so the next polling cycle can reconcile cleanly.
+/// We track the *intended* server state (liked / reposted, plus the
+/// record URIs we got back) so the next polling cycle reconciles cleanly.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct OptimisticPostState {
     /// `true` if the user has liked this post locally (whether or not the
@@ -116,9 +116,34 @@ pub struct OptimisticPostState {
     /// AT-URI of our like record once createRecord returned. Needed to
     /// call deleteRecord on un-like.
     pub like_uri: Option<String>,
+    /// Same shape as `liked`, but for reposts.
+    pub reposted: Option<bool>,
+    /// AT-URI of our repost record.
+    pub repost_uri: Option<String>,
 }
 
 pub type OptimisticMap = std::collections::HashMap<String, OptimisticPostState>;
+
+/// Compose-sheet context. When `reply_to` is `Some`, the sheet renders in
+/// reply mode (parent shown above the textarea, posts with a reply ref).
+/// `open` controls visibility — wrapped here (not in a standalone
+/// `Signal<bool>` context) so PostCard can both flip the sheet open AND
+/// stash the reply target in one atomic write.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ComposeContext {
+    pub open: bool,
+    pub reply_to: Option<ReplyTarget>,
+}
+
+/// Just enough of a parent post to render the quoted context in the
+/// compose sheet and build the reply ref on submit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplyTarget {
+    pub uri: String,
+    pub cid: String,
+    pub handle: String,
+    pub text: String,
+}
 
 /// Global tick counter, bumped every second by [`DeckShell`]'s tick task.
 /// Components that render time-relative text (post / notification
@@ -132,6 +157,7 @@ pub struct Tick(pub u64);
 pub fn use_bootstrap() {
     use_context_provider::<Signal<Tick>>(|| Signal::new(Tick(0)));
     use_context_provider::<Signal<OptimisticMap>>(|| Signal::new(OptimisticMap::new()));
+    use_context_provider::<Signal<ComposeContext>>(|| Signal::new(ComposeContext::default()));
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
         // app boots straight into the deck — no OAuth + no network.

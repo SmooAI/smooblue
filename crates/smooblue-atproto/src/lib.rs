@@ -15,7 +15,7 @@ mod error;
 pub mod feed;
 pub mod notifications;
 
-pub use client::AtClient;
+pub use client::{AtClient, CreatedRecord, ReplyRef, StrongRef};
 pub use error::AtError;
 pub use feed::{
     ActorProfile, Embed, EmbedImage, EmbedKind, FeedItem, FeedResponse, PostAuthor, PostRecord,
