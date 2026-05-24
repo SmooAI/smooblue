@@ -17,7 +17,7 @@ use crate::auth_refresh::fresh_client;
 use crate::components::notification_card::NotificationCard;
 use crate::components::post::PostCard;
 use crate::icons;
-use crate::state::{ColumnKind, ColumnSpec};
+use crate::state::{ColumnDrag, ColumnKind, ColumnSpec};
 use dioxus::prelude::*;
 use smooblue_atproto::{FeedItem, Notification, PostView};
 use smooblue_oauth::Session;
@@ -64,7 +64,9 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
 #[component]
 pub fn Column(spec: ColumnSpec) -> Element {
     let session = use_context::<Signal<Option<Session>>>();
+    let drag_ctx = use_context::<Signal<ColumnDrag>>();
     let spec_kind = spec.kind.clone();
+    let spec_id = spec.id.clone();
 
     // Current visible data. Fresh poll cycles overwrite directly — no
     // banner / opt-in. We auto-load.
@@ -96,8 +98,22 @@ pub fn Column(spec: ColumnSpec) -> Element {
         }
     });
 
+    // Visual state derived from the shared drag context — used to dim
+    // the column being dragged and highlight the drop target.
+    let drag_snap = drag_ctx.read();
+    let is_dragging = drag_snap.dragging.as_deref() == Some(spec_id.as_str());
+    let is_target = drag_snap.target.as_deref() == Some(spec_id.as_str())
+        && drag_snap.dragging.as_deref() != Some(spec_id.as_str());
+    drop(drag_snap);
+
+    let section_class = match (is_dragging, is_target) {
+        (true, _) => "deck-column deck-column--dragging",
+        (_, true) => "deck-column deck-column--drop-target",
+        _ => "deck-column",
+    };
+
     rsx! {
-        section { class: "deck-column",
+        section { class: "{section_class}",
             ColumnHeader { id: spec.id.clone(), title: spec.title.clone(), kind: spec.kind.clone() }
             div { class: "deck-column__body",
                 match (&*data.read(), &*error.read(), *loading.read()) {
@@ -250,13 +266,60 @@ fn subject_for<'a>(n: &Notification, subjects: &'a HashMap<String, PostView>) ->
 #[component]
 fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
     let mut cols = use_context::<Signal<Vec<crate::state::ColumnSpec>>>();
+    let mut drag_ctx = use_context::<Signal<ColumnDrag>>();
     let id_for_close = id.clone();
     let close = move |_| {
         crate::state::remove_column(&mut cols, &id_for_close);
     };
+
+    // Drag-and-drop handlers — header is the drag handle (grip icon),
+    // the whole header acts as the drop target. We use a shared
+    // ColumnDrag context so visual feedback (dimmed dragged column +
+    // highlighted drop target) renders on the right elements.
+    let id_drag_start = id.clone();
+    let dragstart = move |_evt: DragEvent| {
+        drag_ctx.set(ColumnDrag {
+            dragging: Some(id_drag_start.clone()),
+            target: None,
+        });
+    };
+    let dragend = move |_evt: DragEvent| {
+        drag_ctx.set(ColumnDrag::default());
+    };
+    // dragover MUST preventDefault on every fire or the browser
+    // disallows the drop. We also update the target id so the drop
+    // zone gets its visual highlight.
+    let id_dragover = id.clone();
+    let dragover = move |evt: DragEvent| {
+        evt.prevent_default();
+        let mut state = drag_ctx.write();
+        if state.target.as_deref() != Some(id_dragover.as_str()) {
+            state.target = Some(id_dragover.clone());
+        }
+    };
+    let dragleave = move |_evt: DragEvent| {
+        let mut state = drag_ctx.write();
+        state.target = None;
+    };
+    let id_drop = id.clone();
+    let drop = move |evt: DragEvent| {
+        evt.prevent_default();
+        let snap = drag_ctx.read().clone();
+        if let Some(src) = snap.dragging.clone() {
+            crate::state::move_column(&mut cols, &src, &id_drop);
+        }
+        drag_ctx.set(ColumnDrag::default());
+    };
+
     rsx! {
         header { class: "deck-column__header",
-            span { class: "deck-column__drag",
+            draggable: "true",
+            ondragstart: dragstart,
+            ondragend: dragend,
+            ondragover: dragover,
+            ondragleave: dragleave,
+            ondrop: drop,
+            span { class: "deck-column__drag", title: "Drag to reorder",
                 icons::GripVertical { size: icons::Size::Sm }
             }
             span { class: "deck-column__icon",

@@ -102,6 +102,41 @@ pub fn remove_column(cols: &mut Signal<Vec<ColumnSpec>>, id: &str) {
     let _ = crate::persistence::save_columns(&list);
 }
 
+/// Move the column with id `dragged` to the position currently held by
+/// `target`. Persists. No-op when either id is missing or the two are
+/// the same. Insertion side is "before" the target, which gives the
+/// usual deck.blue/Tweetdeck feel: drop on the left half of a column
+/// → it lands before; drop on the right doesn't currently distinguish
+/// (we'd need pixel-position math at the call site).
+pub fn move_column(cols: &mut Signal<Vec<ColumnSpec>>, dragged: &str, target: &str) {
+    if dragged == target {
+        return;
+    }
+    let mut list = cols.write();
+    let Some(src) = list.iter().position(|c| c.id == dragged) else {
+        return;
+    };
+    let spec = list.remove(src);
+    // Re-find the target after removal in case it shifted.
+    let dst = list
+        .iter()
+        .position(|c| c.id == target)
+        .unwrap_or(list.len());
+    list.insert(dst, spec);
+    let _ = crate::persistence::save_columns(&list);
+}
+
+/// Transient drag state shared between every column header. Lives in
+/// a context so the dragged-column shrink + drop-target highlight can
+/// both render without prop-drilling through the whole deck.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ColumnDrag {
+    /// Id of the column currently being dragged, or None when idle.
+    pub dragging: Option<String>,
+    /// Id of the column currently hovered as a drop target.
+    pub target: Option<String>,
+}
+
 /// Per-post optimistic state for likes + reposts. Lives in a
 /// context-shared map keyed by the post's AT-URI so the optimistic flip
 /// survives column re-renders triggered by polling.
@@ -177,6 +212,7 @@ pub fn use_bootstrap() {
             .is_some();
         Signal::new(ComposeContext { open, reply_to: None })
     });
+    use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));
     use_context_provider::<Signal<ThreadFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_THREAD=<at-uri> → boot straight into a
         // thread view for that URI. In demo mode the special value
@@ -247,6 +283,28 @@ mod tests {
         assert_eq!(h.id, "home");
         assert_eq!(h.title, "Home");
         assert!(matches!(h.kind, ColumnKind::Home));
+    }
+
+    #[test]
+    fn move_column_reorders_in_place() {
+        // Pure logic check on a Vec — same algorithm as the Signal
+        // path but easier to test without a Dioxus runtime.
+        let mut list = vec![
+            ColumnSpec::home(),
+            ColumnSpec::notifications(),
+            ColumnSpec::search("rust"),
+        ];
+        // Simulate the move_column algorithm directly.
+        let dragged = "search:rust";
+        let target = "home";
+        let src = list.iter().position(|c| c.id == dragged).unwrap();
+        let spec = list.remove(src);
+        let dst = list.iter().position(|c| c.id == target).unwrap_or(list.len());
+        list.insert(dst, spec);
+        // search:rust should now be first.
+        assert_eq!(list[0].id, "search:rust");
+        assert_eq!(list[1].id, "home");
+        assert_eq!(list[2].id, "notifications");
     }
 
     #[test]

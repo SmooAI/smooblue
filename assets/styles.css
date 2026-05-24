@@ -90,6 +90,21 @@ a {
     border-radius: var(--radius);
     overflow: hidden;
     border: 1px solid var(--border);
+    transition: opacity 140ms ease, border-color 140ms ease,
+                box-shadow 140ms ease;
+}
+
+/* The column currently being dragged — dim it so the drop target
+   stands out. */
+.deck-column--dragging {
+    opacity: 0.4;
+}
+
+/* The column being hovered as a drop target — outline + glow in
+   smoo-orange so the user knows where the drop will land. */
+.deck-column--drop-target {
+    border-color: var(--color-smooai-orange);
+    box-shadow: 0 0 0 2px rgba(244, 159, 10, 0.35);
 }
 
 .deck-column__header {
