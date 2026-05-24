@@ -3,18 +3,23 @@
 //! Uses the shared `.modal__backdrop` + `.modal__sheet` chrome from
 //! smooai-ui and adds compose-specific extensions on top.
 //!
-//! In demo mode, "Post" closes the sheet without actually creating the
-//! record. In live mode it'll call `AtClient::create_post` (com.atproto.repo.createRecord)
-//! once that's wired in `smooblue-atproto`.
+//! In demo mode (or when not signed in), "Post" closes the sheet without
+//! actually creating the record. In live mode it calls
+//! `AtClient::create_post` (com.atproto.repo.createRecord) against the
+//! user's PDS.
 
 use crate::icons;
 use dioxus::prelude::*;
+use smooblue_atproto::AtClient;
+use smooblue_oauth::Session;
+use url::Url;
 
 /// Bluesky's hard post length cap (graphemes, but we count chars as a proxy).
 pub const MAX_LEN: usize = 300;
 
 #[component]
 pub fn ComposeSheet(open: Signal<bool>) -> Element {
+    let session = use_context::<Signal<Option<Session>>>();
     let mut text = use_signal(String::new);
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
@@ -33,6 +38,7 @@ pub fn ComposeSheet(open: Signal<bool>) -> Element {
             return;
         }
         let body = text.read().clone();
+        let sess = session.read().clone();
         posting.set(true);
         error.set(None);
         let mut open = open;
@@ -40,15 +46,38 @@ pub fn ComposeSheet(open: Signal<bool>) -> Element {
         let mut text = text;
         let mut error = error;
         spawn(async move {
-            // Demo / not-yet-implemented: simulate the network round-trip,
-            // then succeed and close. Real createRecord wiring lands with
-            // the AtClient::create_post follow-up.
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-            let _ = body;
-            posting.set(false);
-            text.set(String::new());
-            error.set(None);
-            open.set(false);
+            // Demo / not-signed-in path — simulate the round-trip + close.
+            if crate::demo::is_active() || sess.is_none() {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                posting.set(false);
+                text.set(String::new());
+                open.set(false);
+                return;
+            }
+            let s = sess.unwrap();
+            // Writes go to the user's PDS (createRecord lives there, not
+            // on the AppView). AtClient handles the route internally; we
+            // just supply the PDS as the base URL.
+            let base = match Url::parse(&s.pds) {
+                Ok(u) => u,
+                Err(e) => {
+                    posting.set(false);
+                    error.set(Some(format!("Bad PDS URL: {e}")));
+                    return;
+                }
+            };
+            let client = AtClient::new(s, base);
+            match client.create_post(&body).await {
+                Ok(_record) => {
+                    posting.set(false);
+                    text.set(String::new());
+                    open.set(false);
+                }
+                Err(e) => {
+                    posting.set(false);
+                    error.set(Some(format!("Couldn't post: {e}")));
+                }
+            }
         });
     };
 
