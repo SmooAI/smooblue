@@ -692,9 +692,7 @@ fn ProgressRing(used: usize, max: usize) -> Element {
     let filled = (circumference * ratio.min(1.0)).min(circumference);
     let dash = format!("{filled} {circumference}");
 
-    let stroke = if ratio >= 1.0 {
-        "var(--color-smooai-red)"
-    } else if ratio >= 0.93 {
+    let stroke = if ratio >= 0.93 {
         "var(--color-smooai-red)"
     } else if ratio >= 0.80 {
         "var(--color-smooai-orange)"

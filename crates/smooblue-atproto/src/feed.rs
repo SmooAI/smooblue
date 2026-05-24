@@ -182,6 +182,7 @@ pub struct EmbedRecordWrapper {
 /// regular post, deleted, blocked, etc.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "$type")]
+#[allow(clippy::large_enum_variant)]
 pub enum EmbedRecordView {
     /// Successfully resolved quoted post.
     #[serde(rename = "app.bsky.embed.record#viewRecord")]
@@ -278,6 +279,7 @@ pub struct GetPostThreadResponse {
 /// client.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(tag = "$type")]
+#[allow(clippy::large_enum_variant)]
 pub enum ThreadView {
     /// A real post in the thread. May have a parent (ascending the
     /// reply chain) and replies (descending — sorted server-side).
