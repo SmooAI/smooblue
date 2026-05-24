@@ -157,7 +157,15 @@ pub struct Tick(pub u64);
 pub fn use_bootstrap() {
     use_context_provider::<Signal<Tick>>(|| Signal::new(Tick(0)));
     use_context_provider::<Signal<OptimisticMap>>(|| Signal::new(OptimisticMap::new()));
-    use_context_provider::<Signal<ComposeContext>>(|| Signal::new(ComposeContext::default()));
+    use_context_provider::<Signal<ComposeContext>>(|| {
+        // SMOOBLUE_DEBUG_OPEN_COMPOSE=1 → boot straight into the compose
+        // sheet. Useful for screenshots and iterating the UI.
+        let open = std::env::var("SMOOBLUE_DEBUG_OPEN_COMPOSE")
+            .ok()
+            .filter(|v| v == "1")
+            .is_some();
+        Signal::new(ComposeContext { open, reply_to: None })
+    });
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
         // app boots straight into the deck — no OAuth + no network.

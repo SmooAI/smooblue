@@ -98,6 +98,22 @@ pub fn ComposeSheet() -> Element {
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
 
+    // Debug helper: SMOOBLUE_DEBUG_ATTACH=/path/to/image.jpg injects a
+    // synthetic attachment on first render so screenshots and UI
+    // iteration don't require clicking through the OS file picker.
+    // Hook runs unconditionally (before the open-check) per Dioxus rules.
+    use_hook(|| {
+        if let Ok(p) = std::env::var("SMOOBLUE_DEBUG_ATTACH") {
+            let mut attachments = attachments;
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                spawn(async move {
+                    inject_synthetic_attachment(&mut attachments, path).await;
+                });
+            }
+        }
+    });
+
     let snap = ctx.read().clone();
     if !snap.open {
         return rsx! { Fragment {} };
@@ -526,6 +542,50 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                         span { class: "compose__alt-hint", "alt text helps screen readers" }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Debug-only: synthesize an AttachedImage from a path on disk, run
+/// prep + LLM describe. Mirrors the real picker path without going
+/// through rfd so we can screenshot the attachment UI without OS
+/// dialogs.
+async fn inject_synthetic_attachment(
+    attachments: &mut Signal<Vec<AttachedImage>>,
+    path: PathBuf,
+) {
+    let llm: Option<Arc<dyn AltTextProvider>> =
+        SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+    let att = AttachedImage::new(path.clone());
+    let id = att.id;
+    attachments.write().push(att);
+    let path_for_prep = path.clone();
+    let result = tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
+    let (state, ready_bytes) = match result {
+        Ok(Ok(prep)) => {
+            let bytes = prep.bytes.clone();
+            let mime = prep.mime.clone();
+            (AttachmentState::Ready(prep), Some((bytes, mime)))
+        }
+        Ok(Err(e)) => (AttachmentState::Failed(format!("{e:#}")), None),
+        Err(e) => (AttachmentState::Failed(format!("prep task panicked: {e}")), None),
+    };
+    if let Some(slot) = attachments.write().iter_mut().find(|a| a.id == id) {
+        slot.state = state;
+        if ready_bytes.is_some() && llm.is_some() {
+            slot.ai_in_flight = true;
+        }
+    }
+    if let (Some((bytes, mime)), Some(provider)) = (ready_bytes, llm) {
+        let suggestion = provider.describe(&bytes, &mime).await.ok();
+        if let Some(slot) = attachments.write().iter_mut().find(|a| a.id == id) {
+            slot.ai_in_flight = false;
+            if let Some(sugg) = suggestion {
+                if !slot.alt_user_edited && slot.alt.is_empty() {
+                    slot.alt = sugg.text.clone();
+                }
+                slot.ai_suggestion = Some(sugg);
             }
         }
     }
