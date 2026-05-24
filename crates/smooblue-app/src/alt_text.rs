@@ -28,8 +28,10 @@ use url::Url;
 
 /// Default LLM vision endpoint. Overridable via the
 /// `SMOOBLUE_VISION_ENDPOINT` env var (useful for local dev against a
-/// staging api).
-pub const DEFAULT_ENDPOINT: &str = "https://api.smoo.ai/v1/alt/describe";
+/// staging api). smoo.ai doesn't version under `/v1/` — features
+/// namespace by product + kebab-cased verb, matching existing routes
+/// like `/booking/google/...` and `/agents/{id}/regenerate-prompts`.
+pub const DEFAULT_ENDPOINT: &str = "https://api.smoo.ai/smooblue/describe-image";
 
 /// A single AI-suggested alt text plus a confidence hint, so the UI
 /// can dim very-low-confidence suggestions or hide them entirely.
@@ -177,14 +179,14 @@ mod tests {
     async fn smoo_llm_calls_endpoint_and_parses_description() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/alt/describe"))
+            .and(path("/smooblue/describe-image"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "description": "A black cat sitting on a laptop keyboard.",
                 "confidence": 0.87
             })))
             .mount(&server)
             .await;
-        let url = Url::parse(&format!("{}/v1/alt/describe", server.uri())).unwrap();
+        let url = Url::parse(&format!("{}/smooblue/describe-image", server.uri())).unwrap();
         let provider = SmooLlmAltText::new(url);
         let suggestion = provider.describe(&[0xFF, 0xD8, 0xFF, 0xE0], "image/jpeg").await.unwrap();
         assert_eq!(suggestion.text, "A black cat sitting on a laptop keyboard.");
@@ -196,14 +198,14 @@ mod tests {
     async fn smoo_llm_forwards_bearer_when_set() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/alt/describe"))
+            .and(path("/smooblue/describe-image"))
             .and(header_exists("authorization"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "description": "x", "confidence": 1.0
             })))
             .mount(&server)
             .await;
-        let url = Url::parse(&format!("{}/v1/alt/describe", server.uri())).unwrap();
+        let url = Url::parse(&format!("{}/smooblue/describe-image", server.uri())).unwrap();
         let provider = SmooLlmAltText::new(url).with_bearer("secret-token");
         provider.describe(&[1], "image/jpeg").await.unwrap();
     }
@@ -212,11 +214,11 @@ mod tests {
     async fn smoo_llm_returns_error_on_5xx() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/alt/describe"))
+            .and(path("/smooblue/describe-image"))
             .respond_with(ResponseTemplate::new(503))
             .mount(&server)
             .await;
-        let url = Url::parse(&format!("{}/v1/alt/describe", server.uri())).unwrap();
+        let url = Url::parse(&format!("{}/smooblue/describe-image", server.uri())).unwrap();
         let provider = SmooLlmAltText::new(url);
         let err = provider.describe(&[1], "image/jpeg").await.unwrap_err();
         assert!(err.to_string().contains("503"));
@@ -226,13 +228,13 @@ mod tests {
     async fn smoo_llm_rejects_empty_description() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/alt/describe"))
+            .and(path("/smooblue/describe-image"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "description": "   "
             })))
             .mount(&server)
             .await;
-        let url = Url::parse(&format!("{}/v1/alt/describe", server.uri())).unwrap();
+        let url = Url::parse(&format!("{}/smooblue/describe-image", server.uri())).unwrap();
         let provider = SmooLlmAltText::new(url);
         let err = provider.describe(&[1], "image/jpeg").await.unwrap_err();
         assert!(err.to_string().contains("empty"));
