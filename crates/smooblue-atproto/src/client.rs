@@ -405,6 +405,24 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.notification.updateSeen` — POST that marks all
+    /// notifications older than `seen_at` as read. Smooblue fires
+    /// this when the Notifications column comes into view (with
+    /// `now()` as the timestamp) so the unread badge clears
+    /// automatically — same UX as bsky.app.
+    pub async fn update_seen(&self, seen_at: chrono::DateTime<chrono::Utc>) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.notification.updateSeen")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({ "seenAt": seen_at.to_rfc3339() });
+        // Endpoint returns an empty body on success — but post_json
+        // expects JSON, so deserialize into a serde_json::Value
+        // (accepts {}, []  or even an empty string after our
+        // body-read logic).
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
     /// `app.bsky.notification.getUnreadCount` — cheap call for the
     /// hybrid Notifications polling (poll this every few seconds; only
     /// fetch the full list when the count actually changes).

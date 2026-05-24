@@ -79,6 +79,33 @@ a {
     flex: 1;
 }
 
+/* Unread / count badge on a rail button. The button itself has its
+   own padding + flex; the badge floats top-right via absolute
+   positioning relative to the button (which sets position: relative
+   via the smooai-ui .rail__btn rule). */
+.rail__btn {
+    position: relative;
+}
+
+.rail__badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    background: var(--color-smooai-red);
+    color: #fff;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--sidebar);
+    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ===========================================================
  *  Single column
  * =========================================================== */

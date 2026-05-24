@@ -83,12 +83,26 @@ pub fn Column(spec: ColumnSpec) -> Element {
         let session_sig = session;
         async move {
             let interval = poll_interval(&kind);
+            let mut first_fetch = true;
             loop {
                 match fetch_once(&kind, session_sig).await {
                     Ok(fresh) => {
                         error.set(None);
                         loading.set(false);
                         data.set(fresh);
+                        // First successful Notifications fetch: tell
+                        // the server we've seen them so the sidebar
+                        // unread badge clears. Best-effort; failures
+                        // are silent (the badge will catch up next
+                        // poll cycle anyway).
+                        if first_fetch && matches!(&kind, ColumnKind::Notifications) {
+                            if !crate::demo::is_active() {
+                                if let Some(client) = fresh_client(session_sig).await {
+                                    let _ = client.update_seen(chrono::Utc::now()).await;
+                                }
+                            }
+                            first_fetch = false;
+                        }
                     }
                     Err(e) => {
                         loading.set(false);
