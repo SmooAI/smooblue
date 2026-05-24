@@ -86,6 +86,19 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # Native file picker — used by the compose sheet for the "+ Image" action.
 rfd = "0.14"
 
+# Apple Vision OCR (macOS only). Used by the compose sheet to extract
+# literal text from screenshots / memes and seed alt-text alongside
+# the LLM scene description.
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-vision = { version = "0.3", features = [
+    "VNRequest",
+    "VNRequestHandler",
+    "VNRecognizeTextRequest",
+    "VNObservation",
+    "VNTypes",
+] }
+
 # Test utilities
 wiremock = "0.6"
 tempfile = "3"

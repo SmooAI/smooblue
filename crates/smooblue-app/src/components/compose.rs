@@ -18,9 +18,10 @@
 //!   thumbnail grid, per-image alt-text input. Hooks (in follow-up
 //!   pearls) for Apple Vision OCR + Smoo LLM auto-alt seeding.
 
-use crate::alt_text::{AltSuggestion, AltTextProvider, SmooLlmAltText};
+use crate::alt_text::{merge_descriptions, AltSuggestion, AltTextProvider, SmooLlmAltText};
 use crate::icons;
 use crate::image_prep::{prepare_from_path, PreparedImage};
+use crate::ocr;
 use crate::state::ComposeContext;
 use dioxus::prelude::*;
 use smooblue_atproto::{
@@ -73,6 +74,11 @@ pub struct AttachedImage {
     /// `true` while the LLM describe call is in flight — shows a small
     /// spinner badge on the alt input.
     pub ai_in_flight: bool,
+    /// Literal text extracted by Apple Vision OCR. Merged with
+    /// `ai_suggestion.text` into the alt field via [`merge_descriptions`].
+    pub ocr_text: Option<String>,
+    /// `true` while the OCR task is in flight (macOS only).
+    pub ocr_in_flight: bool,
 }
 
 impl AttachedImage {
@@ -85,7 +91,21 @@ impl AttachedImage {
             state: AttachmentState::Preparing,
             ai_suggestion: None,
             ai_in_flight: false,
+            ocr_text: None,
+            ocr_in_flight: false,
         }
+    }
+
+    /// Compute what the alt field SHOULD show given the current LLM +
+    /// OCR results. Returns `None` if neither has resolved yet.
+    fn computed_alt(&self) -> Option<String> {
+        let llm = self.ai_suggestion.as_ref().map(|s| s.text.as_str());
+        let ocr = self.ocr_text.as_deref();
+        if llm.is_none() && ocr.is_none() {
+            return None;
+        }
+        let merged = merge_descriptions(llm, ocr);
+        if merged.is_empty() { None } else { Some(merged) }
     }
 }
 
@@ -283,46 +303,10 @@ pub fn ComposeSheet() -> Element {
                 let att = AttachedImage::new(path.clone());
                 let id = att.id;
                 attachments.write().push(att);
-                let mut atts = attachments;
-                let path_for_prep = path.clone();
+                let atts = attachments;
                 let llm_for_image = llm.clone();
                 spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                        prepare_from_path(&path_for_prep)
-                    })
-                    .await;
-                    let (state, ready_bytes) = match result {
-                        Ok(Ok(prep)) => {
-                            let bytes = prep.bytes.clone();
-                            let mime = prep.mime.clone();
-                            (AttachmentState::Ready(prep), Some((bytes, mime)))
-                        }
-                        Ok(Err(e)) => (AttachmentState::Failed(format!("{e:#}")), None),
-                        Err(e) => (AttachmentState::Failed(format!("prep task panicked: {e}")), None),
-                    };
-                    if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
-                        slot.state = state;
-                        if ready_bytes.is_some() && llm_for_image.is_some() {
-                            slot.ai_in_flight = true;
-                        }
-                    }
-                    // If prep succeeded AND we have an LLM provider, ask it
-                    // to describe the image. Failures are silent.
-                    if let (Some((bytes, mime)), Some(provider)) = (ready_bytes, llm_for_image) {
-                        let suggestion = provider.describe(&bytes, &mime).await.ok();
-                        if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
-                            slot.ai_in_flight = false;
-                            if let Some(sugg) = suggestion {
-                                // Auto-fill the alt input unless the user
-                                // has already started typing — they own
-                                // their text the moment they touch the box.
-                                if !slot.alt_user_edited && slot.alt.is_empty() {
-                                    slot.alt = sugg.text.clone();
-                                }
-                                slot.ai_suggestion = Some(sugg);
-                            }
-                        }
-                    }
+                    process_attachment(atts, id, path, llm_for_image).await;
                 });
             }
         });
@@ -505,10 +489,16 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
             div { class: "compose__attachment-meta",
                 div { class: "compose__alt-label",
                     span { "Alt text" }
-                    if att.ai_in_flight {
+                    if att.ai_in_flight || att.ocr_in_flight {
                         span { class: "compose__alt-ai compose__alt-ai--busy",
                             icons::Sparkles { size: icons::Size::Sm }
-                            "AI describing…"
+                            if att.ai_in_flight && att.ocr_in_flight {
+                                "AI describing + reading…"
+                            } else if att.ai_in_flight {
+                                "AI describing…"
+                            } else {
+                                "Reading text…"
+                            }
                         }
                     } else if let Some(sugg) = att.ai_suggestion.as_ref() {
                         // If the user has typed something different than
@@ -548,9 +538,8 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
 }
 
 /// Debug-only: synthesize an AttachedImage from a path on disk, run
-/// prep + LLM describe. Mirrors the real picker path without going
-/// through rfd so we can screenshot the attachment UI without OS
-/// dialogs.
+/// the same pipeline as the real picker. Used by
+/// SMOOBLUE_DEBUG_ATTACH for screenshots.
 async fn inject_synthetic_attachment(
     attachments: &mut Signal<Vec<AttachedImage>>,
     path: PathBuf,
@@ -560,9 +549,25 @@ async fn inject_synthetic_attachment(
     let att = AttachedImage::new(path.clone());
     let id = att.id;
     attachments.write().push(att);
+    process_attachment(*attachments, id, path, llm).await;
+}
+
+/// Single shared pipeline for a freshly-added attachment: prep image,
+/// then in parallel run LLM describe + Apple Vision OCR. As each
+/// finishes, write the result into the slot AND recompute the merged
+/// alt text (unless the user has already typed). Idempotent if either
+/// task fails — we just leave the slot's field empty.
+async fn process_attachment(
+    attachments: Signal<Vec<AttachedImage>>,
+    id: u64,
+    path: PathBuf,
+    llm: Option<Arc<dyn AltTextProvider>>,
+) {
+    let mut atts = attachments;
     let path_for_prep = path.clone();
-    let result = tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
-    let (state, ready_bytes) = match result {
+    let prep_result =
+        tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
+    let (state, ready_bytes) = match prep_result {
         Ok(Ok(prep)) => {
             let bytes = prep.bytes.clone();
             let mime = prep.mime.clone();
@@ -571,24 +576,58 @@ async fn inject_synthetic_attachment(
         Ok(Err(e)) => (AttachmentState::Failed(format!("{e:#}")), None),
         Err(e) => (AttachmentState::Failed(format!("prep task panicked: {e}")), None),
     };
-    if let Some(slot) = attachments.write().iter_mut().find(|a| a.id == id) {
+    let has_llm = llm.is_some();
+    let cfg_ocr = cfg!(target_os = "macos");
+    if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
         slot.state = state;
-        if ready_bytes.is_some() && llm.is_some() {
+        if ready_bytes.is_some() && has_llm {
             slot.ai_in_flight = true;
         }
-    }
-    if let (Some((bytes, mime)), Some(provider)) = (ready_bytes, llm) {
-        let suggestion = provider.describe(&bytes, &mime).await.ok();
-        if let Some(slot) = attachments.write().iter_mut().find(|a| a.id == id) {
-            slot.ai_in_flight = false;
-            if let Some(sugg) = suggestion {
-                if !slot.alt_user_edited && slot.alt.is_empty() {
-                    slot.alt = sugg.text.clone();
-                }
-                slot.ai_suggestion = Some(sugg);
-            }
+        if ready_bytes.is_some() && cfg_ocr {
+            slot.ocr_in_flight = true;
         }
     }
+    let Some((bytes, mime)) = ready_bytes else { return };
+
+    // Kick off LLM + OCR in parallel. Two tokio joins so either can
+    // complete independently and update the alt incrementally.
+    let bytes_for_ocr = bytes.clone();
+    let mut atts_ocr = attachments;
+    let ocr_task = spawn(async move {
+        let extracted =
+            tokio::task::spawn_blocking(move || ocr::extract_text_joined(&bytes_for_ocr))
+                .await
+                .ok()
+                .flatten();
+        if let Some(slot) = atts_ocr.write().iter_mut().find(|a| a.id == id) {
+            slot.ocr_in_flight = false;
+            slot.ocr_text = extracted;
+            if !slot.alt_user_edited {
+                if let Some(merged) = slot.computed_alt() {
+                    slot.alt = merged;
+                }
+            }
+        }
+    });
+    let mut atts_llm = attachments;
+    let llm_task = spawn(async move {
+        if let Some(provider) = llm {
+            let suggestion = provider.describe(&bytes, &mime).await.ok();
+            if let Some(slot) = atts_llm.write().iter_mut().find(|a| a.id == id) {
+                slot.ai_in_flight = false;
+                if suggestion.is_some() {
+                    slot.ai_suggestion = suggestion;
+                    if !slot.alt_user_edited {
+                        if let Some(merged) = slot.computed_alt() {
+                            slot.alt = merged;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    let _ = ocr_task;
+    let _ = llm_task;
 }
 
 /// SVG progress ring for the character counter. As `used` approaches

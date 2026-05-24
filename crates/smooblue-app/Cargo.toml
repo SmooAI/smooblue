@@ -42,6 +42,14 @@ image = { workspace = true }
 base64 = { workspace = true }
 anyhow = { workspace = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Apple Vision OCR — text extraction from images. macOS-only because
+# Vision.framework doesn't ship anywhere else; the rest of the OCR
+# module falls back to a no-op stub on other platforms.
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
+objc2-vision = { workspace = true }
+
 [dev-dependencies]
 wiremock = { workspace = true }
 tokio = { workspace = true }
