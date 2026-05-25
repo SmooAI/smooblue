@@ -2,16 +2,16 @@
 //! (compose) + the global compose sheet + the search-column add sheet.
 
 use crate::components::{
-    column::Column, compose::ComposeSheet, engagement::EngagementSheet, profile::ProfileSheet,
-    profile_edit_sheet::ProfileEditSheet, report_sheet::ReportSheet,
+    column::Column, compose::ComposeSheet, engagement::EngagementSheet, lightbox::LightboxSheet,
+    profile::ProfileSheet, profile_edit_sheet::ProfileEditSheet, report_sheet::ReportSheet,
     saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
     sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::keyboard::{self, KeyContext};
 use crate::state::{
-    ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp, PendingChord,
-    ProfileFocus, ThemeMode, ThreadFocus, Tick, UpdateBanner,
+    ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp, LightboxFocus,
+    PendingChord, ProfileFocus, ThemeMode, ThreadFocus, Tick, UpdateBanner,
 };
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
@@ -42,6 +42,7 @@ pub fn DeckShell() -> Element {
         search_open,
         saved_feeds_open,
         settings_open,
+        lightbox: use_context::<Signal<LightboxFocus>>(),
     };
 
     // Chord-timeout: clear PendingChord after 1.5s so a stray `g`
@@ -251,6 +252,7 @@ pub fn DeckShell() -> Element {
             ProfileSheet {}
             EngagementSheet {}
             ReportSheet {}
+            LightboxSheet {}
             ProfileEditSheet {}
             KeyboardHelpSheet {}
             UpdateToast {}

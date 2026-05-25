@@ -284,6 +284,25 @@ impl ThemeMode {
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct ProfileEditOpen(pub bool);
 
+/// In-app lightbox for images / videos. `None` ⇒ closed; `Some(item)`
+/// ⇒ render a full-screen overlay with the media centered.
+/// Clicks on a post image / video populate this rather than shelling
+/// out to the system browser — the browser jump is jarring and
+/// drops the user out of the deck.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct LightboxFocus(pub Option<LightboxItem>);
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum LightboxItem {
+    /// `url` is the fullsize CDN URL. `alt` shown as title attribute
+    /// for screen readers.
+    Image { url: String, alt: String },
+    /// `url` is the bsky video CDN URL (or whatever the embed view
+    /// resolved to). WKWebView's native `<video>` decodes mp4 + m3u8
+    /// directly.
+    Video { url: String, poster: Option<String> },
+}
+
 /// What the report sheet is targeting (account or post). `None` when
 /// the sheet is closed. Set by ProfileSheet's Report action or a
 /// future per-post menu.
@@ -384,6 +403,7 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
     use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
     use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
+    use_context_provider::<Signal<LightboxFocus>>(|| Signal::new(LightboxFocus::default()));
     use_context_provider::<Signal<ThemeMode>>(|| {
         let mode = crate::persistence::load_theme()
             .map(|s| ThemeMode::parse(&s))

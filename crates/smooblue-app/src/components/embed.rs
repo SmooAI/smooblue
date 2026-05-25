@@ -102,13 +102,21 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
         img.alt.clone()
     };
     let fullsize = img.fullsize.clone();
-    let open_fullsize = move |_| {
-        // Scheme-allowlisted (http/https only). bsky CDN URLs are
-        // always https; if a malicious labeler / third-party feed
-        // generator substitutes a `file://` or custom-scheme URL
-        // we silently block it instead of letting macOS `open`
-        // hand off to whatever app registered the scheme.
-        let _ = crate::safe_open::open_in_browser(&fullsize);
+    let alt_for_lightbox = img.alt.clone();
+    let mut lightbox = use_context::<Signal<crate::state::LightboxFocus>>();
+    let open_fullsize = move |e: MouseEvent| {
+        // In-app lightbox — far less jarring than shelling out to
+        // Preview.app via `open`. Also avoids the URL-scheme-handler
+        // attack surface (the safe_open allowlist would catch any
+        // non-http(s) URL, but the lightbox sidesteps the question
+        // entirely since `<img>` only renders http(s) sources).
+        e.stop_propagation();
+        lightbox.set(crate::state::LightboxFocus(Some(
+            crate::state::LightboxItem::Image {
+                url: fullsize.clone(),
+                alt: alt_for_lightbox.clone(),
+            },
+        )));
     };
     // Position class for the 3-up layout (one tall left + two stacked right).
     let pos_class = if total == 3 {
@@ -268,6 +276,23 @@ fn VideoPlayer(
     // historically more robust across odd parents.)
     let padding_pct = (h as f32 / w.max(1) as f32) * 100.0;
     let poster_attr = thumb.clone().unwrap_or_default();
+    // Same lightbox plumbing as ImageTile — click the expand button
+    // (top-right overlay) to pop the video into the full-app
+    // lightbox. The inline `<video>` keeps its native controls for
+    // play / pause / seek without conflict because the expand
+    // button is positioned absolutely above the player.
+    let mut lightbox = use_context::<Signal<crate::state::LightboxFocus>>();
+    let playlist_for_lb = playlist.clone();
+    let poster_for_lb = thumb.clone();
+    let open_lightbox = move |e: MouseEvent| {
+        e.stop_propagation();
+        lightbox.set(crate::state::LightboxFocus(Some(
+            crate::state::LightboxItem::Video {
+                url: playlist_for_lb.clone(),
+                poster: poster_for_lb.clone(),
+            },
+        )));
+    };
     rsx! {
         div { class: "embed__video",
             style: "padding-top: {padding_pct}%;",
@@ -283,6 +308,11 @@ fn VideoPlayer(
                 crossorigin: "anonymous",
                 "playsinline": "true",
                 "referrerpolicy": "no-referrer",
+            }
+            button { class: "embed__video-expand",
+                title: "Open in lightbox",
+                onclick: open_lightbox,
+                crate::icons::Expand { size: crate::icons::Size::Sm }
             }
         }
     }

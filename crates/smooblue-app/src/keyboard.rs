@@ -28,7 +28,7 @@
 
 use crate::state::{
     add_column_unique, ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp,
-    PendingChord, ProfileFocus, ThreadFocus,
+    LightboxFocus, PendingChord, ProfileFocus, ThreadFocus,
 };
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
@@ -49,6 +49,7 @@ pub struct KeyContext {
     pub search_open: Signal<bool>,
     pub saved_feeds_open: Signal<bool>,
     pub settings_open: Signal<bool>,
+    pub lightbox: Signal<LightboxFocus>,
 }
 
 /// `true` when any modal sheet is open. Used to skip vim shortcuts
@@ -58,6 +59,7 @@ pub fn any_modal_open(ctx: &KeyContext) -> bool {
         || ctx.thread.read().0.is_some()
         || ctx.profile.read().0.is_some()
         || ctx.engagement.read().0.is_some()
+        || ctx.lightbox.read().0.is_some()
         || *ctx.search_open.read()
         || *ctx.saved_feeds_open.read()
         || *ctx.settings_open.read()
@@ -68,6 +70,12 @@ pub fn any_modal_open(ctx: &KeyContext) -> bool {
 pub fn close_top_modal(ctx: &mut KeyContext) {
     if ctx.help.read().0 {
         ctx.help.set(KeyboardHelp(false));
+        return;
+    }
+    // Lightbox sits on top of everything visually — Esc kills it
+    // first regardless of what else is open underneath.
+    if ctx.lightbox.read().0.is_some() {
+        ctx.lightbox.set(LightboxFocus(None));
         return;
     }
     // Innermost-first close order — engagement / profile / thread

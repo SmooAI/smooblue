@@ -356,8 +356,15 @@ pub fn PostCard(
                     onclick: open_thread,
                     title: "Open thread",
                     div { class: "post__head",
-                        span { class: "post__name", "{name}" }
-                        span { class: "post__handle", "@{handle}" }
+                        // Name + handle stacked vertically so long
+                        // display names ("Doctor Charlton Cussans PhD")
+                        // don't push the handle off-screen or wrap into
+                        // a 4-line word salad. Both lines truncate with
+                        // ellipsis if they exceed the column width.
+                        div { class: "post__identity",
+                            span { class: "post__name", "{name}" }
+                            span { class: "post__handle", "@{handle}" }
+                        }
                         // Timestamp is a permalink to bsky.app — opens
                         // in the system default browser.
                         button {

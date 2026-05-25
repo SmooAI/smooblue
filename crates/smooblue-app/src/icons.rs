@@ -219,6 +219,12 @@ pub fn Flag(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdFlag } }
 }
 
+#[component]
+pub fn Expand(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdExpand } }
+}
+
 /// Small relative-time text ("11s", "1h", "3d") that updates every
 /// second by subscribing to the global `Tick` signal. Lifted out of
 /// PostCard / NotificationCard so the 1Hz tick re-renders only this

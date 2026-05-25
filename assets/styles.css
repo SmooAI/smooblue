@@ -298,9 +298,21 @@ a {
 
 .post__head {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     gap: 6px;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
+}
+
+/* Name + handle stack vertically; identity block flex-grows so the
+ * timestamp gets pushed to the right edge of the row. min-width: 0
+ * is required so flexbox lets the ellipsis kick in instead of
+ * letting the text push the parent wider. */
+.post__identity {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.15;
 }
 
 .post__name {
@@ -309,7 +321,10 @@ a {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 150px;
+    /* Width comes from the parent .post__identity (which is flex-1
+     * inside .post__head). max-width here was the source of the
+     * "name wraps onto 4 lines" bug — at narrow column widths the
+     * fixed pixel width fought the parent's intrinsic size. */
 }
 
 .post__handle {
@@ -318,7 +333,8 @@ a {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 130px;
+    /* Same reasoning as .post__name — width inherits from the
+     * .post__identity flex column instead of a fixed cap. */
 }
 
 .post__time {
@@ -1939,6 +1955,110 @@ a {
     resize: none;
     font-size: 12px;
     padding: 6px 8px;
+}
+
+/* ===========================================================
+ *  Lightbox — in-app image / video viewer
+ *
+ *  Full-screen dark overlay above everything. Click backdrop or
+ *  Esc to dismiss; the close button is fixed top-right so it's
+ *  reachable regardless of media size.
+ * =========================================================== */
+.lightbox__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(2, 6, 24, 0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px 24px;
+    cursor: zoom-out;
+}
+
+.lightbox__close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: rgba(2, 6, 24, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #fff;
+    padding: 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 120ms ease, border-color 120ms ease;
+}
+
+.lightbox__close:hover {
+    background: var(--color-smooai-orange);
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-dark-blue);
+}
+
+.lightbox__image,
+.lightbox__video {
+    max-width: min(92vw, 1800px);
+    max-height: 82vh;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    cursor: default;
+}
+
+.lightbox__video {
+    width: min(92vw, 1800px);
+    background: #000;
+}
+
+.lightbox__caption {
+    max-width: min(92vw, 1200px);
+    color: #d8dce8;
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    cursor: default;
+}
+
+/* Expand-to-lightbox button overlaid on inline video embeds.
+ * Top-right corner so it doesn't fight the play/pause control
+ * cluster (which sits center-bottom of the native <video>). */
+.embed__video {
+    position: relative;
+}
+
+.embed__video-expand {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    background: rgba(2, 6, 24, 0.75);
+    border: 0;
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease;
+}
+
+.embed__video:hover .embed__video-expand {
+    opacity: 1;
+}
+
+.embed__video-expand:hover {
+    background: var(--color-smooai-orange);
+    color: var(--color-smooai-dark-blue);
 }
 
 .compose__sheet--drag {
