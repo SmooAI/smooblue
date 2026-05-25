@@ -706,6 +706,52 @@ impl AtClient {
         self.post_json(&url, &body).await
     }
 
+    /// Mute an actor (`app.bsky.graph.muteActor`). Procedure call,
+    /// not a createRecord — bsky tracks mutes server-side as a
+    /// preference, so there's no record to later delete. Use
+    /// [`Self::unmute_actor`] to reverse.
+    pub async fn mute_actor(&self, did: &str) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.graph.muteActor")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({ "actor": did });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
+    /// Symmetric with [`Self::mute_actor`].
+    pub async fn unmute_actor(&self, did: &str) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.graph.unmuteActor")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({ "actor": did });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
+    /// Block an actor (`app.bsky.graph.block`). Unlike mute, this IS
+    /// a createRecord — blocks are public records on the user's repo
+    /// (because the other party needs to see them to know not to
+    /// interact). Returns the AT-URI; pass it to
+    /// [`Self::delete_record`] to unblock.
+    pub async fn create_block(&self, subject_did: &str) -> Result<CreatedRecord, AtError> {
+        let did = self.session.lock().did.clone();
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let body = serde_json::json!({
+            "repo": did,
+            "collection": "app.bsky.graph.block",
+            "record": {
+                "$type": "app.bsky.graph.block",
+                "subject": subject_did,
+                "createdAt": created_at,
+            }
+        });
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.repo.createRecord")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.post_json(&url, &body).await
+    }
+
     /// Create a follow (`app.bsky.graph.follow`). Returns the new
     /// record's URI so the caller can pass it back to
     /// [`Self::delete_record`] to unfollow. `subject_did` is the DID

@@ -2012,6 +2012,53 @@ a {
     color: var(--color-smooai-orange);
 }
 
+/* Small icon-only buttons (Mute, Block) inline with Follow. Same
+   visual weight as a chip — square, bordered, hover changes color. */
+.profile__icon-action {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted-foreground);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.profile__icon-action:hover:not(:disabled) {
+    background: var(--card);
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+/* Currently in the active state (already muted / already blocking) —
+   the icon should make the existing state obvious. */
+.profile__icon-action--active {
+    background: rgba(244, 159, 10, 0.12);
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+.profile__icon-action--danger:hover:not(:disabled) {
+    background: rgba(255, 107, 108, 0.1);
+    border-color: var(--color-smooai-red);
+    color: var(--color-smooai-red);
+}
+
+.profile__icon-action--danger.profile__icon-action--active {
+    background: rgba(255, 107, 108, 0.1);
+    border-color: var(--color-smooai-red);
+    color: var(--color-smooai-red);
+}
+
+.profile__icon-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .profile__identity {
     padding: 12px 16px 0;
     display: flex;

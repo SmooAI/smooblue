@@ -184,6 +184,26 @@ pub fn LogOut(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdLogOut } }
 }
 
+#[component]
+pub fn VolumeOff(size: Size) -> Element {
+    let px = size.px();
+    // Lucide's "muted" icon is LdVolumeX (the volume symbol with an
+    // ×). The pack doesn't ship a "VolumeOff" variant.
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdVolumeX } }
+}
+
+#[component]
+pub fn Volume(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdVolume2 } }
+}
+
+#[component]
+pub fn Ban(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdBan } }
+}
+
 /// Small relative-time text ("11s", "1h", "3d") that updates every
 /// second by subscribing to the global `Tick` signal. Lifted out of
 /// PostCard / NotificationCard so the 1Hz tick re-renders only this

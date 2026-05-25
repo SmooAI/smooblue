@@ -141,6 +141,26 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
     let mut follow_pending = use_signal(|| false);
     let is_following = follow_uri.read().is_some();
 
+    // Mute is a server-side preference, not a record — no URI to track,
+    // just a bool. We seed from viewer.muted and flip optimistically.
+    let initial_muted = p
+        .viewer
+        .as_ref()
+        .and_then(|v| v.muted)
+        .unwrap_or(false);
+    let mut is_muted = use_signal(|| initial_muted);
+    let mut mute_pending = use_signal(|| false);
+
+    // Block IS a record (others need to see your block list). Track
+    // the AT-URI so we can deleteRecord on unblock.
+    let initial_block_uri = p
+        .viewer
+        .as_ref()
+        .and_then(|v| v.blocking.as_ref().cloned());
+    let mut block_uri = use_signal(|| initial_block_uri.clone());
+    let mut block_pending = use_signal(|| false);
+    let is_blocking = block_uri.read().is_some();
+
     let did_for_follow = did.clone();
     let toggle_follow = move |_| {
         if *follow_pending.read() {
@@ -182,6 +202,66 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         ));
     };
 
+    let did_for_mute = did.clone();
+    let toggle_mute = move |_| {
+        if *mute_pending.read() {
+            return;
+        }
+        if session.read().is_none() {
+            return;
+        }
+        mute_pending.set(true);
+        let did_clone = did_for_mute.clone();
+        let currently_muted = *is_muted.read();
+        spawn(async move {
+            let Some(client) = fresh_client(session).await else {
+                mute_pending.set(false);
+                return;
+            };
+            let result = if currently_muted {
+                client.unmute_actor(&did_clone).await
+            } else {
+                client.mute_actor(&did_clone).await
+            };
+            match result {
+                Ok(_) => is_muted.set(!currently_muted),
+                Err(e) => tracing::warn!(error = %e, "smooblue: mute toggle failed"),
+            }
+            mute_pending.set(false);
+        });
+    };
+
+    let did_for_block = did.clone();
+    let toggle_block = move |_| {
+        if *block_pending.read() {
+            return;
+        }
+        if session.read().is_none() {
+            return;
+        }
+        block_pending.set(true);
+        let did_clone = did_for_block.clone();
+        let currently_blocking = block_uri.read().clone();
+        spawn(async move {
+            let Some(client) = fresh_client(session).await else {
+                block_pending.set(false);
+                return;
+            };
+            if let Some(uri) = currently_blocking {
+                match client.delete_record(&uri).await {
+                    Ok(_) => block_uri.set(None),
+                    Err(e) => tracing::warn!(error = %e, "smooblue: unblock failed"),
+                }
+            } else {
+                match client.create_block(&did_clone).await {
+                    Ok(rec) => block_uri.set(Some(rec.uri)),
+                    Err(e) => tracing::warn!(error = %e, "smooblue: block failed"),
+                }
+            }
+            block_pending.set(false);
+        });
+    };
+
     let banner_style = match banner.as_deref() {
         Some(url) if !url.is_empty() => format!(
             "background-image: url('{url}'); background-size: cover; background-position: center;"
@@ -220,6 +300,37 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
                         disabled: *follow_pending.read(),
                         onclick: toggle_follow,
                         "{follow_label}"
+                    }
+                    // Mute toggles via the procedure call (no record).
+                    // Icon flips between Volume (currently muted) and
+                    // VolumeOff (currently unmuted, click to mute).
+                    button {
+                        class: if *is_muted.read() {
+                            "profile__icon-action profile__icon-action--active"
+                        } else {
+                            "profile__icon-action"
+                        },
+                        disabled: *mute_pending.read(),
+                        title: if *is_muted.read() { "Unmute" } else { "Mute" },
+                        onclick: toggle_mute,
+                        if *is_muted.read() {
+                            icons::Volume { size: icons::Size::Sm }
+                        } else {
+                            icons::VolumeOff { size: icons::Size::Sm }
+                        }
+                    }
+                    // Block is more destructive — visually offset in red
+                    // when active so the user knows the relationship.
+                    button {
+                        class: if is_blocking {
+                            "profile__icon-action profile__icon-action--danger profile__icon-action--active"
+                        } else {
+                            "profile__icon-action profile__icon-action--danger"
+                        },
+                        disabled: *block_pending.read(),
+                        title: if is_blocking { "Unblock" } else { "Block" },
+                        onclick: toggle_block,
+                        icons::Ban { size: icons::Size::Sm }
                     }
                 }
                 button {
