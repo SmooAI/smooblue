@@ -19,7 +19,7 @@ use crate::components::post::PostCard;
 use crate::components::report_sheet::ReportTarget;
 use crate::demo;
 use crate::icons;
-use crate::state::{add_column_unique, ColumnSpec, ProfileFocus, ReportFocus};
+use crate::state::{add_column_unique, ColumnSpec, ProfileEditOpen, ProfileFocus, ReportFocus};
 use dioxus::prelude::*;
 use smooblue_atproto::{ActorProfile, FeedItem, PostAuthor};
 use smooblue_oauth::Session;
@@ -232,6 +232,19 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         });
     };
 
+    // True when this profile sheet is showing the signed-in user's
+    // own profile. Drives the "Edit profile" affordance and hides
+    // self-actions (follow/mute/block/report yourself).
+    let is_self = session
+        .read()
+        .as_ref()
+        .map(|s| s.did == did)
+        .unwrap_or(false);
+    let mut profile_edit_open = use_context::<Signal<ProfileEditOpen>>();
+    let open_edit_profile = move |_| {
+        profile_edit_open.set(ProfileEditOpen(true));
+    };
+
     let did_for_report = did.clone();
     let mut report_focus = use_context::<Signal<ReportFocus>>();
     let open_report = move |_| {
@@ -303,7 +316,15 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
                 }
             }
             div { class: "profile__actions",
-                if session.read().is_some() {
+                if session.read().is_some() && is_self {
+                    // Own profile — show "Edit profile" instead of
+                    // follow/mute/block/report.
+                    button { class: "btn btn--primary",
+                        onclick: open_edit_profile,
+                        "Edit profile"
+                    }
+                }
+                if session.read().is_some() && !is_self {
                     button {
                         class: "{follow_button_class}",
                         disabled: *follow_pending.read(),

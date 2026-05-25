@@ -276,6 +276,11 @@ impl ThemeMode {
     }
 }
 
+/// Open state for the profile editor sheet. Toggled by the
+/// "Edit profile" button on the own-profile view.
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct ProfileEditOpen(pub bool);
+
 /// What the report sheet is targeting (account or post). `None` when
 /// the sheet is closed. Set by ProfileSheet's Report action or a
 /// future per-post menu.
@@ -375,6 +380,7 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<KeyboardHelp>>(|| Signal::new(KeyboardHelp(false)));
     use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
     use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
+    use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
     use_context_provider::<Signal<ThemeMode>>(|| {
         let mode = crate::persistence::load_theme()
             .map(|s| ThemeMode::from_str(&s))

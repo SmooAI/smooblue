@@ -814,6 +814,58 @@ impl AtClient {
         Ok(())
     }
 
+    /// Read the signed-in user's `app.bsky.actor.profile` record via
+    /// `com.atproto.repo.getRecord`. Used by the profile-editor sheet
+    /// to round-trip the existing fields without dropping any (the
+    /// profile record may carry labels, joinedViaStarterPack, etc.
+    /// that we don't want to clobber on save).
+    ///
+    /// Returns `(record_value, cid_for_swap)`. The CID is what
+    /// `putRecord` expects as `swapRecord` so the write is atomic.
+    pub async fn get_profile_record(&self) -> Result<(serde_json::Value, String), AtError> {
+        let did = self.session.lock().did.clone();
+        let mut url = self
+            .session_pds_url("/xrpc/com.atproto.repo.getRecord")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("repo", &did)
+            .append_pair("collection", "app.bsky.actor.profile")
+            .append_pair("rkey", "self");
+        let v: serde_json::Value = self.get_json(&url).await?;
+        let cid = v
+            .get("cid")
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| AtError::Decode("getRecord response missing cid".into()))?
+            .to_string();
+        let value = v.get("value").cloned().unwrap_or_else(|| serde_json::json!({}));
+        Ok((value, cid))
+    }
+
+    /// Overwrite the signed-in user's `app.bsky.actor.profile` record
+    /// with `new_value`, atomic against `swap_cid` so a concurrent
+    /// edit from another client fails fast instead of silently
+    /// clobbering. Caller is responsible for preserving unchanged
+    /// fields from the prior record.
+    pub async fn put_profile_record(
+        &self,
+        new_value: serde_json::Value,
+        swap_cid: &str,
+    ) -> Result<(), AtError> {
+        let did = self.session.lock().did.clone();
+        let body = serde_json::json!({
+            "repo": did,
+            "collection": "app.bsky.actor.profile",
+            "rkey": "self",
+            "swapRecord": swap_cid,
+            "record": new_value,
+        });
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.repo.putRecord")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
     /// Fetch trending topics via `app.bsky.unspecced.getTrendingTopics`.
     /// `unspecced` endpoints are bsky-AppView-internal — they're not
     /// in the public lexicon, so the shape is best-effort and may

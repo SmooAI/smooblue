@@ -6,6 +6,7 @@ pub mod engagement;
 pub mod notification_card;
 pub mod post;
 pub mod profile;
+pub mod profile_edit_sheet;
 pub mod report_sheet;
 pub mod saved_feeds_sheet;
 pub mod search_sheet;
