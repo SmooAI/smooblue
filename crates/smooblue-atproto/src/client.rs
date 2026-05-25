@@ -871,6 +871,48 @@ impl AtClient {
         Ok(())
     }
 
+    /// List the feed generators the signed-in user has authored
+    /// (collection `app.bsky.feed.generator` on their own repo) and
+    /// resolve them into views via `getFeedGenerators`. Used by the
+    /// "Your feeds" section in the Saved Feeds picker so the user
+    /// can drop their own custom feeds into the deck without having
+    /// to paste an AT-URI.
+    pub async fn list_own_feed_generators(
+        &self,
+    ) -> Result<Vec<crate::feed::FeedGeneratorView>, AtError> {
+        let did = self.session.lock().did.clone();
+        let mut url = self
+            .session_pds_url("/xrpc/com.atproto.repo.listRecords")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("repo", &did)
+            .append_pair("collection", "app.bsky.feed.generator")
+            .append_pair("limit", "50");
+
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(default)]
+            records: Vec<Record>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Record {
+            uri: String,
+        }
+        let r: Resp = self.get_json(&url).await?;
+        let uris: Vec<String> = r.records.into_iter().map(|r| r.uri).collect();
+        if uris.is_empty() {
+            return Ok(Vec::new());
+        }
+        // getFeedGenerators is the public hydration endpoint —
+        // returns FeedGeneratorView with display name + avatar.
+        let views = self
+            .get_feed_generators(&uris)
+            .await
+            .map(|r| r.feeds)
+            .unwrap_or_default();
+        Ok(views)
+    }
+
     /// Fetch trending topics via `app.bsky.unspecced.getTrendingTopics`.
     /// `unspecced` endpoints are bsky-AppView-internal — they're not
     /// in the public lexicon, so the shape is best-effort and may

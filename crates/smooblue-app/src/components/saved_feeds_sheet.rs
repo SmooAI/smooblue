@@ -31,6 +31,11 @@ struct Loaded {
     /// against `feeds` (user's already-saved feeds) so we don't
     /// suggest things they already have.
     popular: Vec<FeedGeneratorView>,
+    /// Feed generators the signed-in user has authored (their own
+    /// app.bsky.feed.generator records). Surfaces under "Your
+    /// feeds" so creators can drop their own work into the deck
+    /// without pasting URIs.
+    own_feeds: Vec<FeedGeneratorView>,
 }
 
 #[component]
@@ -52,6 +57,7 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                     lists: crate::demo::own_lists(),
                     trending: crate::demo::trending_topics(),
                     popular: crate::demo::popular_feeds(),
+                    own_feeds: crate::demo::popular_feeds(),
                 });
             }
             let Some(client) = fresh_client(session_sig).await else {
@@ -138,11 +144,14 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                 })
                 .unwrap_or_default();
 
+            let own_feeds = client.list_own_feed_generators().await.unwrap_or_default();
+
             Ok(Loaded {
                 feeds: pinned,
                 lists,
                 trending,
                 popular,
+                own_feeds,
             })
         }
     });
@@ -188,6 +197,29 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                             if loaded.feeds.is_empty() && loaded.lists.is_empty() {
                                 div { class: "saved-feeds__empty",
                                     "No saved feeds or lists yet. Save a feed or create a list on Bluesky and they'll show up here."
+                                }
+                            }
+                            // "Your feeds" — the user's own authored
+                            // feed generators (from listRecords on the
+                            // app.bsky.feed.generator collection).
+                            // Rendered first so they're impossible to
+                            // miss when the user comes here looking for
+                            // their own work.
+                            if !loaded.own_feeds.is_empty() {
+                                h3 { class: "saved-feeds__section-title", "Your feeds" }
+                                for view in loaded.own_feeds.iter() {
+                                    PopularFeedRow {
+                                        key: "own-{view.uri}",
+                                        view: view.clone(),
+                                        on_add: {
+                                            let mut cols_for_add = cols;
+                                            let mut open_after = open;
+                                            move |spec: ColumnSpec| {
+                                                add_column_unique(&mut cols_for_add, spec);
+                                                open_after.set(false);
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if !loaded.feeds.is_empty() {

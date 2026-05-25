@@ -83,7 +83,11 @@ pub fn Sidebar(
             RailBtn { label: "Saved feeds", active: false, kind: RailKind::Bookmark, badge: 0, onclick: open_saved_feeds }
             RailBtn { label: "Suggested follows", active: false, kind: RailKind::Sparkles, badge: 0, onclick: add_suggestions }
             div { class: "rail__divider" }
-            RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_search }
+            // "+ Add column" opens the Saved Feeds sheet (which lists
+            // your saved feeds, your lists, your *own* feed generators,
+            // trending topics, popular feeds, AND a paste-a-URI box).
+            // Search is its own button above — they're different intents.
+            RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_saved_feeds }
             div { class: "rail__spacer" }
             RailBtn { label: "Profile", active: false, kind: RailKind::Profile, badge: 0, onclick: open_self_profile }
             RailBtn { label: "Settings", active: false, kind: RailKind::Settings, badge: 0, onclick: open_settings }
