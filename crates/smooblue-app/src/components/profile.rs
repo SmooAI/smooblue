@@ -388,8 +388,24 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
             if data.feed.is_empty() {
                 div { class: "profile__feed-empty", "No posts yet." }
             } else {
-                for item in data.feed.iter() {
-                    PostCard { key: "{item.post.uri}", post: item.post.clone() }
+                {
+                    let pinned_uri = data.profile.pinned_post.as_ref().map(|r| r.uri.clone());
+                    let pinned = pinned_uri
+                        .as_ref()
+                        .and_then(|uri| data.feed.iter().find(|it| &it.post.uri == uri).cloned());
+                    rsx! {
+                        if let Some(item) = pinned {
+                            div { class: "profile__pinned",
+                                div { class: "profile__pinned-chip", "📌 Pinned" }
+                                PostCard { key: "pinned-{item.post.uri}", post: item.post.clone() }
+                            }
+                        }
+                        for item in data.feed.iter() {
+                            if Some(&item.post.uri) != pinned_uri.as_ref() {
+                                PostCard { key: "{item.post.uri}", post: item.post.clone() }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -2546,6 +2546,23 @@ a {
     font-style: italic;
 }
 
+/* Pinned post on profile — wraps a PostCard and adds a small
+ * "📌 Pinned" chip at the top-left so it reads distinct from
+ * the regular feed below. */
+.profile__pinned {
+    margin-bottom: 8px;
+}
+
+.profile__pinned-chip {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--color-smooai-orange);
+    margin: 6px 4px 4px;
+}
+
 .profile__loading,
 .profile__error {
     color: var(--muted-foreground);

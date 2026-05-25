@@ -846,6 +846,7 @@ pub fn suggestions() -> Vec<ActorProfile> {
         follows_count: Some(0),
         posts_count: Some(0),
         viewer: Some(ActorViewerState::default()),
+        pinned_post: None,
     };
     vec![
         make("paul.frazee.com", "Paul Frazee", "paul",
@@ -1010,10 +1011,20 @@ pub fn profile_for(actor: &str) -> (ActorProfile, Vec<FeedItem>) {
             blocked_by: Some(false),
             blocking: None,
         }),
+        pinned_post: None,
     };
     // Re-use the same demo feed (first three posts are "yours" in the
     // home_feed timeline anyway, so the profile reads as authentic).
     let feed = home_feed();
+    // Demo a pinned post by pointing at whichever URI comes back
+    // first — gives the chip something concrete to render against.
+    let mut profile = profile;
+    if let Some(first) = feed.first() {
+        profile.pinned_post = Some(smooblue_atproto::feed::PinnedPostRef {
+            uri: first.post.uri.clone(),
+            cid: Some(first.post.cid.clone()),
+        });
+    }
     (profile, feed)
 }
 

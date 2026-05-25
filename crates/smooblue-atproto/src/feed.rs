@@ -39,6 +39,18 @@ pub struct ActorProfile {
     /// this actor, is followed back, has them muted/blocked.
     #[serde(default)]
     pub viewer: Option<ActorViewerState>,
+    /// Optional StrongRef to a post this actor has pinned to the top
+    /// of their profile. `app.bsky.actor.profile.pinnedPost`.
+    #[serde(rename = "pinnedPost", default)]
+    pub pinned_post: Option<PinnedPostRef>,
+}
+
+/// Tiny StrongRef shape used by ActorProfile.pinnedPost.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct PinnedPostRef {
+    pub uri: String,
+    #[serde(default)]
+    pub cid: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
