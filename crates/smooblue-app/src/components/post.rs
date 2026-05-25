@@ -358,7 +358,22 @@ pub fn PostCard(
                     div { class: "post__head",
                         span { class: "post__name", "{name}" }
                         span { class: "post__handle", "@{handle}" }
-                        span { class: "post__time",
+                        // Timestamp is a permalink to bsky.app — opens
+                        // in the system default browser.
+                        button {
+                            class: "post__time post__time--link",
+                            title: "Open on bsky.app",
+                            onclick: {
+                                let uri = post_uri.clone();
+                                let handle = post.author.handle.clone();
+                                move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    if let Some(rkey) = uri.rsplit('/').next() {
+                                        let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
+                                        let _ = std::process::Command::new("open").arg(&url).spawn();
+                                    }
+                                }
+                            },
                             icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
                         }
                     }

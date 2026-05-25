@@ -63,6 +63,11 @@ pub struct BlobLink {
 /// Single image attached to a post (`app.bsky.embed.images` item).
 #[derive(Clone, Debug, Serialize)]
 pub struct PostImage {
+    /// Serialized as `image` per the lexicon
+    /// (`app.bsky.embed.images#image`). The previous field name
+    /// `blob` shipped a record the AppView rejected with
+    /// `Missing required key "image"`.
+    #[serde(rename = "image")]
     pub blob: BlobRef,
     /// Screen-reader description. Empty string is valid but discouraged.
     pub alt: String,
@@ -1390,8 +1395,11 @@ mod tests {
                 assert_eq!(embed["$type"], "app.bsky.embed.images");
                 assert_eq!(embed["images"].as_array().unwrap().len(), 1);
                 assert_eq!(embed["images"][0]["alt"], "a cat sitting on a keyboard");
-                assert_eq!(embed["images"][0]["blob"]["$type"], "blob");
-                assert_eq!(embed["images"][0]["blob"]["ref"]["$link"], "bafyJPG");
+                // Lexicon key is "image" (not "blob") — bsky AppView
+                // rejected records with the wrong key as
+                // `Missing required key "image"`.
+                assert_eq!(embed["images"][0]["image"]["$type"], "blob");
+                assert_eq!(embed["images"][0]["image"]["ref"]["$link"], "bafyJPG");
                 assert_eq!(embed["images"][0]["aspectRatio"]["width"], 1600);
                 assert_eq!(embed["images"][0]["aspectRatio"]["height"], 900);
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({

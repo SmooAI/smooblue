@@ -1855,6 +1855,35 @@ a {
     color: var(--color-smooai-blue-300);
 }
 
+/* Drag-and-drop visual feedback on the compose sheet — a dashed
+ * orange border with a faint orange wash so the user knows the
+ * sheet will accept the drop. */
+/* Timestamp is a button that links out to bsky.app — make sure
+ * it doesn't inherit any button chrome and keeps the muted-text
+ * look of the surrounding head row, with a brand-orange tint on
+ * hover for affordance. */
+.post__time--link {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+}
+
+.post__time--link:hover {
+    color: var(--color-smooai-orange);
+    text-decoration: underline;
+}
+
+.compose__sheet--drag {
+    outline: 2px dashed var(--color-smooai-orange);
+    outline-offset: -8px;
+    background: linear-gradient(rgba(244, 159, 10, 0.06),
+                                rgba(244, 159, 10, 0.06)),
+                var(--card);
+}
+
 /* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */

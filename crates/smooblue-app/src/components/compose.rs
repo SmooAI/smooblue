@@ -413,10 +413,75 @@ pub fn ComposeSheet() -> Element {
 
     let post_disabled = empty || over || any_preparing || any_failed || *posting.read();
 
+    // Drag-and-drop: accept image files dropped anywhere on the
+    // compose sheet. Same pipeline as the +Image picker — push an
+    // AttachedImage placeholder, then process in the background
+    // (decode, generate alt-text, etc.). dragover must call
+    // prevent_default or the browser refuses to fire drop.
+    let mut dragging = use_signal(|| false);
+    let on_dragover = move |e: DragEvent| {
+        e.prevent_default();
+        if !*dragging.read() {
+            dragging.set(true);
+        }
+    };
+    let on_dragleave = move |_| dragging.set(false);
+    let on_drop = move |e: DragEvent| {
+        use dioxus::html::HasFileData;
+        e.prevent_default();
+        dragging.set(false);
+        let Some(file_engine) = e.files() else {
+            return;
+        };
+        let names = file_engine.files();
+        let mut attachments_for_drop = attachments;
+        spawn(async move {
+            let already = attachments_for_drop.read().len();
+            let slots = MAX_IMAGES.saturating_sub(already);
+            if slots == 0 {
+                return;
+            }
+            let llm: Option<Arc<dyn AltTextProvider>> =
+                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+            for name in names.into_iter().take(slots) {
+                // file_engine.files() returns paths on desktop;
+                // skip anything that isn't a readable image file.
+                let path = PathBuf::from(&name);
+                if !path.is_file() {
+                    continue;
+                }
+                let ext = path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic") {
+                    continue;
+                }
+                let att = AttachedImage::new(path.clone());
+                let id = att.id;
+                attachments_for_drop.write().push(att);
+                let atts = attachments_for_drop;
+                let llm_for_image = llm.clone();
+                spawn(async move {
+                    process_attachment(atts, id, path, llm_for_image).await;
+                });
+            }
+        });
+    };
+
     rsx! {
         div { class: "modal__backdrop", onclick: close,
-            div { class: "modal__sheet compose__sheet",
+            div {
+                class: if *dragging.read() {
+                    "modal__sheet compose__sheet compose__sheet--drag"
+                } else {
+                    "modal__sheet compose__sheet"
+                },
                 onclick: move |e| e.stop_propagation(),
+                ondragover: on_dragover,
+                ondragleave: on_dragleave,
+                ondrop: on_drop,
                 div { class: "compose__head",
                     span { class: "compose__title", "{title_text}" }
                     button { class: "compose__close",
