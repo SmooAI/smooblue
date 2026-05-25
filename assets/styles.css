@@ -253,6 +253,10 @@ a {
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     display: flex;
+    /* flex-wrap so the optional .post__context chip (flex-basis: 100%)
+     * forces a line break and the avatar+body row flows below it
+     * instead of being squeezed into the same line. */
+    flex-wrap: wrap;
     gap: 10px;
     transition: background 100ms;
 }
@@ -1827,14 +1831,18 @@ a {
  * the "force a new row in a flex container" trick so the chip sits
  * above the avatar+body row without needing to restructure. */
 .post__context {
-    flex: 1 0 100%;
+    /* Force a wrap so this chip sits on its own row above the
+     * avatar+body. flex-basis: 100% + flex-grow: 0 + flex-shrink: 0
+     * keeps it from being squashed by the row below. */
+    flex: 0 0 100%;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     font-size: 12px;
     color: var(--muted-foreground);
-    padding: 0 0 4px 38px;
-    margin-top: -2px;
+    padding: 0 0 0 38px;
+    margin: -2px 0 -4px;
+    line-height: 1.2;
 }
 
 .post__context-chip {
