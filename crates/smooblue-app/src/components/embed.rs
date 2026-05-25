@@ -296,18 +296,21 @@ fn VideoPlayer(
     rsx! {
         div { class: "embed__video",
             style: "padding-top: {padding_pct}%;",
-            // playsinline + referrerpolicy aren't in dioxus's typed
-            // attribute set for <video>, but the HTML element honors
-            // them — pass via raw `key: "value"` attribute syntax.
+            // No `crossorigin` attr — that would force a CORS preflight
+            // on the .m3u8 playlist, and bsky's video CDN doesn't ship
+            // `Access-Control-Allow-Origin` for those, so the playlist
+            // would silently fail to load (controls show but Play
+            // does nothing). Same reasoning for `referrerpolicy` —
+            // forcing no-referrer can break hotlink-protected CDNs.
+            // The lightbox <video> has neither attr and works; this
+            // matches that config.
             video {
                 class: "embed__video-el",
                 src: "{playlist}",
                 poster: "{poster_attr}",
                 controls: true,
-                preload: "none",
-                crossorigin: "anonymous",
+                preload: "metadata",
                 "playsinline": "true",
-                "referrerpolicy": "no-referrer",
             }
             button { class: "embed__video-expand",
                 title: "Open in lightbox",
