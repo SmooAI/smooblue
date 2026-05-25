@@ -49,12 +49,11 @@ pub fn ThreadSheet() -> Element {
     // Dioxus rules, so we put the early-return after them.
     let uri_opt = snap.clone();
 
-    // use_resource keys on the focused URI — clicking a different
-    // post inside the thread re-fires the fetch automatically.
-    let key = uri_opt.clone();
+    // Reactive: read focus inside the resource so clicking through
+    // to a different post inside the thread re-fires the fetch.
     let thread = use_resource(move || {
-        let uri = key.clone();
         let session_sig = session;
+        let uri = focus.read().0.clone();
         async move {
             let Some(uri) = uri else {
                 return Err::<ThreadView, String>("no focus".into());
@@ -95,8 +94,12 @@ pub fn ThreadSheet() -> Element {
                 div { class: "thread__body",
                     match &*thread.read_unchecked() {
                         Some(Ok(t)) => rsx! { ThreadBody { thread: t.clone() } },
-                        Some(Err(e)) => rsx! {
-                            div { class: "thread__error", "Couldn't load thread: {e}" }
+                        Some(Err(e)) => {
+                            if e == "no focus" {
+                                rsx! { div { class: "thread__loading", "Loading thread…" } }
+                            } else {
+                                rsx! { div { class: "thread__error", "Couldn't load thread: {e}" } }
+                            }
                         },
                         None => rsx! {
                             div { class: "thread__loading", "Loading thread…" }

@@ -11,7 +11,7 @@
 
 use crate::components::embed::EmbedView;
 use crate::icons;
-use crate::state::ProfileFocus;
+use crate::state::{ProfileFocus, ThreadFocus};
 use dioxus::prelude::*;
 use smooblue_atproto::{NotificationGroup, PostAuthor, PostView};
 
@@ -43,8 +43,34 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
     let time_initial = first.relative_time();
     let time_source = first.indexed_at.clone();
 
+    // Which post the user lands on when they click the card.
+    // For inbound interactions (reply / mention / quote) the *event*
+    // post is the conversation — first.uri. For likes / reposts /
+    // starterpack-joined the *subject* post is the one they care
+    // about (their own post that just got engagement); we fall back
+    // to first.reason_subject which is bsky's lexicon hook for that.
+    // Follows don't have a post at all — click target stays empty.
+    let mut thread_focus = use_context::<Signal<ThreadFocus>>();
+    let mut profile_focus = use_context::<Signal<ProfileFocus>>();
+    let click_target: Option<String> = match reason.as_str() {
+        "reply" | "mention" | "quote" => Some(first.uri.clone()),
+        "like" | "repost" => first.reason_subject.clone(),
+        _ => None,
+    };
+    let click_target_for_profile = first.author.did.clone();
+    let click_card = move |_| {
+        if let Some(uri) = &click_target {
+            thread_focus.set(ThreadFocus(Some(uri.clone())));
+        } else {
+            // Pure follow / unknown — fall through to opening the
+            // actor's profile so the click still does something.
+            profile_focus.set(ProfileFocus(Some(click_target_for_profile.clone())));
+        }
+    };
+
     rsx! {
         article { class: "{unread_class}",
+            onclick: click_card,
             div { class: "{icon_color_class}",
                 match reason.as_str() {
                     "like" => rsx! { icons::Heart { size: icons::Size::Sm } },
@@ -110,7 +136,10 @@ fn NotifPhrase(group: NotificationGroup) -> Element {
         return rsx! {
             span { class: "notif__phrase",
                 button { class: "notif__name-link",
-                    onclick: move |_| profile_focus.set(ProfileFocus(Some(did_for_click.clone()))),
+                    onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    profile_focus.set(ProfileFocus(Some(did_for_click.clone())));
+                },
                     "{name}"
                 }
                 " {verb}"
@@ -141,7 +170,10 @@ fn NotifPhrase(group: NotificationGroup) -> Element {
     rsx! {
         span { class: "notif__phrase",
             button { class: "notif__name-link",
-                onclick: move |_| profile_focus.set(ProfileFocus(Some(first_did.clone()))),
+                onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    profile_focus.set(ProfileFocus(Some(first_did.clone())));
+                },
                 "{first_name}"
             }
             if let (Some(sname), Some(sdid)) = (second_name, second_did) {
@@ -151,7 +183,10 @@ fn NotifPhrase(group: NotificationGroup) -> Element {
                     ", "
                 }
                 button { class: "notif__name-link",
-                    onclick: move |_| profile_focus.set(ProfileFocus(Some(sdid.clone()))),
+                    onclick: move |e: MouseEvent| {
+                    e.stop_propagation();
+                    profile_focus.set(ProfileFocus(Some(sdid.clone())));
+                },
                     "{sname}"
                 }
             }
@@ -174,7 +209,10 @@ fn AvatarStack(actors: Vec<PostAuthor>) -> Element {
             for (i, a) in actors.iter().enumerate() {
                 {
                     let did = a.did.clone();
-                    let on_click = move |_| profile_focus.set(ProfileFocus(Some(did.clone())));
+                    let on_click = move |e: MouseEvent| {
+        e.stop_propagation();
+        profile_focus.set(ProfileFocus(Some(did.clone())));
+    };
                     if let Some(url) = a.avatar.as_ref() {
                         rsx! {
                             button { key: "{i}",

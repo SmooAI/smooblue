@@ -416,9 +416,6 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
                 }
             }
             span { class: "deck-column__title", "{title}" }
-            button { class: "deck-column__action", title: "Sort",
-                icons::ListFilter { size: icons::Size::Sm }
-            }
             button { class: "deck-column__action", title: "Close column", onclick: close,
                 icons::X { size: icons::Size::Sm }
             }

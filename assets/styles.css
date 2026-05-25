@@ -1793,6 +1793,36 @@ a {
     color: var(--color-smooai-red);
 }
 
+/* Notification cards are now click-targets — the whole card opens
+ * the relevant thread (or profile for follow notifications). */
+.notif {
+    cursor: pointer;
+}
+
+.notif:hover {
+    background: var(--muted);
+}
+
+/* Custom-feed paste row in the Saved Feeds sheet */
+.custom-feed__row {
+    display: flex;
+    gap: 6px;
+    margin: 6px 2px 10px;
+}
+
+.custom-feed__row input {
+    flex: 1 1 auto;
+    font-size: 12px;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+}
+
+.custom-feed__hint {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    margin: 0 2px 6px;
+}
+
 /* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */

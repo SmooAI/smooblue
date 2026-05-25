@@ -40,10 +40,13 @@ pub fn ProfileSheet() -> Element {
     let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let snap = focus.read().0.clone();
 
-    let key = snap.clone();
+    // Reactive: read the focus signal *inside* the resource so
+    // Dioxus knows to re-run when the user opens the sheet on a
+    // different actor. Capturing a cloned `key` from the outer
+    // render would freeze the fetch on whoever was focused first.
     let data = use_resource(move || {
-        let actor = key.clone();
         let session_sig = session;
+        let actor = focus.read().0.clone();
         async move {
             let Some(actor) = actor else {
                 return Err::<ProfileData, String>("no focus".into());
@@ -72,6 +75,14 @@ pub fn ProfileSheet() -> Element {
     if snap.is_none() {
         return rsx! { Fragment {} };
     }
+    // Empty handle/DID slipped through (e.g., a click site that
+    // forgot to populate the focus). Close silently rather than
+    // showing the user a confusing "no focus" error from the
+    // resource's stale-cache branch.
+    if snap.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        focus.set(ProfileFocus(None));
+        return rsx! { Fragment {} };
+    }
 
     let close = move |_| {
         focus.set(ProfileFocus(None));
@@ -96,8 +107,17 @@ pub fn ProfileSheet() -> Element {
                             },
                         }
                     },
-                    Some(Err(e)) => rsx! {
-                        div { class: "profile__error", "Couldn't load profile: {e}" }
+                    Some(Err(e)) => {
+                        // Stale "no focus" Err from a prior render is
+                        // not a user-visible error — it just means the
+                        // sheet was re-opened on a new actor and the
+                        // new fetch hasn't resolved yet. Show the
+                        // loader instead of a scary red banner.
+                        if e == "no focus" {
+                            rsx! { div { class: "profile__loading", "Loading profile…" } }
+                        } else {
+                            rsx! { div { class: "profile__error", "Couldn't load profile: {e}" } }
+                        }
                     },
                     None => rsx! {
                         div { class: "profile__loading", "Loading profile…" }

@@ -415,7 +415,34 @@ pub fn PostCard(post: PostView) -> Element {
                     } else {
                         span { class: "post__action-count post__action-count--zero", "0" }
                     }
-                    span { class: "post__action post__action--right",
+                    // Copy the bsky.app permalink for this post.
+                    // Builds the URL from the at-uri rkey rather than
+                    // hard-coding it, so reposts / quoted posts get
+                    // the right destination too. Falls through silently
+                    // when the at-uri can't be parsed.
+                    button {
+                        class: "post__action post__action--right",
+                        title: "Copy link",
+                        onclick: {
+                            let uri = post_uri.clone();
+                            let handle = post.author.handle.clone();
+                            move |e: MouseEvent| {
+                                e.stop_propagation();
+                                if let Some(rkey) = uri.rsplit('/').next() {
+                                    let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
+                                    let _ = std::process::Command::new("pbcopy")
+                                        .stdin(std::process::Stdio::piped())
+                                        .spawn()
+                                        .and_then(|mut child| {
+                                            if let Some(stdin) = child.stdin.as_mut() {
+                                                use std::io::Write;
+                                                let _ = stdin.write_all(url.as_bytes());
+                                            }
+                                            child.wait()
+                                        });
+                                }
+                            }
+                        },
                         icons::MoreHorizontal { size: icons::Size::Sm }
                     }
                 }

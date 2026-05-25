@@ -168,6 +168,21 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                     }
                 }
                 div { class: "saved-feeds__body",
+                    // Custom feed by AT-URI — for advanced users who
+                    // want a feed that isn't in their bsky-saved list
+                    // (someone else's curated feed, an experimental
+                    // generator, etc.). One paste + Enter / + Add
+                    // mints a deck column.
+                    CustomFeedAdd {
+                        on_add: {
+                            let mut cols_for_add = cols;
+                            let mut open_after = open;
+                            move |spec: ColumnSpec| {
+                                add_column_unique(&mut cols_for_add, spec);
+                                open_after.set(false);
+                            }
+                        }
+                    }
                     match &*data.read_unchecked() {
                         Some(Ok(loaded)) => rsx! {
                             if loaded.feeds.is_empty() && loaded.lists.is_empty() {
@@ -294,6 +309,91 @@ fn ListRow(list: ListView, on_add: EventHandler<ColumnSpec>) -> Element {
             button { class: "btn btn--primary saved-feeds__add",
                 onclick: add,
                 "+ Column"
+            }
+        }
+    }
+}
+
+/// Paste-an-AT-URI box at the top of the saved-feeds sheet.
+/// Accepts either an `at://did:plc:.../app.bsky.feed.generator/<rkey>`
+/// URI directly, or a `https://bsky.app/profile/<handle>/feed/<rkey>`
+/// link that we translate. Trims aggressively; rejects anything
+/// that doesn't smell like a feed URI so we don't add bogus columns.
+#[component]
+fn CustomFeedAdd(on_add: EventHandler<ColumnSpec>) -> Element {
+    let mut value = use_signal(String::new);
+    let mut err = use_signal(|| None::<String>);
+
+    let mut try_add_inner = move || {
+        let raw = value.read().trim().to_string();
+        if raw.is_empty() {
+            return;
+        }
+        // bsky.app links → at-uri. Form: /profile/<handleOrDid>/feed/<rkey>
+        let normalized: Option<String> = if let Some(rest) = raw.strip_prefix("https://bsky.app/profile/") {
+            let mut parts = rest.split('/');
+            let actor = parts.next().unwrap_or("");
+            let kind = parts.next().unwrap_or("");
+            let rkey = parts.next().unwrap_or("");
+            if kind == "feed" && !actor.is_empty() && !rkey.is_empty() {
+                // bsky.app uses handles in URLs but the AT-URI needs
+                // a DID. Most generator profile pages also serve the
+                // DID-keyed URL; if the user passed a handle we
+                // surface an error guiding them to the at-uri form.
+                if actor.starts_with("did:") {
+                    Some(format!("at://{actor}/app.bsky.feed.generator/{rkey}"))
+                } else {
+                    err.set(Some("bsky.app link uses a handle — paste the at://did:plc:.../... form instead.".into()));
+                    None
+                }
+            } else {
+                err.set(Some("That bsky.app link doesn't look like a feed.".into()));
+                None
+            }
+        } else if raw.starts_with("at://") && raw.contains("/app.bsky.feed.generator/") {
+            Some(raw.clone())
+        } else {
+            err.set(Some("Paste an at://… feed URI or a bsky.app /feed/ link.".into()));
+            None
+        };
+        if let Some(uri) = normalized {
+            err.set(None);
+            value.set(String::new());
+            // Title falls back to the rkey until the column header
+            // fetch resolves the real generator name.
+            let title = uri
+                .rsplit('/')
+                .next()
+                .unwrap_or("Custom feed")
+                .to_string();
+            on_add.call(ColumnSpec::feed_with_title(uri, title));
+        }
+    };
+
+    rsx! {
+        h3 { class: "saved-feeds__section-title", "Add a custom feed" }
+        p { class: "custom-feed__hint",
+            "Paste a feed AT-URI (at://did:plc:…/app.bsky.feed.generator/…)."
+        }
+        div { class: "custom-feed__row",
+            input { class: "input",
+                placeholder: "at://did:plc:.../app.bsky.feed.generator/...",
+                value: "{value}",
+                oninput: move |e| value.set(e.value()),
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Enter {
+                        try_add_inner();
+                    }
+                },
+            }
+            button { class: "btn btn--primary",
+                onclick: move |_| try_add_inner(),
+                "+ Add"
+            }
+        }
+        if let Some(msg) = err.read().clone() {
+            p { class: "custom-feed__hint", style: "color: var(--color-smooai-red)",
+                "{msg}"
             }
         }
     }
