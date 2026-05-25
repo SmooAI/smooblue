@@ -220,6 +220,35 @@ pub struct EmbedAspectRatio {
     pub height: u32,
 }
 
+/// `app.bsky.graph.getLists` response — the user's own curated
+/// lists (each list is a set of accounts they've grouped). Adding
+/// one as a column hits `app.bsky.feed.getListFeed`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListsResponse {
+    #[serde(default)]
+    pub lists: Vec<ListView>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct ListView {
+    pub uri: String,
+    pub cid: String,
+    pub creator: PostAuthor,
+    pub name: String,
+    /// `"modlist"` (mute/block list) or `"curatelist"` (subscribe-able).
+    /// Only curatelists make sense as a column (a modlist would just
+    /// show muted/blocked accounts' posts).
+    pub purpose: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(rename = "listItemCount", default)]
+    pub list_item_count: Option<u64>,
+}
+
 /// `app.bsky.actor.getPreferences` response — opaque preferences
 /// blob; we only care about the savedFeedsPrefV2 entry.
 #[derive(Debug, Clone, Deserialize)]

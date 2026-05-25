@@ -11,7 +11,8 @@
 
 use smooblue_atproto::feed::{
     ActorProfile, ActorViewerState, Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView,
-    FeedGeneratorView, FeedItem, PostAuthor, PostRecord, PostView, SavedFeedItem, ThreadView,
+    FeedGeneratorView, FeedItem, ListView, PostAuthor, PostRecord, PostView, SavedFeedItem,
+    ThreadView,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -887,6 +888,31 @@ pub fn saved_feeds() -> Vec<(SavedFeedItem, Option<FeedGeneratorView>)> {
              "Developer news",
              "GitHub launches, language releases, conference talks.",
              "dev-news", false),
+    ]
+}
+
+/// Demo: a couple of curated lists owned by the user, for the lists
+/// section of the SavedFeedsSheet.
+pub fn own_lists() -> Vec<ListView> {
+    let creator = PostAuthor {
+        did: "did:plc:demo-you".into(),
+        handle: "you.bsky.social".into(),
+        display_name: Some("You".into()),
+        avatar: None,
+    };
+    let mklist = |name: &str, desc: &str, count: u64, seed: &str| ListView {
+        uri: format!("at://did:plc:demo-you/app.bsky.graph.list/{seed}"),
+        cid: format!("bafy-demo-list-{seed}"),
+        creator: creator.clone(),
+        name: name.into(),
+        purpose: "app.bsky.graph.defs#curatelist".into(),
+        description: Some(desc.into()),
+        avatar: Some(format!("https://picsum.photos/seed/list-{seed}/80")),
+        list_item_count: Some(count),
+    };
+    vec![
+        mklist("Rust people", "Folks doing interesting Rust work.", 47, "rust"),
+        mklist("Indy 500 cooks", "Indianapolis food writers + chefs I follow.", 12, "indy-cooks"),
     ]
 }
 

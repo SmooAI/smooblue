@@ -302,6 +302,28 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.graph.getLists` — curated lists owned by `actor`.
+    /// Used by the lists picker to show the signed-in user their
+    /// own lists for adding as columns.
+    pub async fn get_lists(
+        &self,
+        actor: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::ListsResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.graph.getLists")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("actor", actor)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// `app.bsky.actor.getPreferences` — the user's preferences blob,
     /// including saved feeds + lists. Backs the saved-feeds picker.
     pub async fn get_preferences(&self) -> Result<crate::feed::PreferencesResponse, AtError> {

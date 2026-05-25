@@ -12,13 +12,16 @@ use crate::auth_refresh::fresh_client;
 use crate::icons;
 use crate::state::{add_column_unique, ColumnSpec};
 use dioxus::prelude::*;
-use smooblue_atproto::{FeedGeneratorView, SavedFeedItem};
+use smooblue_atproto::{FeedGeneratorView, ListView, SavedFeedItem};
 use smooblue_oauth::Session;
 
 #[derive(Clone, PartialEq)]
 struct Loaded {
     /// Resolved feed-generator views, in pinned-first order.
     feeds: Vec<(SavedFeedItem, Option<FeedGeneratorView>)>,
+    /// User's own curated lists. Modlists filtered out — only
+    /// curatelists make sense as a column.
+    lists: Vec<ListView>,
 }
 
 #[component]
@@ -37,6 +40,7 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
             if crate::demo::is_active() {
                 return Ok(Loaded {
                     feeds: crate::demo::saved_feeds(),
+                    lists: crate::demo::own_lists(),
                 });
             }
             let Some(client) = fresh_client(session_sig).await else {
@@ -74,7 +78,34 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                 }
             }
             pinned.extend(other);
-            Ok(Loaded { feeds: pinned })
+
+            // Fetch the user's own curated lists too. Modlists are
+            // filtered out — those exist as mute/block lists, not as
+            // subscribable feeds.
+            let session_did = session_sig
+                .read()
+                .as_ref()
+                .map(|s| s.did.clone())
+                .unwrap_or_default();
+            let lists = if session_did.is_empty() {
+                Vec::new()
+            } else {
+                client
+                    .get_lists(&session_did, None, 50)
+                    .await
+                    .map(|r| {
+                        r.lists
+                            .into_iter()
+                            .filter(|l| l.purpose == "app.bsky.graph.defs#curatelist")
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+
+            Ok(Loaded {
+                feeds: pinned,
+                lists,
+            })
         }
     });
 
@@ -101,11 +132,13 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                 div { class: "saved-feeds__body",
                     match &*data.read_unchecked() {
                         Some(Ok(loaded)) => rsx! {
-                            if loaded.feeds.is_empty() {
+                            if loaded.feeds.is_empty() && loaded.lists.is_empty() {
                                 div { class: "saved-feeds__empty",
-                                    "No saved feeds yet. Save a feed on Bluesky and it'll show up here."
+                                    "No saved feeds or lists yet. Save a feed or create a list on Bluesky and they'll show up here."
                                 }
-                            } else {
+                            }
+                            if !loaded.feeds.is_empty() {
+                                h3 { class: "saved-feeds__section-title", "Feeds" }
                                 for (sf, view) in loaded.feeds.iter() {
                                     SavedFeedRow {
                                         key: "{sf.value}",
@@ -122,15 +155,71 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                                     }
                                 }
                             }
+                            if !loaded.lists.is_empty() {
+                                h3 { class: "saved-feeds__section-title", "Your lists" }
+                                for list in loaded.lists.iter() {
+                                    ListRow {
+                                        key: "{list.uri}",
+                                        list: list.clone(),
+                                        on_add: {
+                                            let mut cols_for_add = cols;
+                                            let mut open_after = open;
+                                            move |spec: ColumnSpec| {
+                                                add_column_unique(&mut cols_for_add, spec);
+                                                open_after.set(false);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         },
                         Some(Err(e)) => rsx! {
-                            div { class: "saved-feeds__error", "Couldn't load feeds: {e}" }
+                            div { class: "saved-feeds__error", "Couldn't load: {e}" }
                         },
                         None => rsx! {
                             div { class: "saved-feeds__loading", "Loading…" }
                         },
                     }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn ListRow(list: ListView, on_add: EventHandler<ColumnSpec>) -> Element {
+    let display = list.name.clone();
+    let desc = list.description.clone().unwrap_or_default();
+    let avatar = list.avatar.clone();
+    let count = list.list_item_count.unwrap_or(0);
+    let uri = list.uri.clone();
+    let title_for_add = display.clone();
+    let add = move |_| {
+        on_add.call(ColumnSpec::list(uri.clone(), title_for_add.clone()));
+    };
+    rsx! {
+        div { class: "saved-feeds__row",
+            div { class: "saved-feeds__avatar",
+                if let Some(url) = avatar {
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{display}" }
+                } else {
+                    div { class: "saved-feeds__avatar-placeholder",
+                        icons::Users { size: icons::Size::Md }
+                    }
+                }
+            }
+            div { class: "saved-feeds__meta",
+                div { class: "saved-feeds__name-row",
+                    span { class: "saved-feeds__name", "{display}" }
+                    span { class: "saved-feeds__pinned", "{count} accounts" }
+                }
+                if !desc.is_empty() {
+                    p { class: "saved-feeds__desc", "{desc}" }
+                }
+            }
+            button { class: "btn btn--primary saved-feeds__add",
+                onclick: add,
+                "+ Column"
             }
         }
     }
