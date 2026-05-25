@@ -11,7 +11,7 @@
 
 use smooblue_atproto::feed::{
     ActorProfile, ActorViewerState, Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView,
-    FeedGeneratorView, FeedItem, ListView, PostAuthor, PostRecord, PostView, SavedFeedItem,
+    FeedGeneratorView, FeedItem, Label, ListView, PostAuthor, PostRecord, PostView, SavedFeedItem,
     ThreadView,
 };
 use smooblue_atproto::Notification;
@@ -317,6 +317,27 @@ fn curated_home_feed() -> Vec<FeedItem> {
                 aspect_ratio: Some(smooblue_atproto::EmbedAspectRatio { width: 16, height: 9 }),
             }),
         ),
+        // A post with a "graphic-media" label so the content-warning
+        // interstitial renders in demo mode (tap to reveal).
+        {
+            let mut it = item(
+                "labeler-demo.bsky.social",
+                "Labeled post (demo)",
+                Some("https://picsum.photos/seed/label/80"),
+                "This post is marked as graphic-media — smooblue collapses it to a warning until you tap to reveal.",
+                Some(&img("graphic-demo")),
+                &m(320),
+                0, 0, 0,
+            );
+            it.post.labels = vec![Label {
+                src: "did:plc:moderation-demo".into(),
+                uri: it.post.uri.clone(),
+                cid: None,
+                val: "graphic-media".into(),
+                neg: false,
+            }];
+            it
+        },
     ]
 }
 
@@ -575,6 +596,7 @@ fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
         quote_count: 0,
         indexed_at: Some(ts.to_string()),
         viewer: None,
+        labels: Vec::new(),
     }
 }
 
@@ -653,6 +675,7 @@ fn item(
             like_count: likes,
             quote_count: 0,
             viewer: None,
+            labels: Vec::new(),
         },
     }
 }
@@ -690,6 +713,7 @@ fn item_with_embed(
             like_count: likes,
             quote_count: 0,
             viewer: None,
+            labels: Vec::new(),
         },
     }
 }

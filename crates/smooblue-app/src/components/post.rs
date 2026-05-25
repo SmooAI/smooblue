@@ -67,6 +67,20 @@ pub fn PostCard(post: PostView) -> Element {
     };
     let display_reposts = (post.repost_count + repost_delta).max(0);
 
+    // Content-label warning. When the post carries any "show me first"
+    // moderation label (porn / nudity / graphic-media / etc.), we
+    // render an interstitial in place of the body until the user
+    // taps "Show anyway". Per-card state so revealing one post
+    // doesn't reveal others with the same labels.
+    let needs_warning = post.needs_content_warning();
+    let warning_summary = if needs_warning {
+        post.warning_label_summary()
+    } else {
+        String::new()
+    };
+    let mut content_revealed = use_signal(|| false);
+    let show_warning = needs_warning && !*content_revealed.read();
+
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
     let time_initial = post.relative_time();
@@ -299,13 +313,27 @@ pub fn PostCard(post: PostView) -> Element {
                             icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
                         }
                     }
-                    if !text.is_empty() {
+                    if show_warning {
+                        // Interstitial replaces the body until user
+                        // taps to reveal. Per-card state so revealing
+                        // one labeled post doesn't reveal others.
+                        div { class: "post__warning",
+                            onclick: move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                content_revealed.set(true);
+                            },
+                            span { class: "post__warning-label", "{warning_summary}" }
+                            span { class: "post__warning-action", "Tap to show" }
+                        }
+                    } else if !text.is_empty() {
                         p { class: "post__text", "{text}" }
                     }
                 }
-                if let Some(e) = embed {
-                    div { class: "post__embed",
-                        EmbedView { embed: e }
+                if !show_warning {
+                    if let Some(e) = embed {
+                        div { class: "post__embed",
+                            EmbedView { embed: e }
+                        }
                     }
                 }
                 div { class: "post__actions",

@@ -23,8 +23,8 @@ pub use error::AtError;
 pub use feed::{
     ActorProfile, ActorViewerState, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind,
     EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FeedItem, FeedResponse, GetPostThreadResponse,
-    FeedGeneratorView, FeedGeneratorsResponse, KnownFollowersResponse, LikeView, LikesResponse,
-    ListView, ListsResponse, PostAuthor, PostRecord, PostView, PostViewerState,
+    FeedGeneratorView, FeedGeneratorsResponse, KnownFollowersResponse, Label, LikeView,
+    LikesResponse, ListView, ListsResponse, PostAuthor, PostRecord, PostView, PostViewerState,
     PreferencesResponse, QuotesResponse, RepostedByResponse, SavedFeedItem, SuggestionsResponse,
     ThreadView,
 };

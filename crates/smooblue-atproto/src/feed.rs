@@ -82,6 +82,104 @@ pub struct PostView {
     /// like/repost record (used to undo it).
     #[serde(default)]
     pub viewer: Option<PostViewerState>,
+    /// Moderation labels attached to this post (NSFW, graphic-media,
+    /// etc.). Empty for the overwhelming majority of posts. When
+    /// non-empty, the renderer shows a content-warning interstitial
+    /// before the post body.
+    #[serde(default)]
+    pub labels: Vec<Label>,
+}
+
+/// One moderation label attached to a post by the bsky moderation
+/// service or a third-party labeler. The `val` field is the
+/// canonical label name ("porn", "sexual", "graphic-media",
+/// "nudity", "sensitive", "gore"). `neg: true` means the labeler
+/// negated a previous label of the same name (i.e. retracted it).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Label {
+    /// DID of the labeler (e.g. the bsky mod team or a third-party).
+    pub src: String,
+    /// AT-URI the label applies to (the post itself, usually).
+    pub uri: String,
+    #[serde(default)]
+    pub cid: Option<String>,
+    /// Canonical label name. Compare against well-known values for
+    /// rendering decisions.
+    pub val: String,
+    /// `true` means this label retracts a prior label of the same
+    /// `val` from the same `src`. Renderers should treat the post
+    /// as un-labeled in that case.
+    #[serde(default)]
+    pub neg: bool,
+}
+
+impl PostView {
+    /// `true` when the post carries any "show me before I see this"
+    /// moderation label (porn / sexual / nudity / graphic-media /
+    /// sensitive / gore / etc.). Accounts for `neg: true` retractions.
+    pub fn needs_content_warning(&self) -> bool {
+        if self.labels.is_empty() {
+            return false;
+        }
+        let mut effective: std::collections::HashSet<(&str, &str)> =
+            std::collections::HashSet::new();
+        for l in &self.labels {
+            if l.neg {
+                effective.remove(&(l.src.as_str(), l.val.as_str()));
+            } else {
+                effective.insert((l.src.as_str(), l.val.as_str()));
+            }
+        }
+        effective.iter().any(|(_, val)| is_warning_label(val))
+    }
+
+    /// Comma-joined list of distinct warning labels on this post,
+    /// used as the heading text for the interstitial. Empty when
+    /// `needs_content_warning()` is `false`.
+    pub fn warning_label_summary(&self) -> String {
+        let mut out: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for l in &self.labels {
+            if l.neg {
+                continue;
+            }
+            if is_warning_label(&l.val) && seen.insert(l.val.as_str()) {
+                out.push(label_display(&l.val));
+            }
+        }
+        out.join(" · ")
+    }
+}
+
+/// Canonical "show user a warning" labels. Mirrors bsky.app's
+/// default behavior — these are the labels that get interstitials
+/// rather than being silently hidden or shown as-is.
+fn is_warning_label(val: &str) -> bool {
+    matches!(
+        val,
+        "porn"
+            | "sexual"
+            | "nudity"
+            | "graphic-media"
+            | "sensitive"
+            | "gore"
+            | "graphic"
+    )
+}
+
+/// User-facing display name for a label. Falls back to the raw `val`
+/// for unknown labels so a future bsky-coined label still renders
+/// something readable.
+fn label_display(val: &str) -> String {
+    match val {
+        "porn" => "Adult content".into(),
+        "sexual" => "Suggestive".into(),
+        "nudity" => "Nudity".into(),
+        "graphic-media" => "Graphic media".into(),
+        "sensitive" => "Sensitive".into(),
+        "gore" | "graphic" => "Graphic".into(),
+        other => other.replace('-', " "),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
