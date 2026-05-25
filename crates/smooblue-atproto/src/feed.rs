@@ -449,24 +449,72 @@ pub struct SavedFeedItem {
 
 impl PreferencesResponse {
     /// Pull the user's saved-feeds list out of the opaque
-    /// preferences blob. Returns `None` if the user hasn't set any
-    /// preferences (account is fresh, or just hasn't customized).
+    /// preferences blob. Handles both shapes the lexicon ships with:
+    ///
+    /// - `app.bsky.actor.defs#savedFeedsPrefV2` — newer, items array
+    ///   with `{ type, value, pinned, id }` per entry.
+    /// - `app.bsky.actor.defs#savedFeedsPref` (V1) — older, parallel
+    ///   `saved: [uri,...]` + `pinned: [uri,...]` arrays. Old accounts
+    ///   that never re-saved a feed still have this shape, and skipping
+    ///   it left the picker looking empty even when the user clearly
+    ///   had feeds on bsky.app.
+    ///
+    /// V2 wins when both are present (it's what bsky.app writes today).
     pub fn saved_feeds(&self) -> Vec<SavedFeedItem> {
+        let mut v2: Option<Vec<SavedFeedItem>> = None;
+        let mut v1: Option<Vec<SavedFeedItem>> = None;
         for entry in &self.preferences {
             let ty = entry.get("$type").and_then(|v| v.as_str()).unwrap_or("");
-            if ty == "app.bsky.actor.defs#savedFeedsPrefV2" {
-                if let Some(items) = entry.get("items").and_then(|v| v.as_array()) {
-                    let mut out = Vec::with_capacity(items.len());
-                    for it in items {
-                        if let Ok(sf) = serde_json::from_value::<SavedFeedItem>(it.clone()) {
-                            out.push(sf);
+            match ty {
+                "app.bsky.actor.defs#savedFeedsPrefV2" => {
+                    if let Some(items) = entry.get("items").and_then(|v| v.as_array()) {
+                        let mut out = Vec::with_capacity(items.len());
+                        for it in items {
+                            if let Ok(sf) = serde_json::from_value::<SavedFeedItem>(it.clone()) {
+                                out.push(sf);
+                            }
                         }
+                        v2 = Some(out);
                     }
-                    return out;
                 }
+                "app.bsky.actor.defs#savedFeedsPref" => {
+                    let pinned_uris: std::collections::HashSet<String> = entry
+                        .get("pinned")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let saved_uris: Vec<String> = entry
+                        .get("saved")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    // V1 saved entries are all feed generators (V1
+                    // predates lists in saved-feeds).
+                    let mut out: Vec<SavedFeedItem> = saved_uris
+                        .into_iter()
+                        .map(|uri| SavedFeedItem {
+                            pinned: pinned_uris.contains(&uri),
+                            kind: "feed".into(),
+                            value: uri,
+                            id: None,
+                        })
+                        .collect();
+                    // Surface pinned ones first to match bsky.app order.
+                    out.sort_by_key(|s| !s.pinned);
+                    v1 = Some(out);
+                }
+                _ => {}
             }
         }
-        Vec::new()
+        v2.or(v1).unwrap_or_default()
     }
 }
 
