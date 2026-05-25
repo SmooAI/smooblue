@@ -1676,4 +1676,145 @@ mod tests {
         let err = client.get_timeline(None, 1).await.unwrap_err();
         assert!(matches!(err, AtError::SessionExpired));
     }
+
+    // ── Video embed: lexicon-shape tests ───────────────────────────
+
+    #[tokio::test]
+    async fn create_post_with_video_embeds_app_bsky_embed_video() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.video");
+                assert_eq!(embed["video"]["$type"], "blob");
+                assert_eq!(embed["video"]["ref"]["$link"], "bafyMP4");
+                assert_eq!(embed["alt"], "a cat doing a zoomie");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://did:plc:test/app.bsky.feed.post/v1",
+                    "cid": "bafy..."
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let video = PostVideo {
+            video: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafyMP4".into() },
+                mime_type: "video/mp4".into(),
+                size: 42_000_000,
+            },
+            alt: "a cat doing a zoomie".into(),
+            aspect_ratio: None,
+        };
+        let rec = client
+            .create_post_full("look at this", None, &[], &[], None, Some(&video))
+            .await
+            .unwrap();
+        assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/v1");
+    }
+
+    #[tokio::test]
+    async fn create_post_with_video_plus_quote_uses_record_with_media() {
+        // The lexicon's only way to ship "quote AND media" is the
+        // recordWithMedia carrier. Video gets nested under `media`,
+        // quote ref under `record`.
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.recordWithMedia");
+                assert_eq!(embed["record"]["$type"], "app.bsky.embed.record");
+                assert_eq!(embed["record"]["record"]["uri"], "at://did:quoted/post/abc");
+                assert_eq!(embed["media"]["$type"], "app.bsky.embed.video");
+                assert_eq!(embed["media"]["video"]["ref"]["$link"], "bafyMP4");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://x", "cid": "y"
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let video = PostVideo {
+            video: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafyMP4".into() },
+                mime_type: "video/mp4".into(),
+                size: 1_000_000,
+            },
+            alt: String::new(),
+            aspect_ratio: None,
+        };
+        let quote = StrongRef {
+            uri: "at://did:quoted/post/abc".into(),
+            cid: "qcid".into(),
+        };
+        client
+            .create_post_full("with quote", None, &[], &[], Some(&quote), Some(&video))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_post_with_video_drops_images_by_precedence() {
+        // Lexicon enforces a single media slot per post. Our embed
+        // builder picks video > images when both are passed (caller
+        // shouldn't normally do this, but we test the precedence
+        // explicitly so a refactor can't silently switch it).
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.video");
+                assert!(embed.get("images").is_none(), "images must NOT be in a video embed");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://x", "cid": "y"
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let video = PostVideo {
+            video: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafyMP4".into() },
+                mime_type: "video/mp4".into(),
+                size: 1,
+            },
+            alt: String::new(),
+            aspect_ratio: None,
+        };
+        let img = PostImage {
+            blob: BlobRef {
+                kind: "blob".into(),
+                link: BlobLink { cid: "bafyJPG".into() },
+                mime_type: "image/jpeg".into(),
+                size: 1,
+            },
+            alt: String::new(),
+            aspect_ratio: None,
+        };
+        client
+            .create_post_full("both", None, std::slice::from_ref(&img), &[], None, Some(&video))
+            .await
+            .unwrap();
+    }
 }

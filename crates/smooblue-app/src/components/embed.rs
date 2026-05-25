@@ -103,10 +103,12 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
     };
     let fullsize = img.fullsize.clone();
     let open_fullsize = move |_| {
-        // Open via macOS `open` so it goes to whatever the user's
-        // default browser/preview app is. Best-effort — failures here
-        // shouldn't crash the click handler.
-        let _ = std::process::Command::new("open").arg(&fullsize).spawn();
+        // Scheme-allowlisted (http/https only). bsky CDN URLs are
+        // always https; if a malicious labeler / third-party feed
+        // generator substitutes a `file://` or custom-scheme URL
+        // we silently block it instead of letting macOS `open`
+        // hand off to whatever app registered the scheme.
+        let _ = crate::safe_open::open_in_browser(&fullsize);
     };
     // Position class for the 3-up layout (one tall left + two stacked right).
     let pos_class = if total == 3 {
@@ -144,7 +146,13 @@ fn LinkCard(ext: EmbedExternal) -> Element {
         .unwrap_or_else(|| ext.uri.clone());
     let uri = ext.uri.clone();
     let open = move |_| {
-        let _ = std::process::Command::new("open").arg(&uri).spawn();
+        // CRITICAL: `ext.uri` is attacker-controlled — any bsky user
+        // can publish a post with an arbitrary external embed. Without
+        // scheme validation, macOS `open` would happily launch
+        // `file:///Users/<you>/.ssh/id_rsa`, `mailto:phish@evil`,
+        // `slack://...` deep links, custom URL handlers, etc. The
+        // allowlist in safe_open keeps us to http/https.
+        let _ = crate::safe_open::open_in_browser(&uri);
     };
     rsx! {
         button { class: "embed__link", onclick: open, title: "{ext.uri}",

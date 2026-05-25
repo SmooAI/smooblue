@@ -11,6 +11,7 @@ pub mod image_prep;
 pub mod keyboard;
 pub mod ocr;
 pub mod persistence;
+pub mod safe_open;
 pub mod state;
 pub mod updates;
 pub mod views;

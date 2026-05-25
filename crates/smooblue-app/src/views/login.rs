@@ -158,9 +158,18 @@ async fn sync_to_smoo_crm(session: &Session) -> Result<(), Box<dyn std::error::E
 
 /// Open `url` in the user's default browser.
 ///
-/// We don't depend on the `open` crate to keep dependency count low — `macOS`
-/// uses `open`, Linux uses `xdg-open`, Windows uses `cmd /c start`.
+/// Defensive scheme check via [`crate::safe_open::is_safe_browser_url`] —
+/// the URL here is the OAuth authorization endpoint we built from
+/// our own client metadata, so it's first-party, but a future
+/// regression that lets a remote-controlled string reach this
+/// function shouldn't immediately become a system-wide URL handler
+/// click-jack.
 fn open_default(url: &str) -> Result<(), smooblue_oauth::OAuthError> {
+    if !crate::safe_open::is_safe_browser_url(url) {
+        return Err(smooblue_oauth::OAuthError::BrowserOpen(format!(
+            "refused to open non-http(s) URL: {url}"
+        )));
+    }
     use std::process::Command;
     let cmd = if cfg!(target_os = "macos") {
         Command::new("open").arg(url).status()

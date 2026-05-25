@@ -13,7 +13,14 @@ set -euo pipefail
 
 REPO="${SMOOBLUE_REPO:-$HOME/dev/smooai/smooblue}"
 INSTALL_PATH="${SMOOBLUE_INSTALL:-/Applications/Smooblue.app}"
-LOG_FILE="${SMOOBLUE_LOG:-/tmp/smooblue-update.log}"
+# Logs live under ~/Library/Logs so they're user-owned and outside
+# the world-writable /tmp. /tmp would let any local user pre-create
+# the log path as a symlink to e.g. ~/.zshrc — appending hourly to
+# whatever they picked. ~/Library/Logs is the macOS-canonical place
+# for app logs and Console.app reads from it.
+LOG_DIR="${SMOOBLUE_LOG_DIR:-$HOME/Library/Logs/Smooblue}"
+LOG_FILE="${SMOOBLUE_LOG:-$LOG_DIR/update.log}"
+mkdir -p "$LOG_DIR"
 
 # Pipe all output through tee so the script's stdout AND the log file
 # both see what's happening. Without this, launchd sees nothing.
@@ -77,6 +84,16 @@ bash scripts/bundle-macos.sh
 if [[ ! -d "dist/Smooblue.app" ]]; then
     echo "ERROR: bundle script didn't produce dist/Smooblue.app — aborting install."
     exit 1
+fi
+
+# Don't replace the .app while it's running. A live NSApplication has
+# its executable mmap'd into memory; overwriting the bytes on disk
+# can SIGBUS the running process on the next code-page demand-fault.
+# Skip with a log line — the next tick (or a manual run after quit)
+# will pick it up.
+if pgrep -f "$INSTALL_PATH/Contents/MacOS/Smooblue" >/dev/null 2>&1; then
+    echo "Smooblue is currently running — skipping install. Quit the app and rerun."
+    exit 0
 fi
 
 # Install: replace the previous .app atomically (rsync --delete cleans

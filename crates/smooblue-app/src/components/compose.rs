@@ -37,6 +37,13 @@ pub const MAX_LEN: usize = 300;
 /// Per-post image cap from the `app.bsky.embed.images` lexicon.
 pub const MAX_IMAGES: usize = 4;
 
+/// Hard cap on dropped video file size before we accept it. Matches
+/// bsky's own `app.bsky.video.uploadVideo` ceiling — files above
+/// this would 413 at the AppView even if we managed to upload them,
+/// and reading them blocks the renderer thread. Surface a clear
+/// error instead of letting the drop silently swallow a 4 GB file.
+pub const MAX_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
+
 static ATTACHMENT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Single attached video. Mutually exclusive with images. Held as
@@ -503,10 +510,23 @@ pub fn ComposeSheet() -> Element {
                 // before we even hit the upload step (caller's
                 // responsibility to crop / compress).
                 if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm") {
-                    let bytes = match std::fs::read(&path) {
-                        Ok(b) => b,
+                    // Size-gate BEFORE reading so a 4 GB drop can't
+                    // OOM the renderer. bsky's own ceiling is 50 MB —
+                    // anything bigger would 413 from the AppView
+                    // even if we did manage to upload it. Surface a
+                    // clear error toast instead of silently dropping.
+                    let size = match std::fs::metadata(&path) {
+                        Ok(m) => m.len(),
                         Err(_) => continue,
                     };
+                    if size > MAX_VIDEO_BYTES {
+                        error.set(Some(format!(
+                            "Video too large ({:.1} MB). Bluesky caps videos at {} MB.",
+                            size as f64 / 1_048_576.0,
+                            MAX_VIDEO_BYTES / 1_048_576,
+                        )));
+                        break;
+                    }
                     let mime = match ext.as_str() {
                         "mp4" | "m4v" => "video/mp4",
                         "mov" => "video/quicktime",
@@ -514,6 +534,20 @@ pub fn ComposeSheet() -> Element {
                         _ => "application/octet-stream",
                     }
                     .to_string();
+                    let path_for_read = path.clone();
+                    // Read off the renderer thread — even 50 MB of
+                    // disk I/O stutters the UI when done synchronously.
+                    let bytes = match tokio::task::spawn_blocking(move || {
+                        std::fs::read(&path_for_read)
+                    })
+                    .await
+                    {
+                        Ok(Ok(b)) => b,
+                        _ => {
+                            error.set(Some("Couldn't read the dropped video file.".into()));
+                            break;
+                        }
+                    };
                     video_attachment.set(Some(VideoAttachment {
                         source_path: path,
                         bytes,
@@ -612,7 +646,10 @@ pub fn ComposeSheet() -> Element {
                                     "{v.source_path.file_name().and_then(|s| s.to_str()).unwrap_or(\"video\")}"
                                 }
                                 span { class: "compose__video-size",
-                                    "{(v.bytes.len() as f64 / 1_048_576.0).round()} MB · {v.mime}"
+                                    // One decimal so a 1.6 MB clip
+                                    // doesn't round to "2 MB" / a 1.2
+                                    // doesn't round to "1 MB".
+                                    "{(v.bytes.len() as f64 / 1_048_576.0):.1} MB · {v.mime}"
                                 }
                             }
                             button { class: "compose__video-remove",

@@ -988,4 +988,226 @@ mod tests {
         .unwrap();
         assert!(matches!(p.embed, Some(Embed::Unknown(_))));
     }
+
+    // ── PreferencesResponse: V1 + V2 shapes ────────────────────────
+
+    #[test]
+    fn saved_feeds_parses_v2_items() {
+        let prefs: PreferencesResponse = serde_json::from_value(serde_json::json!({
+            "preferences": [
+                {
+                    "$type": "app.bsky.actor.defs#savedFeedsPrefV2",
+                    "items": [
+                        { "type": "feed", "value": "at://did:plc:a/app.bsky.feed.generator/x", "pinned": true,  "id": "id1" },
+                        { "type": "list", "value": "at://did:plc:b/app.bsky.graph.list/y",      "pinned": false, "id": "id2" },
+                    ]
+                }
+            ]
+        })).unwrap();
+        let saved = prefs.saved_feeds();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0].kind, "feed");
+        assert!(saved[0].pinned);
+        assert_eq!(saved[1].kind, "list");
+        assert!(!saved[1].pinned);
+    }
+
+    #[test]
+    fn saved_feeds_falls_back_to_v1_when_v2_absent() {
+        // V1 = parallel saved[] + pinned[] arrays of URIs. Older
+        // accounts that never re-saved a feed still have this shape.
+        let prefs: PreferencesResponse = serde_json::from_value(serde_json::json!({
+            "preferences": [
+                {
+                    "$type": "app.bsky.actor.defs#savedFeedsPref",
+                    "saved":  ["at://feed/a", "at://feed/b", "at://feed/c"],
+                    "pinned": ["at://feed/b"]
+                }
+            ]
+        })).unwrap();
+        let saved = prefs.saved_feeds();
+        assert_eq!(saved.len(), 3);
+        // V1 entries are all treated as kind=feed.
+        assert!(saved.iter().all(|s| s.kind == "feed"));
+        // Pinned entries surface first (matches bsky.app order).
+        assert!(saved[0].pinned, "first row should be the pinned feed");
+        assert_eq!(saved[0].value, "at://feed/b");
+    }
+
+    #[test]
+    fn saved_feeds_prefers_v2_when_both_shapes_present() {
+        // Some accounts have both blobs sitting in their prefs.
+        // V2 is what bsky.app writes today; pick it.
+        let prefs: PreferencesResponse = serde_json::from_value(serde_json::json!({
+            "preferences": [
+                {
+                    "$type": "app.bsky.actor.defs#savedFeedsPref",
+                    "saved":  ["at://old/v1"], "pinned": []
+                },
+                {
+                    "$type": "app.bsky.actor.defs#savedFeedsPrefV2",
+                    "items": [{ "type": "feed", "value": "at://new/v2", "pinned": true }]
+                }
+            ]
+        })).unwrap();
+        let saved = prefs.saved_feeds();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].value, "at://new/v2");
+    }
+
+    #[test]
+    fn saved_feeds_empty_when_no_prefs_match() {
+        let prefs: PreferencesResponse = serde_json::from_value(serde_json::json!({
+            "preferences": [
+                { "$type": "app.bsky.actor.defs#interestsPref", "tags": ["rust"] }
+            ]
+        })).unwrap();
+        assert!(prefs.saved_feeds().is_empty());
+    }
+
+    // ── FeedItem reply / reason helpers ────────────────────────────
+
+    #[test]
+    fn feed_item_reposter_extracts_display_and_did() {
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reason": {
+                "$type": "app.bsky.feed.defs#reasonRepost",
+                "by": { "did": "did:plc:reposter", "handle": "rp.bsky.social", "displayName": "Reposter Pat" }
+            }
+        })).unwrap();
+        assert_eq!(item.reposter_display().as_deref(), Some("Reposter Pat"));
+        assert_eq!(item.reposter_did().as_deref(), Some("did:plc:reposter"));
+    }
+
+    #[test]
+    fn feed_item_reposter_falls_back_to_handle_when_no_display_name() {
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reason": {
+                "$type": "app.bsky.feed.defs#reasonRepost",
+                "by": { "did": "did:plc:rp", "handle": "rp.bsky.social" }
+            }
+        })).unwrap();
+        assert_eq!(item.reposter_display().as_deref(), Some("rp.bsky.social"));
+    }
+
+    #[test]
+    fn feed_item_reposter_none_for_non_repost_reason() {
+        // Custom feed generators sometimes attach a "reasonPin" or
+        // similar tag we don't model. Should NOT surface as a repost.
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reason": { "$type": "app.bsky.feed.defs#reasonPin" }
+        })).unwrap();
+        assert!(item.reposter_display().is_none());
+        assert!(item.reposter_did().is_none());
+    }
+
+    #[test]
+    fn feed_item_reply_parent_handle_extracts_author() {
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reply": {
+                "parent": {
+                    "uri": "at://parent",
+                    "cid": "pcid",
+                    "author": { "did": "did:plc:parent", "handle": "parent.bsky.social" },
+                    "record": { "text": "original post" }
+                }
+            }
+        })).unwrap();
+        assert_eq!(
+            item.reply_parent_handle().as_deref(),
+            Some("parent.bsky.social")
+        );
+    }
+
+    #[test]
+    fn feed_item_reply_parent_handle_none_for_not_found_post() {
+        // Reply to a deleted post: lexicon ships a #notFoundPost
+        // shape instead of a real PostView. Renderer should treat
+        // this as "no parent" rather than crashing.
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reply": {
+                "parent": {
+                    "$type": "app.bsky.feed.defs#notFoundPost",
+                    "uri": "at://gone",
+                    "notFound": true
+                }
+            }
+        })).unwrap();
+        assert!(item.reply_parent_handle().is_none());
+    }
+
+    #[test]
+    fn feed_item_reply_parent_handle_none_for_blocked_post() {
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reply": {
+                "parent": {
+                    "$type": "app.bsky.feed.defs#blockedPost",
+                    "uri": "at://blocked",
+                    "blocked": true
+                }
+            }
+        })).unwrap();
+        assert!(item.reply_parent_handle().is_none());
+    }
+
+    #[test]
+    fn feed_item_with_no_reply_or_reason_returns_none() {
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            }
+        })).unwrap();
+        assert!(item.reposter_display().is_none());
+        assert!(item.reposter_did().is_none());
+        assert!(item.reply_parent_handle().is_none());
+    }
+
+    #[test]
+    fn feed_item_with_garbage_reason_doesnt_panic() {
+        // Defensive: someone could ship a reason with no $type, or
+        // a $type that's not a string. We should silently return
+        // None, not unwrap.
+        let item: FeedItem = serde_json::from_value(serde_json::json!({
+            "post": {
+                "uri": "at://x", "cid": "y",
+                "author": { "did": "d", "handle": "h" },
+                "record": { "text": "" }
+            },
+            "reason": { "weird": "no $type at all" }
+        })).unwrap();
+        assert!(item.reposter_display().is_none());
+        assert!(item.reposter_did().is_none());
+    }
 }

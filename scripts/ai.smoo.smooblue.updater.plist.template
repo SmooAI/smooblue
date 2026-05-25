@@ -30,9 +30,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/smooblue-update.log</string>
+    <string>@HOME@/Library/Logs/Smooblue/update.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/smooblue-update.log</string>
+    <string>@HOME@/Library/Logs/Smooblue/update.log</string>
 
     <key>Nice</key>
     <integer>10</integer>

@@ -370,7 +370,7 @@ pub fn PostCard(
                                     e.stop_propagation();
                                     if let Some(rkey) = uri.rsplit('/').next() {
                                         let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
-                                        let _ = std::process::Command::new("open").arg(&url).spawn();
+                                        let _ = crate::safe_open::open_in_browser(&url);
                                     }
                                 }
                             },

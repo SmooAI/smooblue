@@ -120,7 +120,9 @@ pub fn DeckShell() -> Element {
         };
         let url = update.url.clone();
         let open_url = move |_| {
-            let _ = std::process::Command::new("open").arg(&url).spawn();
+            // GitHub release URL — scheme-allowlisted defensively
+            // even though the source is github.com/SmooAI/smooblue.
+            let _ = crate::safe_open::open_in_browser(&url);
         };
         let dismiss = move |_| banner.set(UpdateBanner(None));
         rsx! {
