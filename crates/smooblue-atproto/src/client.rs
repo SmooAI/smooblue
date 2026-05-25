@@ -547,7 +547,7 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, None, &[], &[]).await
+        self.create_post_full(text, None, &[], &[], None).await
     }
 
     /// Same as [`Self::create_post`] but adds a reply context. The
@@ -558,24 +558,29 @@ impl AtClient {
         text: &str,
         reply: Option<&ReplyRef>,
     ) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, reply, &[], &[]).await
+        self.create_post_full(text, reply, &[], &[], None).await
     }
 
     /// Full post creation — text + optional reply + optional image
-    /// attachments + optional rich-text facets (mentions, links,
-    /// hashtags). Pass at most 4 images per the bsky lexicon. Each
-    /// image's `blob` field must come from a prior [`Self::upload_blob`] call.
+    /// attachments + optional rich-text facets + optional quote
+    /// target (a StrongRef to the post being quoted). Pass at most 4
+    /// images per the bsky lexicon. Each image's `blob` field must
+    /// come from a prior [`Self::upload_blob`] call.
     ///
-    /// Facets are byte-range annotations on the text — see
-    /// [`crate::richtext`] for the detection helpers. Without facets,
-    /// mentions don't fire notifications + URLs render as plain text
-    /// on bsky.app.
+    /// Embed combinations:
+    /// - text only          → no embed
+    /// - text + images      → `app.bsky.embed.images`
+    /// - text + quote       → `app.bsky.embed.record`
+    /// - text + quote + img → `app.bsky.embed.recordWithMedia`
+    /// (Mutually exclusive on the wire — `recordWithMedia` is bsky's
+    /// "quote AND image" carrier.)
     pub async fn create_post_full(
         &self,
         text: &str,
         reply: Option<&ReplyRef>,
         images: &[PostImage],
         facets: &[crate::richtext::Facet],
+        quote: Option<&StrongRef>,
     ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -590,13 +595,39 @@ impl AtClient {
                 "parent": { "uri": r.parent.uri, "cid": r.parent.cid },
             });
         }
-        if !images.is_empty() {
-            // app.bsky.embed.images takes up to 4 image refs.
-            let trimmed = &images[..images.len().min(4)];
-            record["embed"] = serde_json::json!({
-                "$type": "app.bsky.embed.images",
-                "images": trimmed,
-            });
+        // Embed: pick the combination that matches what's set.
+        let trimmed_images = if images.is_empty() {
+            None
+        } else {
+            Some(&images[..images.len().min(4)])
+        };
+        match (quote, trimmed_images) {
+            (Some(qr), Some(imgs)) => {
+                record["embed"] = serde_json::json!({
+                    "$type": "app.bsky.embed.recordWithMedia",
+                    "record": {
+                        "$type": "app.bsky.embed.record",
+                        "record": { "uri": qr.uri, "cid": qr.cid }
+                    },
+                    "media": {
+                        "$type": "app.bsky.embed.images",
+                        "images": imgs,
+                    }
+                });
+            }
+            (Some(qr), None) => {
+                record["embed"] = serde_json::json!({
+                    "$type": "app.bsky.embed.record",
+                    "record": { "uri": qr.uri, "cid": qr.cid },
+                });
+            }
+            (None, Some(imgs)) => {
+                record["embed"] = serde_json::json!({
+                    "$type": "app.bsky.embed.images",
+                    "images": imgs,
+                });
+            }
+            (None, None) => {}
         }
         if !facets.is_empty() {
             record["facets"] = serde_json::to_value(facets)
@@ -1238,7 +1269,7 @@ mod tests {
             }),
         };
         let rec = client
-            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[])
+            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[], None)
             .await
             .unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
@@ -1283,7 +1314,7 @@ mod tests {
             img,
         ];
         client
-            .create_post_full("six images", None, &many, &[])
+            .create_post_full("six images", None, &many, &[], None)
             .await
             .unwrap();
     }

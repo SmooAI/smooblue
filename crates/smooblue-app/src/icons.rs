@@ -148,6 +148,15 @@ pub fn Quote(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdQuote } }
 }
 
+/// Distinct "compose-a-quote" affordance — different from the bare
+/// quotation-marks Quote icon (which we use for the *quote-count*
+/// affordance). Pairs with PostCard's "Quote this post" button.
+#[component]
+pub fn MessageQuote(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdMessageSquareQuote } }
+}
+
 #[component]
 pub fn Package(size: Size) -> Element {
     let px = size.px();

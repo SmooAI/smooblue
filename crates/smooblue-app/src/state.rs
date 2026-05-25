@@ -197,19 +197,32 @@ pub type OptimisticMap = std::collections::HashMap<String, OptimisticPostState>;
 
 /// Compose-sheet context. When `reply_to` is `Some`, the sheet renders in
 /// reply mode (parent shown above the textarea, posts with a reply ref).
-/// `open` controls visibility — wrapped here (not in a standalone
-/// `Signal<bool>` context) so PostCard can both flip the sheet open AND
-/// stash the reply target in one atomic write.
+/// When `quote_to` is `Some`, the sheet renders the quoted post above
+/// the textarea + attaches an `app.bsky.embed.record` to the new post
+/// on submit. Reply + quote are mutually exclusive in the UI — picking
+/// quote clears reply and vice versa.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ComposeContext {
     pub open: bool,
     pub reply_to: Option<ReplyTarget>,
+    pub quote_to: Option<QuoteTarget>,
 }
 
 /// Just enough of a parent post to render the quoted context in the
 /// compose sheet and build the reply ref on submit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplyTarget {
+    pub uri: String,
+    pub cid: String,
+    pub handle: String,
+    pub text: String,
+}
+
+/// The post being quoted in a compose. Same shape as ReplyTarget —
+/// kept as its own type so render code can distinguish quote-context
+/// from reply-context at a glance (different visual treatment).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuoteTarget {
     pub uri: String,
     pub cid: String,
     pub handle: String,
@@ -298,6 +311,7 @@ pub fn use_bootstrap() {
         Signal::new(ComposeContext {
             open,
             reply_to: None,
+            quote_to: None,
         })
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));

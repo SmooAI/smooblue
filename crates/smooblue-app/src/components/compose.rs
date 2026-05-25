@@ -151,6 +151,7 @@ pub fn ComposeSheet() -> Element {
     }
 
     let reply_to = snap.reply_to.clone();
+    let quote_to = snap.quote_to.clone();
 
     let len = text.read().chars().count();
     let remaining = MAX_LEN as i64 - len as i64;
@@ -181,6 +182,10 @@ pub fn ComposeSheet() -> Element {
         }
         let body = text.read().clone();
         let sess = session.read().clone();
+        let quote = ctx.read().quote_to.as_ref().map(|q| StrongRef {
+            uri: q.uri.clone(),
+            cid: q.cid.clone(),
+        });
         let reply = ctx.read().reply_to.as_ref().map(|p| ReplyRef {
             root: StrongRef {
                 uri: p.uri.clone(),
@@ -218,6 +223,7 @@ pub fn ComposeSheet() -> Element {
                 attachments.set(Vec::new());
                 let mut w = ctx.write();
                 w.reply_to = None;
+            w.quote_to = None;
                 w.open = false;
                 return;
             }
@@ -261,7 +267,7 @@ pub fn ComposeSheet() -> Element {
                 .await
                 .unwrap_or_default();
             let result = client
-                .create_post_full(&body, reply.as_ref(), &images, &facets)
+                .create_post_full(&body, reply.as_ref(), &images, &facets, quote.as_ref())
                 .await;
             match result {
                 Ok(_record) => {
@@ -273,6 +279,7 @@ pub fn ComposeSheet() -> Element {
                     attachments.set(Vec::new());
                     let mut w = ctx.write();
                     w.reply_to = None;
+            w.quote_to = None;
                     w.open = false;
                 }
                 Err(e) => {
@@ -289,6 +296,7 @@ pub fn ComposeSheet() -> Element {
     let close = move |_evt| {
         let mut w = ctx.write();
         w.reply_to = None;
+            w.quote_to = None;
         w.open = false;
     };
 
@@ -368,6 +376,15 @@ pub fn ComposeSheet() -> Element {
                             span { class: "compose__reply-handle", "@{parent.handle}" }
                         }
                         p { class: "compose__reply-text", "{parent.text}" }
+                    }
+                }
+                if let Some(q) = quote_to.as_ref() {
+                    div { class: "compose__quote-context",
+                        div { class: "compose__reply-author",
+                            "Quoting "
+                            span { class: "compose__reply-handle", "@{q.handle}" }
+                        }
+                        p { class: "compose__reply-text", "{q.text}" }
                     }
                 }
                 textarea {

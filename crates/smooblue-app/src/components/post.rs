@@ -121,6 +121,26 @@ pub fn PostCard(post: PostView) -> Element {
             uri_for_quotes.clone(),
         ))));
     };
+    // Quote-this-post: opens the compose sheet with the quoted post
+    // pinned above the textarea + an app.bsky.embed.record attached
+    // on submit. Mutually exclusive with reply mode (compose clears
+    // reply_to when quote_to is set + vice versa).
+    let post_uri_quote = post_uri.clone();
+    let post_cid_quote = post_cid.clone();
+    let handle_quote = handle.clone();
+    let text_quote = text.clone();
+    let open_quote_compose = move |evt: MouseEvent| {
+        evt.stop_propagation();
+        let mut w = compose_ctx.write();
+        w.reply_to = None;
+        w.quote_to = Some(crate::state::QuoteTarget {
+            uri: post_uri_quote.clone(),
+            cid: post_cid_quote.clone(),
+            handle: handle_quote.clone(),
+            text: text_quote.clone(),
+        });
+        w.open = true;
+    };
 
     // Click an avatar → open the profile sheet (modal with banner +
     // bio + follow + recent posts). The sheet itself has an
@@ -350,6 +370,15 @@ pub fn PostCard(post: PostView) -> Element {
                         onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_repost(evt); },
                         title: if is_reposted { "Undo repost" } else { "Repost" },
                         icons::Repeat2 { size: icons::Size::Sm }
+                    }
+                    // Quote-this-post — separate affordance from
+                    // Repost. Distinct MessageQuote icon so it
+                    // doesn't visually clash with the bare quote-
+                    // count Quote icon further down the row.
+                    button { class: "post__action post__action--clickable",
+                        onclick: open_quote_compose,
+                        title: "Quote this post",
+                        icons::MessageQuote { size: icons::Size::Sm }
                     }
                     if display_reposts > 0 {
                         button { class: "post__action-count",

@@ -635,6 +635,17 @@ a {
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* Same shape as reply-context but with a softer all-around border
+   (no left-rail color stripe) — quoting reads visually as wrapping
+   the post rather than answering it. */
+.compose__quote-context {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: var(--radius-sm);
+}
+
 .compose__reply-author {
     font-size: 12px;
     color: var(--muted-foreground);
