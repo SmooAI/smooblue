@@ -14,6 +14,7 @@ mod client;
 mod error;
 pub mod feed;
 pub mod notifications;
+pub mod richtext;
 
 pub use client::{
     AspectRatio, AtClient, BlobLink, BlobRef, CreatedRecord, PostImage, ReplyRef, StrongRef,
@@ -28,4 +29,7 @@ pub use feed::{
 };
 pub use notifications::{
     group_notifications, Notification, NotificationGroup, NotificationsResponse,
+};
+pub use richtext::{
+    detect_facet_candidates, Facet, FacetCandidate, FacetFeature, FacetIndex, FacetKind,
 };

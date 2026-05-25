@@ -250,8 +250,18 @@ pub fn ComposeSheet() -> Element {
                 });
             }
 
+            // Detect @mentions / links / #hashtags + resolve handles
+            // to DIDs before posting. Failure here (network blip on
+            // resolveHandle) silently degrades to a plain-text post
+            // rather than blocking the user — they'd much rather
+            // their post go through than see "couldn't resolve
+            // @alice, please retry."
+            let facets = client
+                .build_facets_from_text(&body)
+                .await
+                .unwrap_or_default();
             let result = client
-                .create_post_full(&body, reply.as_ref(), &images)
+                .create_post_full(&body, reply.as_ref(), &images, &facets)
                 .await;
             match result {
                 Ok(_record) => {

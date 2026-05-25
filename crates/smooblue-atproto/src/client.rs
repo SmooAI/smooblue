@@ -525,7 +525,7 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, None, &[]).await
+        self.create_post_full(text, None, &[], &[]).await
     }
 
     /// Same as [`Self::create_post`] but adds a reply context. The
@@ -536,17 +536,24 @@ impl AtClient {
         text: &str,
         reply: Option<&ReplyRef>,
     ) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, reply, &[]).await
+        self.create_post_full(text, reply, &[], &[]).await
     }
 
     /// Full post creation — text + optional reply + optional image
-    /// attachments. Pass at most 4 images per the bsky lexicon.
-    /// Each image's `blob` field must come from a prior [`Self::upload_blob`] call.
+    /// attachments + optional rich-text facets (mentions, links,
+    /// hashtags). Pass at most 4 images per the bsky lexicon. Each
+    /// image's `blob` field must come from a prior [`Self::upload_blob`] call.
+    ///
+    /// Facets are byte-range annotations on the text — see
+    /// [`crate::richtext`] for the detection helpers. Without facets,
+    /// mentions don't fire notifications + URLs render as plain text
+    /// on bsky.app.
     pub async fn create_post_full(
         &self,
         text: &str,
         reply: Option<&ReplyRef>,
         images: &[PostImage],
+        facets: &[crate::richtext::Facet],
     ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -569,6 +576,10 @@ impl AtClient {
                 "images": trimmed,
             });
         }
+        if !facets.is_empty() {
+            record["facets"] = serde_json::to_value(facets)
+                .map_err(|e| AtError::Decode(format!("facet serialize: {e}")))?;
+        }
         let body = serde_json::json!({
             "repo": did,
             "collection": "app.bsky.feed.post",
@@ -578,6 +589,80 @@ impl AtClient {
             .session_pds_url("/xrpc/com.atproto.repo.createRecord")
             .map_err(|e| AtError::Decode(e.to_string()))?;
         self.post_json(&url, &body).await
+    }
+
+    /// `com.atproto.identity.resolveHandle` — turn a bsky handle into
+    /// its DID. Used by the rich-text pipeline to convert
+    /// `@alice.bsky.social` mention candidates into the DID-bearing
+    /// `mention` facet feature the lexicon expects.
+    pub async fn resolve_handle(&self, handle: &str) -> Result<String, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/com.atproto.identity.resolveHandle")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut().append_pair("handle", handle);
+        #[derive(serde::Deserialize)]
+        struct R {
+            did: String,
+        }
+        let r: R = self.get_json(&url).await?;
+        Ok(r.did)
+    }
+
+    /// Run the full rich-text detection + resolution pipeline on
+    /// `text`. Returns a `Vec<Facet>` ready to pass to
+    /// [`Self::create_post_full`]:
+    ///
+    /// - Detects @mentions / links / #tags via [`crate::richtext::detect_facet_candidates`].
+    /// - Resolves each mention's handle to a DID via [`Self::resolve_handle`].
+    ///   Mentions whose handles don't resolve (typo, deleted account)
+    ///   are silently skipped — the literal `@text` stays in the post
+    ///   body but doesn't become a clickable facet.
+    /// - Dedupes handles so the same `@alice` mentioned 3× only fires
+    ///   one resolveHandle call.
+    pub async fn build_facets_from_text(
+        &self,
+        text: &str,
+    ) -> Result<Vec<crate::richtext::Facet>, AtError> {
+        use crate::richtext::{Facet, FacetFeature, FacetIndex, FacetKind};
+        let candidates = crate::richtext::detect_facet_candidates(text);
+        // Resolve unique handles in parallel — typical post has 0-2
+        // mentions so this is a small fan-out.
+        let mut handle_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for c in &candidates {
+            if let FacetKind::Mention { handle } = &c.kind {
+                handle_set.insert(handle.clone());
+            }
+        }
+        let mut resolved: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for h in handle_set {
+            // Sequential resolution — fan-out with futures::join_all
+            // is fine here too but a typical post has 0-2 mentions
+            // and sequential keeps the error surface simple.
+            if let Ok(did) = self.resolve_handle(&h).await {
+                resolved.insert(h, did);
+            }
+        }
+        let mut out = Vec::with_capacity(candidates.len());
+        for c in candidates {
+            let feature = match c.kind {
+                FacetKind::Mention { handle } => match resolved.get(&handle) {
+                    Some(did) => FacetFeature::Mention { did: did.clone() },
+                    None => continue, // unresolved → skip the facet
+                },
+                FacetKind::Link { uri } => FacetFeature::Link { uri },
+                FacetKind::Tag { tag } => FacetFeature::Tag { tag },
+            };
+            out.push(Facet {
+                index: FacetIndex {
+                    byte_start: c.byte_start,
+                    byte_end: c.byte_end,
+                },
+                features: vec![feature],
+            });
+        }
+        Ok(out)
     }
 
     /// Upload raw image bytes to the user's PDS via
@@ -1085,7 +1170,7 @@ mod tests {
             }),
         };
         let rec = client
-            .create_post_full("look at this cat", None, std::slice::from_ref(&img))
+            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[])
             .await
             .unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
@@ -1130,7 +1215,7 @@ mod tests {
             img,
         ];
         client
-            .create_post_full("six images", None, &many)
+            .create_post_full("six images", None, &many, &[])
             .await
             .unwrap();
     }
