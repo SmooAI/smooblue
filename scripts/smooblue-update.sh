@@ -40,12 +40,21 @@ local_sha="$(git rev-parse HEAD)"
 remote_sha="$(git rev-parse origin/main)"
 
 if [[ "$local_sha" == "$remote_sha" ]]; then
-    echo "Already up to date at ${local_sha:0:12}."
-    exit 0
+    # No new commits — but if the installed bundle is older than the
+    # current binary in target/release/, the installed copy is stale
+    # (likely because a previous run failed mid-install). Reinstall.
+    installed="$INSTALL_PATH/Contents/MacOS/Smooblue"
+    fresh="$REPO/target/release/smooblue-app"
+    if [[ -f "$fresh" && -f "$installed" && "$fresh" -nt "$installed" ]]; then
+        echo "Repo unchanged but target/release is newer than installed — reinstalling."
+    else
+        echo "Already up to date at ${local_sha:0:12}."
+        exit 0
+    fi
+else
+    echo "New commits: ${local_sha:0:12} → ${remote_sha:0:12}"
+    git pull --quiet --rebase
 fi
-
-echo "New commits: ${local_sha:0:12} → ${remote_sha:0:12}"
-git pull --quiet --rebase
 
 # Source nvm/cargo from the shell rc so PATH has rustup/cargo. launchd's
 # env is otherwise the bare login defaults.
