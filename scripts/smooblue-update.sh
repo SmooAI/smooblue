@@ -44,9 +44,20 @@ if [[ "$local_sha" == "$remote_sha" ]]; then
     # current binary in target/release/, the installed copy is stale
     # (likely because a previous run failed mid-install). Reinstall.
     installed="$INSTALL_PATH/Contents/MacOS/Smooblue"
-    fresh="$REPO/target/release/smooblue-app"
-    if [[ -f "$fresh" && -f "$installed" && "$fresh" -nt "$installed" ]]; then
-        echo "Repo unchanged but target/release is newer than installed — reinstalling."
+    # `cargo metadata` reports the real target dir, which on this
+    # workspace is `~/.cargo/shared-target` not `./target`. Defaulting
+    # to ./target/release misses fresh builds and leaves stale apps
+    # installed.
+    target_dir="$(cargo metadata --no-deps --format-version 1 2>/dev/null \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin)["target_directory"])' \
+        2>/dev/null || echo "$REPO/target")"
+    fresh="$target_dir/release/smooblue-app"
+    bundled="$REPO/dist/Smooblue.app/Contents/MacOS/Smooblue"
+    # Compare both candidates against the installed binary — whichever
+    # exists and is newer wins.
+    if [[ -f "$bundled" && "$bundled" -nt "$installed" ]] \
+        || [[ -f "$fresh" && "$fresh" -nt "$installed" ]]; then
+        echo "Repo unchanged but a fresher build exists — reinstalling."
     else
         echo "Already up to date at ${local_sha:0:12}."
         exit 0
