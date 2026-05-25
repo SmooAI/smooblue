@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Template launchd plist for the auto-updater. Install with:
+
+        sed -e "s|@USER@|$USER|g" -e "s|@HOME@|$HOME|g" \
+            scripts/ai.smoo.smooblue.updater.plist.template \
+            > ~/Library/LaunchAgents/ai.smoo.smooblue.updater.plist
+        launchctl load ~/Library/LaunchAgents/ai.smoo.smooblue.updater.plist
+
+    The job runs at login and once an hour after, calling
+    scripts/smooblue-update.sh which is a no-op when origin/main is
+    unchanged or the local checkout is dirty / on a feature branch.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.smoo.smooblue.updater</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>@HOME@/dev/smooai/smooblue/scripts/smooblue-update.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/smooblue-update.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/smooblue-update.log</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>@HOME@</string>
+        <key>PATH</key>
+        <string>@HOME@/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
