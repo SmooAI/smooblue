@@ -1366,6 +1366,84 @@ a {
 }
 
 /* ===========================================================
+ *  Keyboard help overlay (?)
+ * =========================================================== */
+.kbd-help__sheet {
+    width: 460px;
+    max-width: 92vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.kbd-help__head {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.kbd-help__title {
+    flex: 1 1 auto;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--foreground);
+}
+
+.kbd-help__close {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.kbd-help__close:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.kbd-help__body {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    padding: 14px 18px 18px;
+}
+
+.kbd-help__section {
+    margin: 14px 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted-foreground);
+}
+
+.kbd-help__section:first-child {
+    margin-top: 0;
+}
+
+.kbd-help__row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 14px;
+    padding: 5px 0;
+    font-size: 13px;
+}
+
+.kbd-help__keys {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--color-smooai-orange);
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.kbd-help__action {
+    color: var(--foreground);
+}
+
+/* ===========================================================
  *  Settings sheet
  * =========================================================== */
 .settings__sheet {

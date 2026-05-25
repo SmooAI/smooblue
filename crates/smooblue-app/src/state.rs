@@ -216,6 +216,33 @@ pub struct ReplyTarget {
     pub text: String,
 }
 
+/// Vim-style cursor for the deck — which column and which item-
+/// within-column the user is "on" for keyboard navigation. Updated
+/// by j/k/h/l etc. PostCard reads this to highlight the focused
+/// card; ColumnHeader reads it to highlight the focused column.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct FocusedItem {
+    pub column: usize,
+    pub item: usize,
+}
+
+/// Open state for the keyboard-shortcut help overlay. Toggled by `?`.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct KeyboardHelp(pub bool);
+
+/// Tracks an in-flight key chord. Vim has two-key chords like `gg`
+/// (top), `gh` (home column), `gd` (discover), `gp` (profile). When
+/// the user types `g`, we set this to `Some(now)`; the next key
+/// either consumes the chord or times out 1.5s later via the
+/// keyboard handler clearing it. Leader chords (`<space>X`) use
+/// the same field.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct PendingChord {
+    /// `Some("g")` after a `g` press waiting for the second key.
+    /// `Some(" ")` after `<space>` (leader) waiting.
+    pub prefix: Option<String>,
+}
+
 /// Which actor (if any) the user has currently focused into a
 /// profile view. `None` ⇒ closed; `Some(actor)` ⇒ the ProfileSheet
 /// loads + renders the profile + recent posts for this DID or handle.
@@ -291,6 +318,9 @@ pub fn use_bootstrap() {
             });
         Signal::new(EngagementFocus(initial))
     });
+    use_context_provider::<Signal<FocusedItem>>(|| Signal::new(FocusedItem::default()));
+    use_context_provider::<Signal<KeyboardHelp>>(|| Signal::new(KeyboardHelp(false)));
+    use_context_provider::<Signal<PendingChord>>(|| Signal::new(PendingChord::default()));
     use_context_provider::<Signal<ProfileFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_PROFILE=<handle-or-did> → boot straight
         // into a profile view. `demo` resolves to the synth demo actor.
