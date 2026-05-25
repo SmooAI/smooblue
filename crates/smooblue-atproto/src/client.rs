@@ -759,6 +759,61 @@ impl AtClient {
         self.post_json(&url, &body).await
     }
 
+    /// File a moderation report against an account or post via
+    /// `com.atproto.moderation.createReport`. The bsky lexicon
+    /// expects a `subject` (StrongRef for a post, `{ $type: ...,
+    /// did }` for an account) and a `reasonType` (lexicon-defined
+    /// enum string). Optional free-text `reason`.
+    ///
+    /// Returns `()` because we don't currently surface the report
+    /// ID anywhere — the toast just confirms "report sent" and the
+    /// moderation team takes it from there.
+    pub async fn create_report_account(
+        &self,
+        subject_did: &str,
+        reason_type: &str,
+        reason: &str,
+    ) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.moderation.createReport")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({
+            "reasonType": reason_type,
+            "reason": reason,
+            "subject": {
+                "$type": "com.atproto.admin.defs#repoRef",
+                "did": subject_did,
+            }
+        });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
+    /// File a report against a specific post (via StrongRef) rather
+    /// than the whole account. Same lexicon — different subject shape.
+    pub async fn create_report_post(
+        &self,
+        post_uri: &str,
+        post_cid: &str,
+        reason_type: &str,
+        reason: &str,
+    ) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/com.atproto.moderation.createReport")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({
+            "reasonType": reason_type,
+            "reason": reason,
+            "subject": {
+                "$type": "com.atproto.repo.strongRef",
+                "uri": post_uri,
+                "cid": post_cid,
+            }
+        });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
     /// Mute an actor (`app.bsky.graph.muteActor`). Procedure call,
     /// not a createRecord — bsky tracks mutes server-side as a
     /// preference, so there's no record to later delete. Use

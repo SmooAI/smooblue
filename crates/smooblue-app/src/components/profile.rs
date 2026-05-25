@@ -16,9 +16,10 @@
 
 use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
+use crate::components::report_sheet::ReportTarget;
 use crate::demo;
 use crate::icons;
-use crate::state::{add_column_unique, ColumnSpec, ProfileFocus};
+use crate::state::{add_column_unique, ColumnSpec, ProfileFocus, ReportFocus};
 use dioxus::prelude::*;
 use smooblue_atproto::{ActorProfile, FeedItem, PostAuthor};
 use smooblue_oauth::Session;
@@ -231,6 +232,14 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         });
     };
 
+    let did_for_report = did.clone();
+    let mut report_focus = use_context::<Signal<ReportFocus>>();
+    let open_report = move |_| {
+        report_focus.set(ReportFocus(Some(ReportTarget::Account {
+            did: did_for_report.clone(),
+        })));
+    };
+
     let did_for_block = did.clone();
     let toggle_block = move |_| {
         if *block_pending.read() {
@@ -331,6 +340,13 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
                         title: if is_blocking { "Unblock" } else { "Block" },
                         onclick: toggle_block,
                         icons::Ban { size: icons::Size::Sm }
+                    }
+                    // Report opens the ReportSheet pre-targeted at this actor.
+                    button {
+                        class: "profile__icon-action profile__icon-action--danger",
+                        title: "Report account",
+                        onclick: open_report,
+                        icons::Flag { size: icons::Size::Sm }
                     }
                 }
                 button {

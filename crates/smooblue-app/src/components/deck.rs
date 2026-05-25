@@ -3,14 +3,14 @@
 
 use crate::components::{
     column::Column, compose::ComposeSheet, engagement::EngagementSheet, profile::ProfileSheet,
-    saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
-    sidebar::Sidebar, thread::ThreadSheet,
+    report_sheet::ReportSheet, saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet,
+    settings_sheet::SettingsSheet, sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::keyboard::{self, KeyContext};
 use crate::state::{
     ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp, PendingChord,
-    ProfileFocus, ThreadFocus, Tick,
+    ProfileFocus, ThreadFocus, Tick, UpdateBanner,
 };
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
@@ -66,6 +66,23 @@ pub fn DeckShell() -> Element {
         }
     });
 
+    // Self-update check — single GitHub releases API call on boot.
+    // Stays silent on failure. Skipped in demo mode (would always
+    // claim an update against the synthetic version).
+    let mut update_banner = use_context::<Signal<UpdateBanner>>();
+    use_future(move || async move {
+        if crate::demo::is_active() {
+            return;
+        }
+        // Single-shot: delay 5s so the boot animation finishes
+        // before we maybe show a toast.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let http = reqwest::Client::new();
+        if let Some(update) = crate::updates::check_for_updates(&http).await {
+            update_banner.set(UpdateBanner(Some(update)));
+        }
+    });
+
     // 1-second tick that drives time-relative re-renders (post timestamps
     // ticking "11s" → "12s" etc.). Reading the Tick context in
     // PostCard/NotificationCard subscribes them; the signal bump here
@@ -88,6 +105,38 @@ pub fn DeckShell() -> Element {
         w.reply_to = None;
         w.open = true;
     };
+
+    // "Update available" toast. Bottom-left, dismissible, links to
+    // the GitHub release page. Auto-installer is a future pearl —
+    // for now the user reads the changelog and downloads the new
+    // .app on their schedule.
+    #[component]
+    fn UpdateToast() -> Element {
+        let mut banner = use_context::<Signal<UpdateBanner>>();
+        let snap = banner.read().0.clone();
+        let Some(update) = snap else {
+            return rsx! { Fragment {} };
+        };
+        let url = update.url.clone();
+        let open_url = move |_| {
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+        };
+        let dismiss = move |_| banner.set(UpdateBanner(None));
+        rsx! {
+            div { class: "update-toast",
+                div { class: "update-toast__body",
+                    span { class: "update-toast__label", "Update available" }
+                    button { class: "update-toast__tag", onclick: open_url,
+                        "{update.tag} ↗"
+                    }
+                }
+                button { class: "update-toast__dismiss",
+                    onclick: dismiss,
+                    icons::X { size: icons::Size::Sm }
+                }
+            }
+        }
+    }
 
     // Keyboard help overlay — shown with `?` or `<space>?`. Stays
     // out of the main deck render to keep the keymap close to its
@@ -194,7 +243,9 @@ pub fn DeckShell() -> Element {
             ThreadSheet {}
             ProfileSheet {}
             EngagementSheet {}
+            ReportSheet {}
             KeyboardHelpSheet {}
+            UpdateToast {}
         }
     }
 }

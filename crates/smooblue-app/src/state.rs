@@ -243,6 +243,18 @@ pub struct FocusedItem {
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct KeyboardHelp(pub bool);
 
+/// Set on boot if the GitHub releases API reports a newer tag than
+/// CARGO_PKG_VERSION. The deck renders a small dismissible toast
+/// linking to the release page when this is `Some`.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct UpdateBanner(pub Option<crate::updates::UpdateAvailable>);
+
+/// What the report sheet is targeting (account or post). `None` when
+/// the sheet is closed. Set by ProfileSheet's Report action or a
+/// future per-post menu.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ReportFocus(pub Option<crate::components::report_sheet::ReportTarget>);
+
 /// Tracks an in-flight key chord. Vim has two-key chords like `gg`
 /// (top), `gh` (home column), `gd` (discover), `gp` (profile). When
 /// the user types `g`, we set this to `Some(now)`; the next key
@@ -334,6 +346,8 @@ pub fn use_bootstrap() {
     });
     use_context_provider::<Signal<FocusedItem>>(|| Signal::new(FocusedItem::default()));
     use_context_provider::<Signal<KeyboardHelp>>(|| Signal::new(KeyboardHelp(false)));
+    use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
+    use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
     use_context_provider::<Signal<PendingChord>>(|| Signal::new(PendingChord::default()));
     use_context_provider::<Signal<ProfileFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_PROFILE=<handle-or-did> → boot straight

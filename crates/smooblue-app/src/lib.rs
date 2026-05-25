@@ -12,6 +12,7 @@ pub mod keyboard;
 pub mod ocr;
 pub mod persistence;
 pub mod state;
+pub mod updates;
 pub mod views;
 
 use dioxus::prelude::*;

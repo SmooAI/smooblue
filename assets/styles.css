@@ -1409,6 +1409,176 @@ a {
 }
 
 /* ===========================================================
+ *  Report sheet — moderation flag dialog
+ * =========================================================== */
+.report__sheet {
+    width: 460px;
+    max-width: 92vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.report__head {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.report__title {
+    flex: 1 1 auto;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--foreground);
+}
+
+.report__close {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.report__close:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.report__body {
+    overflow-y: auto;
+    flex: 1 1 auto;
+    padding: 14px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.report__hint {
+    margin: 0;
+    color: var(--muted-foreground);
+    font-size: 13px;
+}
+
+.report__reasons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.report__reason {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    cursor: pointer;
+    font-size: 13px;
+    transition: border-color 120ms ease, background 120ms ease;
+}
+
+.report__reason:hover {
+    border-color: var(--color-smooai-orange);
+}
+
+.report__reason--selected {
+    border-color: var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.12);
+    color: var(--color-smooai-orange);
+    font-weight: 600;
+}
+
+.report__detail {
+    resize: none;
+    min-height: 80px;
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 8px 10px;
+}
+
+.report__submit,
+.report__done {
+    align-self: flex-end;
+    min-width: 130px;
+}
+
+.report__confirmation {
+    margin: 8px 0;
+    padding: 12px;
+    background: rgba(244, 159, 10, 0.12);
+    border-left: 3px solid var(--color-smooai-orange);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 13px;
+}
+
+/* ===========================================================
+ *  Update toast (bottom-left, "Update available")
+ * =========================================================== */
+.update-toast {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--color-smooai-orange);
+    border-radius: var(--radius-md);
+    box-shadow: 0 6px 24px rgba(244, 159, 10, 0.25);
+    font-size: 13px;
+    max-width: 320px;
+}
+
+.update-toast__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.update-toast__label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 700;
+    color: var(--muted-foreground);
+}
+
+.update-toast__tag {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--color-smooai-orange);
+    font-weight: 700;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.update-toast__tag:hover {
+    text-decoration: underline;
+}
+
+.update-toast__dismiss {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.update-toast__dismiss:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+/* ===========================================================
  *  Keyboard help overlay (?)
  * =========================================================== */
 .kbd-help__sheet {
