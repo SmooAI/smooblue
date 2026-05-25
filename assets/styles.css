@@ -1545,6 +1545,33 @@ a {
 }
 
 /* ===========================================================
+ *  Trending topic chips (saved feeds → "Trending now")
+ * =========================================================== */
+.trending__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 4px 2px 10px;
+}
+
+.trending__chip {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 120ms ease, color 120ms ease;
+}
+
+.trending__chip:hover {
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+/* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */
 .report__sheet {

@@ -442,6 +442,33 @@ pub struct SuggestionsResponse {
     pub cursor: Option<String>,
 }
 
+/// `app.bsky.unspecced.getTrendingTopics` response. Two parallel
+/// lists: `topics` (what's surging right now) and `suggested`
+/// (curated evergreen topics to follow). Both surface in the
+/// browser sheet as taps that open a search column.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TrendingTopicsResponse {
+    #[serde(default)]
+    pub topics: Vec<TrendingTopic>,
+    #[serde(default)]
+    pub suggested: Vec<TrendingTopic>,
+}
+
+/// One entry from getTrendingTopics. `topic` is the user-facing
+/// label; `link` is the bsky deep-link (e.g., `/search?q=...` or
+/// `/profile/...`) and is what the AppView would navigate to in
+/// the browser. We just open the matching search column on click.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct TrendingTopic {
+    pub topic: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub link: Option<String>,
+}
+
 /// Single-page response shape for `app.bsky.graph.getMutes`. Same
 /// shape as Suggestions — a vec of profile views plus a cursor.
 #[derive(Debug, Clone, Deserialize)]

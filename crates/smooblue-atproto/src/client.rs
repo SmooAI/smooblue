@@ -814,6 +814,30 @@ impl AtClient {
         Ok(())
     }
 
+    /// Fetch trending topics via `app.bsky.unspecced.getTrendingTopics`.
+    /// `unspecced` endpoints are bsky-AppView-internal — they're not
+    /// in the public lexicon, so the shape is best-effort and may
+    /// change without warning. We treat it as opt-in surface area:
+    /// silent failure on the UI side, no retries.
+    pub async fn get_trending_topics(&self) -> Result<crate::feed::TrendingTopicsResponse, AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.unspecced.getTrendingTopics?limit=25")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.get_json(&url).await
+    }
+
+    /// Browse popular feed generators via
+    /// `app.bsky.unspecced.getPopularFeedGenerators`. Same caveats as
+    /// trending topics — unspecced surface.
+    pub async fn get_popular_feed_generators(
+        &self,
+    ) -> Result<crate::feed::FeedGeneratorsResponse, AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.unspecced.getPopularFeedGenerators?limit=30")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.get_json(&url).await
+    }
+
     /// List the signed-in user's muted actors via
     /// `app.bsky.graph.getMutes`. Returns the first page (limit 100).
     /// The settings UI doesn't paginate yet — a single page is plenty

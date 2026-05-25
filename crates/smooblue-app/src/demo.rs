@@ -12,7 +12,7 @@
 use smooblue_atproto::feed::{
     ActorProfile, ActorViewerState, Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView,
     FeedGeneratorView, FeedItem, Label, ListView, PostAuthor, PostRecord, PostView, SavedFeedItem,
-    ThreadView,
+    ThreadView, TrendingTopic,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -938,6 +938,50 @@ pub fn own_lists() -> Vec<ListView> {
     vec![
         mklist("Rust people", "Folks doing interesting Rust work.", 47, "rust"),
         mklist("Indy 500 cooks", "Indianapolis food writers + chefs I follow.", 12, "indy-cooks"),
+    ]
+}
+
+/// Demo trending topics for the saved-feeds sheet — exercised
+/// when SMOOBLUE_DEMO=1 so the chips render with realistic labels.
+pub fn trending_topics() -> Vec<TrendingTopic> {
+    let mk = |label: &str, desc: &str| TrendingTopic {
+        topic: label.into(),
+        display_name: Some(label.into()),
+        description: Some(desc.into()),
+        link: None,
+    };
+    vec![
+        mk("rust", "Rust language conversations."),
+        mk("atproto", "ATProto + Bluesky lexicon discussion."),
+        mk("indyfood", "Indianapolis food scene."),
+        mk("smoo", "Smoo AI updates."),
+        mk("dioxus", "Dioxus UI framework."),
+        mk("homelab", "Self-hosting + homelab gear."),
+    ]
+}
+
+/// Demo popular feed generators for the saved-feeds sheet.
+pub fn popular_feeds() -> Vec<FeedGeneratorView> {
+    let creator = PostAuthor {
+        did: "did:plc:demo-feed".into(),
+        handle: "demo.bsky.app".into(),
+        display_name: Some("Demo feed".into()),
+        avatar: None,
+    };
+    let mk = |slug: &str, name: &str, desc: &str, seed: &str, likes: u64| FeedGeneratorView {
+        uri: format!("at://did:plc:demo-feed/{slug}"),
+        cid: format!("bafy-demo-feed-{slug}"),
+        did: "did:plc:demo-feed".into(),
+        creator: creator.clone(),
+        display_name: name.into(),
+        description: Some(desc.into()),
+        avatar: Some(format!("https://picsum.photos/seed/{seed}/80")),
+        like_count: likes,
+    };
+    vec![
+        mk("for-you", "For You", "Personalized algorithmic feed.", "popular-foryou", 12_400),
+        mk("rust-only", "Rust-only", "Posts mentioning Rust or cargo.", "popular-rust", 4_280),
+        mk("tech-news", "Tech News", "Curated tech news links.", "popular-tech", 9_810),
     ]
 }
 

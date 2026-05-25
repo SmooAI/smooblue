@@ -12,6 +12,7 @@ use crate::auth_refresh::fresh_client;
 use crate::icons;
 use crate::state::{add_column_unique, ColumnSpec};
 use dioxus::prelude::*;
+use smooblue_atproto::feed::TrendingTopic;
 use smooblue_atproto::{FeedGeneratorView, ListView, SavedFeedItem};
 use smooblue_oauth::Session;
 
@@ -22,6 +23,14 @@ struct Loaded {
     /// User's own curated lists. Modlists filtered out — only
     /// curatelists make sense as a column.
     lists: Vec<ListView>,
+    /// Trending topics from `app.bsky.unspecced.getTrendingTopics`.
+    /// Best-effort — empty on failure.
+    trending: Vec<TrendingTopic>,
+    /// Popular feed generators from
+    /// `app.bsky.unspecced.getPopularFeedGenerators`. De-duped
+    /// against `feeds` (user's already-saved feeds) so we don't
+    /// suggest things they already have.
+    popular: Vec<FeedGeneratorView>,
 }
 
 #[component]
@@ -41,6 +50,8 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                 return Ok(Loaded {
                     feeds: crate::demo::saved_feeds(),
                     lists: crate::demo::own_lists(),
+                    trending: crate::demo::trending_topics(),
+                    popular: crate::demo::popular_feeds(),
                 });
             }
             let Some(client) = fresh_client(session_sig).await else {
@@ -102,9 +113,36 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                     .unwrap_or_default()
             };
 
+            // Trending topics + popular feeds — both unspecced, both
+            // best-effort. Silent failure on each.
+            let trending = client
+                .get_trending_topics()
+                .await
+                .map(|r| {
+                    let mut all = r.topics;
+                    all.extend(r.suggested);
+                    all
+                })
+                .unwrap_or_default();
+
+            let saved_uris: std::collections::HashSet<String> =
+                pinned.iter().map(|(sf, _)| sf.value.clone()).collect();
+            let popular = client
+                .get_popular_feed_generators()
+                .await
+                .map(|r| {
+                    r.feeds
+                        .into_iter()
+                        .filter(|v| !saved_uris.contains(&v.uri))
+                        .collect()
+                })
+                .unwrap_or_default();
+
             Ok(Loaded {
                 feeds: pinned,
                 lists,
+                trending,
+                popular,
             })
         }
     });
@@ -172,6 +210,42 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                                     }
                                 }
                             }
+                            if !loaded.trending.is_empty() {
+                                h3 { class: "saved-feeds__section-title", "Trending now" }
+                                div { class: "trending__chips",
+                                    for topic in loaded.trending.iter() {
+                                        TrendingChip {
+                                            key: "{topic.topic}",
+                                            topic: topic.clone(),
+                                            on_open: {
+                                                let mut cols_for_add = cols;
+                                                let mut open_after = open;
+                                                move |spec: ColumnSpec| {
+                                                    add_column_unique(&mut cols_for_add, spec);
+                                                    open_after.set(false);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if !loaded.popular.is_empty() {
+                                h3 { class: "saved-feeds__section-title", "Popular feeds" }
+                                for view in loaded.popular.iter() {
+                                    PopularFeedRow {
+                                        key: "popular-{view.uri}",
+                                        view: view.clone(),
+                                        on_add: {
+                                            let mut cols_for_add = cols;
+                                            let mut open_after = open;
+                                            move |spec: ColumnSpec| {
+                                                add_column_unique(&mut cols_for_add, spec);
+                                                open_after.set(false);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         },
                         Some(Err(e)) => rsx! {
                             div { class: "saved-feeds__error", "Couldn't load: {e}" }
@@ -215,6 +289,71 @@ fn ListRow(list: ListView, on_add: EventHandler<ColumnSpec>) -> Element {
                 }
                 if !desc.is_empty() {
                     p { class: "saved-feeds__desc", "{desc}" }
+                }
+            }
+            button { class: "btn btn--primary saved-feeds__add",
+                onclick: add,
+                "+ Column"
+            }
+        }
+    }
+}
+
+/// Pill rendering one trending topic. Clicking opens a search
+/// column for the topic text (the `link` field would route inside
+/// bsky.app to either a search or a profile; we map any link to
+/// a search column for simplicity).
+#[component]
+fn TrendingChip(topic: TrendingTopic, on_open: EventHandler<ColumnSpec>) -> Element {
+    let label = topic
+        .display_name
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| topic.topic.clone());
+    let query = topic.topic.clone();
+    let click = move |_| {
+        on_open.call(ColumnSpec::search(query.clone()));
+    };
+    rsx! {
+        button { class: "trending__chip",
+            title: "{topic.description.clone().unwrap_or_default()}",
+            onclick: click,
+            "{label}"
+        }
+    }
+}
+
+/// Row for one of the bsky-curated popular feed generators. Same
+/// shape as SavedFeedRow but without the "Pinned" badge — these
+/// aren't subscribed yet, so the "+ Column" button is the
+/// affordance for adopting them.
+#[component]
+fn PopularFeedRow(view: FeedGeneratorView, on_add: EventHandler<ColumnSpec>) -> Element {
+    let display_name = view.display_name.clone();
+    let description = view.description.clone().unwrap_or_default();
+    let avatar = view.avatar.clone();
+    let uri = view.uri.clone();
+    let title_for_add = display_name.clone();
+    let add = move |_| {
+        on_add.call(ColumnSpec::feed_with_title(uri.clone(), title_for_add.clone()));
+    };
+    rsx! {
+        div { class: "saved-feeds__row",
+            div { class: "saved-feeds__avatar",
+                if let Some(url) = avatar {
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{display_name}" }
+                } else {
+                    div { class: "saved-feeds__avatar-placeholder",
+                        icons::Sparkles { size: icons::Size::Md }
+                    }
+                }
+            }
+            div { class: "saved-feeds__meta",
+                div { class: "saved-feeds__name-row",
+                    span { class: "saved-feeds__name", "{display_name}" }
+                }
+                if !description.is_empty() {
+                    p { class: "saved-feeds__desc", "{description}" }
                 }
             }
             button { class: "btn btn--primary saved-feeds__add",
