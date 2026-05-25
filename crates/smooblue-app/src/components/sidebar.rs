@@ -80,7 +80,6 @@ pub fn Sidebar(
             RailBtn { label: "Search", active: false, kind: RailKind::Search, badge: 0, onclick: open_search }
             RailBtn { label: "Notifications", active: false, kind: RailKind::Bell, badge: unread_count, onclick: add_notif }
             RailBtn { label: "Discover", active: false, kind: RailKind::Compass, badge: 0, onclick: add_discover }
-            RailBtn { label: "Saved feeds", active: false, kind: RailKind::Bookmark, badge: 0, onclick: open_saved_feeds }
             RailBtn { label: "Suggested follows", active: false, kind: RailKind::Sparkles, badge: 0, onclick: add_suggestions }
             div { class: "rail__divider" }
             // "+ Add column" opens the Saved Feeds sheet (which lists

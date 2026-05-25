@@ -769,10 +769,14 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                             ChipState::UseAi { combined } => rsx! {
                                 button {
                                     class: "compose__alt-ai compose__alt-ai--use",
-                                    title: "Use AI-suggested alt text",
+                                    title: if combined {
+                                        "Fill alt text from an AI description of the image PLUS any text the OCR pass detected. For screen-reader accessibility."
+                                    } else {
+                                        "Fill alt text from an AI description of the image. For screen-reader accessibility."
+                                    },
                                     onclick: use_suggestion,
                                     icons::Sparkles { size: icons::Size::Sm }
-                                    if combined { "Use AI + text" } else { "Use AI" }
+                                    if combined { "Auto-fill alt (AI + text)" } else { "Auto-fill alt with AI" }
                                 }
                             },
                             ChipState::None => rsx! { Fragment {} },

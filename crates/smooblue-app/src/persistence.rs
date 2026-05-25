@@ -1,40 +1,80 @@
-//! Disk + keyring persistence for sessions and column layouts.
+//! Session + layout persistence.
 //!
-//! - Session (which includes the DPoP PKCS8 PEM) → OS keyring under
-//!   service `ai.smoo.smooblue`, account `oauth-session`.
-//! - Column layout → JSON in the app's config dir.
-//! - Last handle → plaintext in the app's config dir. Non-secret;
-//!   used to pre-fill the login input so users don't retype after
-//!   sign-out.
+//! Sessions live as JSON files in the app's config dir with mode 0600.
+//! We previously used the OS keyring (Keychain on macOS) but the ACL
+//! is bound to the app's code signature — and our adhoc signature
+//! changes on every rebuild, so each install became a "different app"
+//! to the Keychain, forcing the user to re-auth after every update.
+//! Files survive rebuilds; the threat model (local-only personal app,
+//! DPoP key already a sensitive secret stored next to the access
+//! token) lines up with how Slack/Discord/etc. cache auth.
+//!
+//! Layout: `~/Library/Application Support/ai.Smoo.smooblue/`
+//!   session.json            ← legacy single-slot session
+//!   session-<did>.json      ← per-account session (multi-account)
+//!   accounts.json           ← which accounts exist + which is active
+//!   columns.json            ← deck layout
+//!   last_handle.txt         ← login pre-fill (non-secret)
+//!   draft.txt               ← in-progress compose
+//!   theme.txt               ← dark / light
 
 use smooblue_oauth::Session;
 
-const KEYRING_SERVICE: &str = "ai.smoo.smooblue";
-const KEYRING_ACCOUNT: &str = "oauth-session";
 const ACCOUNTS_FILE: &str = "accounts.json";
 const COLUMNS_FILE: &str = "columns.json";
 const LAST_HANDLE_FILE: &str = "last_handle.txt";
 const DRAFT_FILE: &str = "draft.txt";
 const THEME_FILE: &str = "theme.txt";
+const SESSION_FILE: &str = "session.json";
+
+fn config_dir() -> Option<std::path::PathBuf> {
+    Some(
+        directories::ProjectDirs::from("ai", "Smoo", "smooblue")?
+            .config_dir()
+            .to_path_buf(),
+    )
+}
+
+/// Atomically write `data` to `path` with mode 0600. Atomic so a
+/// crash mid-write doesn't leave a half-truncated session file.
+fn write_secret(path: &std::path::Path, data: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    // Owner-only readable. Best-effort; if the user has a weird umask
+    // or non-POSIX FS the file is still written, just less locked-down.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
 
 /// Persist the OAuth session.
 pub fn save_session(session: &Session) -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| e.to_string())?;
+    let path = config_dir().ok_or("no config dir")?.join(SESSION_FILE);
     let json = serde_json::to_string(session).map_err(|e| e.to_string())?;
-    entry.set_password(&json).map_err(|e| e.to_string())
+    write_secret(&path, &json)
 }
 
 /// Restore the OAuth session if one is stored.
 pub fn load_session() -> Option<Session> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).ok()?;
-    let json = entry.get_password().ok()?;
+    let path = config_dir()?.join(SESSION_FILE);
+    let json = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&json).ok()
 }
 
 /// Drop the persisted session (sign-out).
 pub fn clear_session() -> Result<(), String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| e.to_string())?;
-    entry.delete_credential().map_err(|e| e.to_string())
+    let path = config_dir().ok_or("no config dir")?.join(SESSION_FILE);
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// One known account — kept in a small disk index alongside the
@@ -55,22 +95,22 @@ pub struct Accounts {
     pub accounts: Vec<AccountRef>,
 }
 
-fn keyring_account_for(did: &str) -> String {
-    format!("{KEYRING_ACCOUNT}:{did}")
+/// Sanitize a DID for use in a filename (slashes / colons aren't
+/// portable). bsky DIDs use `:` (e.g. `did:plc:abc`) so we encode
+/// them by replacing with `_`.
+fn session_filename_for(did: &str) -> String {
+    let safe = did.replace([':', '/', '\\'], "_");
+    format!("session-{safe}.json")
 }
 
 fn accounts_path() -> Option<std::path::PathBuf> {
-    Some(
-        directories::ProjectDirs::from("ai", "Smoo", "smooblue")?
-            .config_dir()
-            .join(ACCOUNTS_FILE),
-    )
+    Some(config_dir()?.join(ACCOUNTS_FILE))
 }
 
 /// Load the multi-account index. On first run after the multi-account
 /// migration ships, falls back to migrating a legacy single-account
-/// keyring entry into a fresh index — the user gets to keep their
-/// signed-in session without re-authing.
+/// session into a fresh index — the user keeps their signed-in
+/// session without re-authing.
 pub fn load_accounts() -> Accounts {
     if let Some(path) = accounts_path() {
         if let Ok(s) = std::fs::read_to_string(&path) {
@@ -79,9 +119,8 @@ pub fn load_accounts() -> Accounts {
             }
         }
     }
-    // Migrate legacy single-session: if `oauth-session` exists in
-    // keyring, write it under the new keyed name and synthesize an
-    // index pointing at it.
+    // Migrate legacy single-session: if session.json exists, write
+    // a keyed copy and synthesize an index pointing at it.
     if let Some(s) = load_session() {
         let did = s.did.clone();
         let handle = s.handle.clone();
@@ -109,22 +148,28 @@ pub fn save_accounts(accounts: &Accounts) -> Result<(), String> {
 /// Persist a session keyed by DID. Independent of [`save_session`]
 /// (legacy single-slot) — multi-account callers should use this.
 pub fn save_session_for(did: &str, session: &Session) -> Result<(), String> {
-    let entry =
-        keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).map_err(|e| e.to_string())?;
+    let path = config_dir()
+        .ok_or("no config dir")?
+        .join(session_filename_for(did));
     let json = serde_json::to_string(session).map_err(|e| e.to_string())?;
-    entry.set_password(&json).map_err(|e| e.to_string())
+    write_secret(&path, &json)
 }
 
 pub fn load_session_for(did: &str) -> Option<Session> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).ok()?;
-    let json = entry.get_password().ok()?;
+    let path = config_dir()?.join(session_filename_for(did));
+    let json = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&json).ok()
 }
 
 pub fn delete_session_for(did: &str) -> Result<(), String> {
-    let entry =
-        keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).map_err(|e| e.to_string())?;
-    entry.delete_credential().map_err(|e| e.to_string())
+    let path = config_dir()
+        .ok_or("no config dir")?
+        .join(session_filename_for(did));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 pub fn save_columns(cols: &[crate::state::ColumnSpec]) -> Result<(), String> {
