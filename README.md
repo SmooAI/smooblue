@@ -7,14 +7,13 @@ A native, multi-column [Bluesky](https://bsky.app) client for macOS desktop. Wri
 </p>
 
 <p align="center">
-  <a href="media/smooblue-demo.mp4">
-    <img src="assets/icons/icon-1024.png" alt="Watch the demo (MP4)" width="120" />
-  </a>
-  <br/>
-  <a href="media/smooblue-demo.mp4"><strong>▶ Watch the demo (MP4 · 65 MB)</strong></a>
+  <img src="media/smooblue-demo.gif" alt="Smooblue demo" width="720" />
 </p>
 
-GitHub's README renderer doesn't play arbitrary repo MP4s inline. Tap the link above to download / view, or clone and open `media/smooblue-demo.mp4` locally.
+<p align="center"><sub>
+  GIF heavily downsampled to fit GitHub's inline limit. Full quality:
+  <a href="media/smooblue-demo.mp4"><strong>▶ smooblue-demo.mp4 (1080p · 65 MB)</strong></a>
+</sub></p>
 
 ---
 

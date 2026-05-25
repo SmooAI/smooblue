@@ -1,125 +1,96 @@
 <svg viewBox="0 0 135 135" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
-  <!-- Smooblue brand mark — Borg-cybernetic Bluesky butterfly with
-       a smoo monogram chip clipped onto the bottom-right corner.
-       Hard geometric plating + glowing red sensor slit + matrix-grid
-       wing inlay. Mechanical, not organic. -->
+  <!-- Smooblue brand mark — alien butterfly: blue wings + green
+       alien head with big black almond eyes. Smoo monogram chip
+       stamped bottom-right. Dropped the Borg circuitry/plating
+       per "a little too badass"; kept the antenna sensors as a nod
+       to the original Bluesky butterfly. -->
   <defs>
-    <!-- Smoo orange/red gradient (chip + accents) -->
     <linearGradient id="smoo" gradientUnits="userSpaceOnUse" x1="112.93" x2="22.42" y1="113.22" y2="22.71">
       <stop offset=".3" stop-color="#f49f0a"/>
       <stop offset=".79" stop-color="#fb7a4d"/>
       <stop offset="1" stop-color="#ff6b6c"/>
     </linearGradient>
-    <!-- Cold metal blue wing fill -->
-    <linearGradient id="metalBlue" gradientUnits="userSpaceOnUse" x1="-20" x2="20" y1="-15" y2="15">
-      <stop offset="0" stop-color="#02386b"/>
-      <stop offset=".5" stop-color="#0560c4"/>
-      <stop offset="1" stop-color="#1185fe"/>
+    <!-- Soft butterfly-wing blue (back to the organic Bluesky feel) -->
+    <linearGradient id="wing" gradientUnits="userSpaceOnUse" x1="-18" x2="18" y1="-14" y2="14">
+      <stop offset="0" stop-color="#0560c4"/>
+      <stop offset=".55" stop-color="#1185fe"/>
+      <stop offset="1" stop-color="#5cb1ff"/>
     </linearGradient>
-    <!-- Edge highlight stripe -->
-    <linearGradient id="edgeGlow" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="-20" y2="20">
-      <stop offset="0" stop-color="#5cb1ff" stop-opacity=".95"/>
-      <stop offset="1" stop-color="#1185fe" stop-opacity=".2"/>
-    </linearGradient>
-    <!-- Red Borg sensor glow (radial) -->
-    <radialGradient id="borgEye" cx="0" cy="0" r="6">
-      <stop offset="0" stop-color="#ffe4e4" stop-opacity="1"/>
-      <stop offset=".3" stop-color="#ff3333" stop-opacity="1"/>
-      <stop offset="1" stop-color="#7a0000" stop-opacity=".0"/>
+    <!-- Alien-skin blue: cool deep navy through bright sky on the
+         lit side, fading to near-black in the shadowed rim.
+         Reads as a smooth alien skull, not metallic. -->
+    <radialGradient id="alienHead" cx="-0.15" cy="-0.2" r="1">
+      <stop offset="0" stop-color="#cfeaff"/>
+      <stop offset=".35" stop-color="#1185fe"/>
+      <stop offset=".85" stop-color="#022c5a"/>
+      <stop offset="1" stop-color="#02152e"/>
     </radialGradient>
-    <!-- Wing-plate dark seam -->
-    <linearGradient id="plateSeam" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="-12" y2="12">
-      <stop offset="0" stop-color="#020618" stop-opacity=".0"/>
-      <stop offset=".5" stop-color="#020618" stop-opacity=".55"/>
-      <stop offset="1" stop-color="#020618" stop-opacity=".0"/>
-    </linearGradient>
-    <!-- Small matrix-grid pattern for wing inlay (used as a fill) -->
-    <pattern id="circuit" patternUnits="userSpaceOnUse" width="3" height="3">
-      <rect width="3" height="3" fill="transparent"/>
-      <path d="M0 0H3M0 0V3" stroke="#5cb1ff" stroke-width=".18" stroke-opacity=".55"/>
-    </pattern>
+    <!-- Alien eye sheen — pure black almond with a subtle pearl glint. -->
+    <radialGradient id="eyeShine" cx="0.3" cy="0.25" r="0.8">
+      <stop offset="0" stop-color="#9fdcff" stop-opacity=".9"/>
+      <stop offset=".4" stop-color="#0a1a2a" stop-opacity="1"/>
+      <stop offset="1" stop-color="#000" stop-opacity="1"/>
+    </radialGradient>
   </defs>
 
-  <!-- Outer mechanical ring — subtle, only on a few clock positions -->
-  <g transform="translate(67.5 64)">
-    <!-- Background ring sectors (faint) -->
-    <circle r="58" fill="none" stroke="#0a2440" stroke-width="2.5" stroke-opacity=".55"
-            stroke-dasharray="14 5 8 5 6 5 18 5"/>
-    <!-- Inner sensor ring (brighter) -->
-    <circle r="50" fill="none" stroke="#1185fe" stroke-width=".7" stroke-opacity=".75"
-            stroke-dasharray="2 4"/>
-  </g>
-
-  <!-- BUTTERFLY — Borg edition.
-       Coordinate system is centered at (67.5, 60). All inner art uses
-       small numbers so the geometry stays readable. -->
-  <g transform="translate(67.5 60) scale(3.0)">
-    <!-- Antennae: hard metallic spikes with conductive tips -->
-    <g stroke="#5cb1ff" stroke-linecap="square" stroke-width=".55">
-      <path d="m-2-11L-9-19" fill="none"/>
-      <path d="m2-11L9-19"   fill="none"/>
+  <!-- Butterfly geometry (centered at 67.5, 60). -->
+  <g transform="translate(67.5 60) scale(3.2)">
+    <!-- Antennae: organic-curvy, ending in small soft bulbs (the
+         signature Bluesky butterfly antennae, kept). -->
+    <g stroke="#0560c4" fill="none" stroke-linecap="round" stroke-width=".7">
+      <path d="m-2-11q-3-5-5-6"/>
+      <path d="m2-11q3-5 5-6"/>
     </g>
-    <!-- Antenna sensor balls -->
-    <circle cx="-9" cy="-19" fill="#ff3333" r="1.1"/>
-    <circle cx="9"  cy="-19" fill="#ff3333" r="1.1"/>
+    <circle cx="-7" cy="-17" fill="#5cb1ff" stroke="#0560c4" stroke-width=".4" r="1.3"/>
+    <circle cx="7"  cy="-17" fill="#5cb1ff" stroke="#0560c4" stroke-width=".4" r="1.3"/>
 
-    <!-- Upper wings (left + right) -->
-    <g stroke="#020618" stroke-linejoin="miter" stroke-width=".4">
-      <!-- Left upper -->
-      <path d="m-2-6c-6-9-17-8-16 1 1 5 10 6 16 3z" fill="url(#metalBlue)"/>
-      <path d="m-2-6c-6-9-17-8-16 1 1 5 10 6 16 3z" fill="url(#circuit)"/>
-      <!-- Right upper -->
-      <path d="m2-6c6-9 17-8 16 1-1 5-10 6-16 3z" fill="url(#metalBlue)"/>
-      <path d="m2-6c6-9 17-8 16 1-1 5-10 6-16 3z" fill="url(#circuit)"/>
-    </g>
-    <!-- Hard chevron plating on upper wings -->
-    <g fill="none" stroke="#5cb1ff" stroke-width=".4" stroke-opacity=".9">
-      <path d="m-15-3L-9-1.5L-3-3"/>
-      <path d="m-15-1L-9.5 .5L-3-1"/>
-      <path d="m15-3L9-1.5L3-3"/>
-      <path d="m15-1L9.5 .5L3-1"/>
+    <!-- Wings — back to clean Bluesky silhouettes, no plating. -->
+    <g fill="url(#wing)" stroke="#0560c4" stroke-linejoin="round" stroke-width=".5">
+      <path d="m-2-6c-6-9-17-8-16 1 1 5 10 6 16 3z"/>
+      <path d="m2-6c6-9 17-8 16 1-1 5-10 6-16 3z"/>
+      <path d="m-2 2c-5 7-14 10-13 3 1-4 8-5 13-3z"/>
+      <path d="m2 2c5 7 14 10 13 3-1-4-8-5-13-3z"/>
     </g>
 
-    <!-- Lower wings -->
-    <g stroke="#020618" stroke-width=".4">
-      <path d="m-2 2c-5 7-14 10-13 3 1-4 8-5 13-3z" fill="url(#metalBlue)"/>
-      <path d="m-2 2c-5 7-14 10-13 3 1-4 8-5 13-3z" fill="url(#circuit)"/>
-      <path d="m2 2c5 7 14 10 13 3-1-4-8-5-13-3z"   fill="url(#metalBlue)"/>
-      <path d="m2 2c5 7 14 10 13 3-1-4-8-5-13-3z"   fill="url(#circuit)"/>
-    </g>
-    <!-- Lower-wing accent chevrons -->
-    <g fill="none" stroke="#5cb1ff" stroke-width=".35" stroke-opacity=".8">
-      <path d="m-13 6L-8 4L-3 5"/>
-      <path d="m13 6L8 4L3 5"/>
-    </g>
+    <!-- Subtle wing highlights — soft ovals, not metallic glints. -->
+    <ellipse cx="-12" cy="-7" fill="#fff" opacity=".55" rx="2" ry=".9"/>
+    <ellipse cx="12"  cy="-7" fill="#fff" opacity=".55" rx="2" ry=".9"/>
+    <ellipse cx="-10" cy="6"  fill="#fff" opacity=".4"  rx="1.3" ry=".7"/>
+    <ellipse cx="10"  cy="6"  fill="#fff" opacity=".4"  rx="1.3" ry=".7"/>
 
-    <!-- Central plated body — armored, segmented -->
-    <ellipse rx="2.1" ry="9" fill="#02152e"/>
-    <!-- Body segment lines -->
-    <g stroke="#5cb1ff" stroke-width=".25" stroke-opacity=".85">
-      <line x1="-1.6" x2="1.6" y1="-5" y2="-5"/>
-      <line x1="-1.7" x2="1.7" y1="-2" y2="-2"/>
-      <line x1="-1.7" x2="1.7" y1="1"  y2="1"/>
-      <line x1="-1.6" x2="1.6" y1="4"  y2="4"/>
-    </g>
+    <!-- Body — slim, dark-blue stem connecting head and tail. -->
+    <ellipse rx="1.7" ry="8" fill="#0560c4"/>
 
-    <!-- Head plate (armored, dark, with a single red Borg sensor slit) -->
-    <circle cy="-9" r="4.2" fill="#020e1f" stroke="#1185fe" stroke-width=".4"/>
-    <!-- Borg sensor: thin horizontal red glow + bright inner dot -->
-    <g transform="translate(0 -8.7)">
-      <ellipse rx="4" ry="2" fill="url(#borgEye)"/>
-      <rect x="-3" y="-.55" width="6" height="1.1" fill="#ff1f1f"/>
-      <rect x="-3" y="-.25" width="6" height=".5"  fill="#ffe0e0"/>
-    </g>
+    <!-- ALIEN HEAD — large green dome, slightly oversized vs the
+         original butterfly head (5.4r vs 4.2r) so it reads as an
+         actual alien skull. Soft rim shadow via radial gradient. -->
+    <g transform="translate(0 -9)">
+      <!-- Subtle shadow halo under the chin so the head pops from
+           the wings instead of looking pasted on. -->
+      <ellipse cy="4.5" rx="4.2" ry="1.1" fill="#020618" opacity=".45"/>
+      <!-- The dome itself — slightly taller than wide for the
+           classic grey-alien skull elongation. -->
+      <ellipse rx="5.2" ry="5.6" fill="url(#alienHead)" stroke="#02152e" stroke-width=".35"/>
+      <!-- A tiny brow shadow gives the head dimensionality. -->
+      <ellipse cy="-1" rx="4.2" ry="1.2" fill="#fff" opacity=".18"/>
 
-    <!-- Glinting highlights on the outer wing edges -->
-    <g fill="url(#edgeGlow)" opacity=".7">
-      <ellipse cx="-15" cy="-6" rx="2.2" ry="1"/>
-      <ellipse cx="15"  cy="-6" rx="2.2" ry="1"/>
+      <!-- Big black almond eyes — the iconic alien feature.
+           Rotated outward ~22° so they sweep up like grey/Zeta
+           Reticuli imagery. Inner pearl glint catches the corner. -->
+      <g transform="rotate(-22) translate(-2.1 .3)">
+        <ellipse rx="1.7" ry="2.6" fill="url(#eyeShine)"/>
+      </g>
+      <g transform="rotate(22) translate(2.1 .3)">
+        <ellipse rx="1.7" ry="2.6" fill="url(#eyeShine)"/>
+      </g>
+
+      <!-- Tiny mouth slit — barely visible but breaks up the chin. -->
+      <line x1="-.8" x2=".8" y1="3.2" y2="3.2"
+            stroke="#02152e" stroke-width=".25" stroke-linecap="round"/>
     </g>
   </g>
 
-  <!-- Smoo monogram chip — bottom-right brand stamp -->
+  <!-- Smoo monogram chip — bottom-right brand stamp. Unchanged. -->
   <g transform="translate(109 109)">
     <circle r="20" fill="#020618" opacity=".35"/>
     <circle r="18.5" fill="#fff"/>
