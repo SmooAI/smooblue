@@ -233,7 +233,7 @@ impl AtClient {
             feed: r
                 .posts
                 .into_iter()
-                .map(|p| crate::feed::FeedItem { post: p })
+                .map(|p| crate::feed::FeedItem { post: p, reply: None, reason: None })
                 .collect(),
         })
     }

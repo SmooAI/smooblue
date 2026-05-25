@@ -12,7 +12,17 @@ use smooblue_atproto::feed::PostView;
 use smooblue_oauth::Session;
 
 #[component]
-pub fn PostCard(post: PostView) -> Element {
+pub fn PostCard(
+    post: PostView,
+    /// Display name of the actor who reposted this — drives the
+    /// "Reposted by X" chip above the card. None on first-hand posts.
+    #[props(default)]
+    reposter: Option<String>,
+    /// Handle of the post being replied to — drives the
+    /// "Replying to @X" chip. None on top-level posts.
+    #[props(default)]
+    reply_parent_handle: Option<String>,
+) -> Element {
     // NOTE: this component does NOT subscribe to the global Tick
     // signal — the relative timestamp ("11s" → "12s") is rendered
     // via icons::TimeAgo, which has its own tick subscription. With
@@ -315,6 +325,25 @@ pub fn PostCard(post: PostView) -> Element {
 
     rsx! {
         article { class: "post",
+            // Context chips above the card — repost attribution and
+            // reply-to context. Both wrap the whole card so the user
+            // sees them before scanning the body, matching bsky.app.
+            if reposter.is_some() || reply_parent_handle.is_some() {
+                div { class: "post__context",
+                    if let Some(name) = reposter.as_ref() {
+                        span { class: "post__context-chip",
+                            icons::Repeat2 { size: icons::Size::Sm }
+                            " Reposted by {name}"
+                        }
+                    }
+                    if let Some(handle) = reply_parent_handle.as_ref() {
+                        span { class: "post__context-chip post__context-chip--reply",
+                            icons::MessageCircle { size: icons::Size::Sm }
+                            " Replying to @{handle}"
+                        }
+                    }
+                }
+            }
             div { class: "post__avatar post__avatar--clickable",
                 onclick: open_profile,
                 title: "Open profile column",

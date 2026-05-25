@@ -13,6 +13,60 @@ pub struct FeedResponse {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FeedItem {
     pub post: PostView,
+    /// Set when this row appears in the feed *because* the post is
+    /// a reply — carries the parent post (and grandparent root) so
+    /// the renderer can show a "Replying to @parent" chip.
+    /// `app.bsky.feed.defs#replyRef` shape.
+    #[serde(default)]
+    pub reply: Option<FeedItemReply>,
+    /// Set when this row appears in the feed because it was reposted
+    /// or surfaced by a feed generator. Used for the "Reposted by X"
+    /// chip and for de-dup keying (same post URI, different reposter).
+    #[serde(default)]
+    pub reason: Option<FeedItemReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct FeedItemReply {
+    /// The immediate parent post. `Unknown` covers `notFoundPost` /
+    /// `blockedPost` shapes from the lexicon — render a placeholder.
+    pub parent: ReplyParentView,
+}
+
+/// Either a real PostView for the parent, or a metadata-only shape
+/// when the parent is unavailable (deleted / blocked / not found).
+/// Untagged so serde just tries the rich form first.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ReplyParentView {
+    Post(Box<PostView>),
+    Other(serde_json::Value),
+}
+
+impl ReplyParentView {
+    /// Extract the parent author when we have a real PostView,
+    /// otherwise None (rendered as "a deleted post" downstream).
+    pub fn author(&self) -> Option<&PostAuthor> {
+        match self {
+            ReplyParentView::Post(p) => Some(&p.author),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "$type")]
+pub enum FeedItemReason {
+    #[serde(rename = "app.bsky.feed.defs#reasonRepost")]
+    Repost {
+        by: PostAuthor,
+        #[serde(rename = "indexedAt", default)]
+        indexed_at: Option<String>,
+    },
+    /// Custom feed generators sometimes attach a reasonPin or similar.
+    /// We catch the rest as Unknown so a new tag doesn't break decode.
+    #[serde(other)]
+    Other,
 }
 
 /// `app.bsky.actor.defs#profileViewDetailed` — full profile shape.

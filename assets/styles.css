@@ -1823,6 +1823,30 @@ a {
     margin: 0 2px 6px;
 }
 
+/* Repost / reply context above a post card. flex-basis: 100% is
+ * the "force a new row in a flex container" trick so the chip sits
+ * above the avatar+body row without needing to restructure. */
+.post__context {
+    flex: 1 0 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+    padding: 0 0 4px 38px;
+    margin-top: -2px;
+}
+
+.post__context-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.post__context-chip--reply {
+    color: var(--color-smooai-blue-300);
+}
+
 /* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */

@@ -677,6 +677,8 @@ fn item(
             viewer: None,
             labels: Vec::new(),
         },
+        reply: None,
+        reason: None,
     }
 }
 
@@ -715,6 +717,8 @@ fn item_with_embed(
             viewer: None,
             labels: Vec::new(),
         },
+        reply: None,
+        reason: None,
     }
 }
 
