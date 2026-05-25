@@ -7,9 +7,14 @@
 //! Polling model (the "deck.blue feel"):
 //! - Each column kind has its own cadence — see [`poll_interval`].
 //! - The first fetch populates the column.
-//! - Subsequent fetches go into a "pending" buffer. If the user is at the
-//!   top of the column we slide them in automatically; otherwise we show
-//!   a "N new posts" banner and the user opts in.
+//! - Subsequent top-polls merge new items at the head, deduped by URI,
+//!   so old scrollback survives the refresh.
+//! - Scrolling near the bottom triggers a `fetch_more` with the saved
+//!   cursor — items append at the tail.
+//! - Capacity-capped at [`MAX_POSTS_PER_COLUMN`] to keep per-column
+//!   memory bounded (~6 MB at 2000 items). Cap behavior is
+//!   **refuse-to-load-more**, not bottom-eviction — we don't shuffle
+//!   data out from under a user who's scrolled into the deep tail.
 //! - No jetstream / firehose — pure XRPC polling against the AppView via
 //!   the user's PDS, mirroring what deck.blue does.
 
@@ -25,6 +30,26 @@ use smooblue_atproto::{
 use smooblue_oauth::Session;
 use std::collections::HashMap;
 use std::time::Duration;
+
+/// Per-column scrollback cap. ~2000 items × ~3 KB/item ≈ 6 MB per
+/// column in-memory (image bytes live in WKWebView's image cache,
+/// not here). Nine maxed columns ≈ 50 MB — well inside our budget.
+/// Above this we **refuse** to load more rather than evict from the
+/// tail; evicting under the user's scroll position would be jarring.
+pub const MAX_POSTS_PER_COLUMN: usize = 2000;
+
+/// How many items we ask for per page. Small enough that the first
+/// page paints fast, large enough that scroll-to-bottom doesn't fire
+/// a fetch_more on every flick.
+const PAGE_SIZE: u32 = 30;
+
+/// How close to the bottom (in pixels) the user would have to scroll
+/// before an auto fetch_more would trigger. Currently unused —
+/// Dioxus 0.6's `ScrollData` doesn't expose scroll position, so we
+/// drive `fetch_more` from a "Load more" button instead. Kept as a
+/// const for the future JS-eval IntersectionObserver wire-up.
+#[allow(dead_code)]
+const FETCH_MORE_THRESHOLD_PX: f64 = 400.0;
 
 #[derive(Clone, PartialEq, Default)]
 enum ColumnData {
@@ -80,13 +105,25 @@ pub fn Column(spec: ColumnSpec) -> Element {
     let spec_kind = spec.kind.clone();
     let spec_id = spec.id.clone();
 
-    // Current visible data. Fresh poll cycles overwrite directly — no
-    // banner / opt-in. We auto-load.
+    // Current visible data. Top-polls merge new items at the head;
+    // scroll-bottom triggers fetch_more which appends at the tail.
     let mut data = use_signal(ColumnData::default);
     let mut error = use_signal::<Option<String>>(|| None);
     let mut loading = use_signal(|| true);
+    // Server-side cursor for the next fetch_more. None on first
+    // mount; populated from each fetch's returned cursor (whether
+    // top-poll or fetch-more) so the next page picks up where the
+    // last one left off.
+    let mut next_cursor = use_signal::<Option<String>>(|| None);
+    // Pinned `true` while a fetch_more is in flight so the scroll
+    // observer doesn't enqueue a second concurrent fetch.
+    let mut loading_more = use_signal(|| false);
+    // `true` when the server tells us the bottom-of-feed cursor is
+    // None — we've hit the end and shouldn't keep firing fetches.
+    let mut at_end = use_signal(|| false);
 
-    // The polling loop. Re-fires when the session or kind changes.
+    // The polling loop. Top-of-feed refresh on each tick: merges new
+    // items at the head, preserves the user's scrollback below.
     let kind_for_poll = spec_kind.clone();
     use_future(move || {
         let kind = kind_for_poll.clone();
@@ -100,24 +137,51 @@ pub fn Column(spec: ColumnSpec) -> Element {
             // doesn't grow this unboundedly.
             let mut subjects_cache: HashMap<String, PostView> = HashMap::new();
             loop {
-                match fetch_once(&kind, session_sig, &mut subjects_cache).await {
+                match fetch_page(&kind, session_sig, None, &mut subjects_cache).await {
                     Ok(fresh) => {
                         error.set(None);
                         loading.set(false);
-                        data.set(fresh);
+                        // Merge the fresh page into whatever we already
+                        // have. First-fetch: just install. Subsequent
+                        // polls: prepend new items, preserve tail.
+                        let merged = match (data.peek().clone(), fresh.data) {
+                            (_, ColumnData::Empty) => ColumnData::Empty,
+                            (ColumnData::Posts(existing), ColumnData::Posts(new_page)) => {
+                                ColumnData::Posts(merge_top_page(
+                                    existing,
+                                    new_page,
+                                    MAX_POSTS_PER_COLUMN,
+                                ))
+                            }
+                            // Notifications + Suggestions don't paginate
+                            // this way — top-poll replaces wholesale.
+                            (_, other) => other,
+                        };
+                        data.set(merged);
+                        // Save the cursor from the top page — the FIRST
+                        // top-poll's cursor tells us where to start
+                        // paginating downward from. We don't overwrite
+                        // on subsequent polls because top cursors point
+                        // to "the page below the newest" and would
+                        // shift as new items arrive.
+                        if first_fetch {
+                            next_cursor.set(fresh.cursor);
+                            at_end.set(false);
+                        }
                         // First successful Notifications fetch: tell
                         // the server we've seen them so the sidebar
                         // unread badge clears. Best-effort; failures
                         // are silent (the badge will catch up next
                         // poll cycle anyway).
-                        if first_fetch && matches!(&kind, ColumnKind::Notifications) {
-                            if !crate::demo::is_active() {
-                                if let Some(client) = fresh_client(session_sig).await {
-                                    let _ = client.update_seen(chrono::Utc::now()).await;
-                                }
+                        if first_fetch
+                            && matches!(&kind, ColumnKind::Notifications)
+                            && !crate::demo::is_active()
+                        {
+                            if let Some(client) = fresh_client(session_sig).await {
+                                let _ = client.update_seen(chrono::Utc::now()).await;
                             }
-                            first_fetch = false;
                         }
+                        first_fetch = false;
                     }
                     Err(e) => {
                         loading.set(false);
@@ -128,6 +192,76 @@ pub fn Column(spec: ColumnSpec) -> Element {
             }
         }
     });
+
+    // "Load more" click handler. Skips entirely for non-paginated
+    // column kinds (Notifications, Suggestions) and when:
+    //   - a fetch is already in flight
+    //   - the server told us there's no more (at_end)
+    //   - we'd push the column over MAX_POSTS_PER_COLUMN
+    //
+    // Auto-trigger on scroll-near-bottom is a follow-up — Dioxus
+    // 0.6's ScrollData doesn't expose scroll position, so we'd need
+    // a JS-eval'd IntersectionObserver. Button works today.
+    let kind_for_more = spec_kind.clone();
+    let load_more = move |_| {
+        if !is_paginated(&kind_for_more) {
+            return;
+        }
+        if *loading_more.read() || *at_end.read() {
+            return;
+        }
+        // Cap-guard: refuse rather than evict.
+        if let ColumnData::Posts(items) = &*data.peek() {
+            if items.len() >= MAX_POSTS_PER_COLUMN {
+                return;
+            }
+        }
+        // Need a non-empty cursor to ask for more.
+        let cursor = match next_cursor.peek().clone() {
+            Some(c) if !c.is_empty() => c,
+            _ => return,
+        };
+        let kind = kind_for_more.clone();
+        loading_more.set(true);
+        spawn(async move {
+            match fetch_page(&kind, session, Some(cursor), &mut HashMap::new()).await {
+                Ok(more) => {
+                    // Drop the immutable borrow on `data` before we
+                    // call `data.set` — Dioxus tracks signal borrows
+                    // dynamically and a held read-guard during a
+                    // write panics.
+                    let existing_snap = data.peek().clone();
+                    if let (ColumnData::Posts(existing), ColumnData::Posts(new_page)) =
+                        (existing_snap, more.data)
+                    {
+                        data.set(ColumnData::Posts(append_bottom_page(
+                            existing,
+                            new_page,
+                            MAX_POSTS_PER_COLUMN,
+                        )));
+                    }
+                    if more.cursor.is_none() {
+                        at_end.set(true);
+                    } else {
+                        next_cursor.set(more.cursor);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "smooblue: fetch_more failed");
+                }
+            }
+            loading_more.set(false);
+        });
+    };
+    // Whether to render the "Load more" button (only on paginated
+    // kinds, only when not at-end, only when not capped).
+    let kind_for_button_check = spec_kind.clone();
+    let show_load_more = is_paginated(&kind_for_button_check)
+        && !*at_end.read()
+        && match &*data.read() {
+            ColumnData::Posts(items) => !items.is_empty() && items.len() < MAX_POSTS_PER_COLUMN,
+            _ => false,
+        };
 
     // Visual state derived from the shared drag context — used to dim
     // the column being dragged and highlight the drop target.
@@ -192,21 +326,67 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         }
                     }
                 }
+                // Bottom indicator: "Load more" button when there's
+                // more to fetch, "Loading more…" while in flight,
+                // "End of feed" once we've exhausted the cursor,
+                // "Scrollback cap reached" if we hit the per-column
+                // memory ceiling.
+                if matches!(&*data.read(), ColumnData::Posts(items) if !items.is_empty()) {
+                    if *loading_more.read() {
+                        div { class: "deck-column__more", "Loading more…" }
+                    } else if matches!(&*data.read(), ColumnData::Posts(items) if items.len() >= MAX_POSTS_PER_COLUMN) {
+                        div { class: "deck-column__more deck-column__more--cap",
+                            "Scrollback cap reached ({MAX_POSTS_PER_COLUMN} posts). Refresh to reset."
+                        }
+                    } else if *at_end.read() {
+                        div { class: "deck-column__more", "End of feed." }
+                    } else if show_load_more {
+                        button { class: "deck-column__load-more",
+                            onclick: load_more,
+                            "Load more"
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-/// One fetch cycle for the column. Returns the freshest page of items;
-/// the caller decides whether to install them or stash them as pending.
-async fn fetch_once(
+/// True when the column supports cursor-based fetch_more on scroll.
+/// Notifications and Suggestions have their own pagination semantics
+/// (notifications are time-bucketed and small; suggestions are a
+/// single page of personalized actors).
+fn is_paginated(kind: &ColumnKind) -> bool {
+    matches!(
+        kind,
+        ColumnKind::Home
+            | ColumnKind::AuthorFeed { .. }
+            | ColumnKind::Search { .. }
+            | ColumnKind::Feed { .. }
+            | ColumnKind::List { .. }
+    )
+}
+
+/// One page of results from `fetch_page` — the data view + the cursor
+/// the AppView gave us for the next page (None ⇒ end of feed).
+struct Page {
+    data: ColumnData,
+    cursor: Option<String>,
+}
+
+/// One fetch cycle for the column at a given cursor position.
+/// `cursor: None` ⇒ top of feed; `cursor: Some(c)` ⇒ continue from c.
+/// Returns both the data and the cursor for the page below this one.
+async fn fetch_page(
     kind: &ColumnKind,
     session_sig: Signal<Option<Session>>,
+    cursor: Option<String>,
     subjects_cache: &mut HashMap<String, PostView>,
-) -> Result<ColumnData, String> {
-    // Demo mode: canned data with no network.
+) -> Result<Page, String> {
+    // Demo mode: canned data, no cursor — second fetch_more call
+    // returns an empty page so the column shows "End of feed".
     if crate::demo::is_active() {
-        return Ok(match kind {
+        let data = match kind {
             ColumnKind::Notifications => {
                 let (items, subjects) = crate::demo::notifications_with_subjects();
                 let groups = group_notifications(items);
@@ -217,8 +397,17 @@ async fn fetch_once(
             ColumnKind::Home
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
-            | ColumnKind::List { .. } => ColumnData::Posts(crate::demo::home_feed()),
-        });
+            | ColumnKind::List { .. } => {
+                if cursor.is_some() {
+                    // Fake pagination in demo: empty page on
+                    // fetch_more so the indicator lands at "End".
+                    ColumnData::Posts(Vec::new())
+                } else {
+                    ColumnData::Posts(crate::demo::home_feed())
+                }
+            }
+        };
+        return Ok(Page { data, cursor: None });
     }
     // OAuth-authenticated calls hit the user's PDS (which proxies app.bsky.*
     // to the AppView with service-auth on our behalf). Hitting the AppView
@@ -230,20 +419,29 @@ async fn fetch_once(
     let Some(client) = fresh_client(session_sig).await else {
         return Err("not signed in".into());
     };
+    let cur = cursor.as_deref();
     match kind {
         ColumnKind::Home => client
-            .get_timeline(None, 30)
+            .get_timeline(cur, PAGE_SIZE)
             .await
-            .map(|r| ColumnData::Posts(r.feed))
+            .map(|r| Page {
+                data: ColumnData::Posts(r.feed),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
         ColumnKind::AuthorFeed { actor } => client
-            .get_author_feed(actor, None, 30)
+            .get_author_feed(actor, cur, PAGE_SIZE)
             .await
-            .map(|r| ColumnData::Posts(r.feed))
+            .map(|r| Page {
+                data: ColumnData::Posts(r.feed),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
         ColumnKind::Notifications => {
+            // Notifications don't paginate via fetch_more — top-poll
+            // only. We don't expose a cursor.
             let items = client
-                .list_notifications(None, 50)
+                .list_notifications(cur, 50)
                 .await
                 .map(|r| r.notifications)
                 .map_err(|e| e.to_string())?;
@@ -271,32 +469,90 @@ async fn fetch_once(
             // Collapse 20 likes on the same post into one card etc.
             // Done after hydration so the same subjects map keys still work.
             let groups = group_notifications(items);
-            Ok(ColumnData::Notifications {
-                groups,
-                subjects: subjects_cache.clone(),
+            Ok(Page {
+                data: ColumnData::Notifications {
+                    groups,
+                    subjects: subjects_cache.clone(),
+                },
+                cursor: None,
             })
         }
         ColumnKind::Search { query } => client
-            .search_posts(query, None, 30)
+            .search_posts(query, cur, PAGE_SIZE)
             .await
-            .map(|r| ColumnData::Posts(r.feed))
+            .map(|r| Page {
+                data: ColumnData::Posts(r.feed),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
         ColumnKind::Feed { uri } => client
-            .get_feed(uri, None, 30)
+            .get_feed(uri, cur, PAGE_SIZE)
             .await
-            .map(|r| ColumnData::Posts(r.feed))
+            .map(|r| Page {
+                data: ColumnData::Posts(r.feed),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
         ColumnKind::List { uri } => client
-            .get_list_feed(uri, None, 30)
+            .get_list_feed(uri, cur, PAGE_SIZE)
             .await
-            .map(|r| ColumnData::Posts(r.feed))
+            .map(|r| Page {
+                data: ColumnData::Posts(r.feed),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
         ColumnKind::Suggestions => client
-            .get_suggestions(None, 25)
+            .get_suggestions(cur, 25)
             .await
-            .map(|r| ColumnData::Suggestions(r.actors))
+            .map(|r| Page {
+                data: ColumnData::Suggestions(r.actors),
+                cursor: r.cursor,
+            })
             .map_err(|e| e.to_string()),
     }
+}
+
+/// Merge a fresh top-of-feed page into the existing item list.
+/// Fresh page items are newest-first; any whose dedupe key isn't in
+/// `existing` get prepended (preserving fresh's relative order).
+/// Existing items keep their tail. Capped at `cap` from the head if
+/// the merged result is too long — the cap-as-policy is "newer wins
+/// when we have to choose."
+fn merge_top_page(existing: Vec<FeedItem>, fresh: Vec<FeedItem>, cap: usize) -> Vec<FeedItem> {
+    use std::collections::HashSet;
+    let existing_keys: HashSet<String> = existing.iter().map(feed_item_key).collect();
+    let mut new_items: Vec<FeedItem> = fresh
+        .into_iter()
+        .filter(|item| !existing_keys.contains(&feed_item_key(item)))
+        .collect();
+    new_items.extend(existing);
+    if new_items.len() > cap {
+        new_items.truncate(cap);
+    }
+    new_items
+}
+
+/// Append a bottom-of-feed page (older items) to the existing list.
+/// De-dupe by key. Respects the cap — drops any items from `more`
+/// that would push us over the limit (refuse-rather-than-evict so a
+/// user scrolled into the deep tail isn't surprised by content
+/// disappearing).
+fn append_bottom_page(
+    mut existing: Vec<FeedItem>,
+    more: Vec<FeedItem>,
+    cap: usize,
+) -> Vec<FeedItem> {
+    use std::collections::HashSet;
+    let existing_keys: HashSet<String> = existing.iter().map(feed_item_key).collect();
+    let room = cap.saturating_sub(existing.len());
+    for item in more
+        .into_iter()
+        .filter(|item| !existing_keys.contains(&feed_item_key(item)))
+        .take(room)
+    {
+        existing.push(item);
+    }
+    existing
 }
 
 /// Stable key for a feed row. URI alone isn't unique (a post can
@@ -448,5 +704,168 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
                 icons::X { size: icons::Size::Sm }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smooblue_atproto::feed::{PostAuthor, PostRecord, PostView};
+
+    fn mk(uri: &str) -> FeedItem {
+        FeedItem {
+            post: PostView {
+                uri: uri.into(),
+                cid: format!("cid:{uri}"),
+                author: PostAuthor {
+                    did: "did:plc:a".into(),
+                    handle: "a.test".into(),
+                    display_name: None,
+                    avatar: None,
+                },
+                record: PostRecord {
+                    text: String::new(),
+                    created_at: None,
+                },
+                embed: None,
+                indexed_at: None,
+                reply_count: 0,
+                repost_count: 0,
+                like_count: 0,
+                quote_count: 0,
+                viewer: None,
+                labels: Vec::new(),
+            },
+            reply: None,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn merge_top_prepends_new_and_keeps_existing_tail() {
+        let existing = vec![mk("at://x/a"), mk("at://x/b"), mk("at://x/c")];
+        let fresh = vec![mk("at://x/new1"), mk("at://x/new2"), mk("at://x/a")];
+        let merged = merge_top_page(existing, fresh, 100);
+        // new1 + new2 prepended; a (dup) skipped; existing tail kept.
+        let uris: Vec<&str> = merged.iter().map(|i| i.post.uri.as_str()).collect();
+        assert_eq!(
+            uris,
+            vec![
+                "at://x/new1",
+                "at://x/new2",
+                "at://x/a",
+                "at://x/b",
+                "at://x/c"
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_top_respects_cap_from_the_head() {
+        // Big merge: 5 fresh + 10 existing, cap at 8 → keep the newest 8.
+        let existing: Vec<FeedItem> = (0..10).map(|i| mk(&format!("at://x/old{i}"))).collect();
+        let fresh: Vec<FeedItem> = (0..5).map(|i| mk(&format!("at://x/new{i}"))).collect();
+        let merged = merge_top_page(existing, fresh, 8);
+        assert_eq!(merged.len(), 8);
+        // First 5 = the fresh items (newest); next 3 = the start of existing.
+        assert_eq!(merged[0].post.uri, "at://x/new0");
+        assert_eq!(merged[4].post.uri, "at://x/new4");
+        assert_eq!(merged[5].post.uri, "at://x/old0");
+        assert_eq!(merged[7].post.uri, "at://x/old2");
+    }
+
+    #[test]
+    fn merge_top_empty_fresh_keeps_existing() {
+        let existing = vec![mk("at://x/a"), mk("at://x/b")];
+        let merged = merge_top_page(existing.clone(), vec![], 100);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].post.uri, "at://x/a");
+    }
+
+    #[test]
+    fn merge_top_empty_existing_takes_full_fresh() {
+        let fresh = vec![mk("at://x/n1"), mk("at://x/n2")];
+        let merged = merge_top_page(vec![], fresh, 100);
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn append_bottom_appends_new_items_only() {
+        let existing = vec![mk("at://x/a"), mk("at://x/b")];
+        let more = vec![mk("at://x/c"), mk("at://x/b"), mk("at://x/d")];
+        let out = append_bottom_page(existing, more, 100);
+        let uris: Vec<&str> = out.iter().map(|i| i.post.uri.as_str()).collect();
+        assert_eq!(uris, vec!["at://x/a", "at://x/b", "at://x/c", "at://x/d"]);
+    }
+
+    #[test]
+    fn append_bottom_refuses_to_evict_past_cap() {
+        // Existing already at cap → no items should be appended even
+        // though `more` has 3 fresh ones. This is the load-bearing
+        // memory guard — "refuse rather than evict".
+        let existing: Vec<FeedItem> = (0..5).map(|i| mk(&format!("at://x/{i}"))).collect();
+        let more = vec![mk("at://x/m1"), mk("at://x/m2"), mk("at://x/m3")];
+        let out = append_bottom_page(existing.clone(), more, 5);
+        assert_eq!(out.len(), 5);
+        // None of the m* items made it in.
+        for item in &out {
+            assert!(!item.post.uri.starts_with("at://x/m"));
+        }
+    }
+
+    #[test]
+    fn append_bottom_takes_only_what_fits() {
+        // Existing has 3 slots free, more has 5 candidates → take 3.
+        let existing: Vec<FeedItem> = (0..2).map(|i| mk(&format!("at://x/{i}"))).collect();
+        let more: Vec<FeedItem> = (0..5).map(|i| mk(&format!("at://x/m{i}"))).collect();
+        let out = append_bottom_page(existing, more, 5);
+        assert_eq!(out.len(), 5);
+        assert_eq!(out[2].post.uri, "at://x/m0");
+        assert_eq!(out[4].post.uri, "at://x/m2");
+    }
+
+    #[test]
+    fn is_paginated_classifies_kinds_correctly() {
+        assert!(is_paginated(&ColumnKind::Home));
+        assert!(is_paginated(&ColumnKind::Search { query: "x".into() }));
+        assert!(is_paginated(&ColumnKind::Feed {
+            uri: "at://x".into()
+        }));
+        assert!(is_paginated(&ColumnKind::AuthorFeed { actor: "a".into() }));
+        assert!(is_paginated(&ColumnKind::List {
+            uri: "at://x".into()
+        }));
+        // Notifications + Suggestions deliberately excluded — they
+        // have their own pagination semantics.
+        assert!(!is_paginated(&ColumnKind::Notifications));
+        assert!(!is_paginated(&ColumnKind::Suggestions));
+    }
+
+    #[test]
+    fn memory_budget_per_column_is_reasonable() {
+        // Sanity: 2000 representative FeedItems shouldn't push past
+        // a few MB of Vec overhead. The real per-item heap is
+        // dominated by String contents that this measurement won't
+        // capture, but the Vec's *fixed* overhead alone is one of
+        // the things that could quietly balloon if FeedItem grows.
+        let items: Vec<FeedItem> = (0..MAX_POSTS_PER_COLUMN)
+            .map(|i| mk(&format!("at://x/{i}")))
+            .collect();
+        let stack_bytes = std::mem::size_of_val(items.as_slice());
+        // A FeedItem at 1.0 is ~712 bytes of struct overhead (PostView
+        // is the bulk — String headers + Option<Vec> + the Embed enum's
+        // worst-case variant). 2000 × 712 ≈ 1.4 MB. The cap below has
+        // ~40% slack so small additions don't break the test, but
+        // anything that takes us past 2 MB stack-only means a real
+        // refactor — break the test, force the audit, decide whether
+        // MAX_POSTS_PER_COLUMN should drop.
+        assert!(
+            stack_bytes < 2_000_000,
+            "FeedItem stack footprint grew unexpectedly: {} bytes for {} items \
+             (~{} bytes / item) — review MAX_POSTS_PER_COLUMN budget",
+            stack_bytes,
+            MAX_POSTS_PER_COLUMN,
+            stack_bytes / MAX_POSTS_PER_COLUMN,
+        );
     }
 }

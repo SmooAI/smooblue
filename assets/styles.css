@@ -220,6 +220,38 @@ a {
     opacity: 0.7;
 }
 
+/* Bottom-of-column footer for pagination status and Load more. */
+.deck-column__more {
+    text-align: center;
+    padding: 16px 12px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.deck-column__more--cap {
+    color: var(--color-smooai-orange);
+}
+
+.deck-column__load-more {
+    display: block;
+    margin: 12px auto;
+    padding: 8px 20px;
+    background: transparent;
+    color: var(--color-smooai-orange);
+    border: 1px solid var(--color-smooai-orange);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.deck-column__load-more:hover {
+    background: var(--color-smooai-orange);
+    color: var(--color-smooai-dark-blue);
+}
+
 /* "N new posts" banner — surfaces fresh items without disturbing scroll.
  * Pinned to the top of the column body; clicking promotes the pending
  * items into the visible list. */
