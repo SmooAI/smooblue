@@ -1660,6 +1660,73 @@ a {
 }
 
 /* ===========================================================
+ *  Thread compose extras (chained replies under the root post)
+ * =========================================================== */
+.compose__thread {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+}
+
+.compose__thread-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.compose__thread-label {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    padding-top: 8px;
+    min-width: 24px;
+}
+
+.compose__thread-text {
+    flex: 1 1 auto;
+    min-height: 56px;
+    resize: none;
+    font-size: 13px;
+    padding: 6px 8px;
+}
+
+.compose__thread-remove {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+}
+
+.compose__thread-remove:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
+.compose__thread-add {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--muted-foreground);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.compose__thread-add:hover {
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+/* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */
 .report__sheet {

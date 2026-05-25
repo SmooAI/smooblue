@@ -128,6 +128,11 @@ pub fn ComposeSheet() -> Element {
     let attachments = use_signal::<Vec<AttachedImage>>(Vec::new);
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
+    // Extra posts that get chained as replies to the root after
+    // submit. Each entry is the body text of one downstream post.
+    // Plain text only — no images / facets / quotes on extras
+    // (keeps the UI focused; the root carries the heavy payload).
+    let mut thread_extras = use_signal::<Vec<String>>(Vec::new);
 
     // Debug helper: SMOOBLUE_DEBUG_ATTACH=/path/to/image.jpg injects a
     // synthetic attachment on first render so screenshots and UI
@@ -269,23 +274,73 @@ pub fn ComposeSheet() -> Element {
             let result = client
                 .create_post_full(&body, reply.as_ref(), &images, &facets, quote.as_ref())
                 .await;
-            match result {
-                Ok(_record) => {
-                    posting.set(false);
-                    text.set(String::new());
-                    // Drop the persisted draft now that the post is
-                    // live — nothing left to recover.
-                    let _ = crate::persistence::save_draft("");
-                    attachments.set(Vec::new());
-                    let mut w = ctx.write();
-                    w.reply_to = None;
-            w.quote_to = None;
-                    w.open = false;
-                }
+            let root_record = match result {
+                Ok(rec) => rec,
                 Err(e) => {
                     posting.set(false);
                     error.set(Some(format!("Couldn't post: {e}")));
+                    return;
                 }
+            };
+
+            // Thread continuation — chain each non-empty extra as a
+            // reply with root = first post, parent = previous post.
+            // If any one fails mid-thread we surface the error but
+            // keep the root + any successful intermediate posts:
+            // partial threads are better than reverted threads (we
+            // can't atomically roll back a published post anyway).
+            let extras_snap = thread_extras.read().clone();
+            let mut prev: smooblue_atproto::CreatedRecord = root_record.clone();
+            let mut thread_error: Option<String> = None;
+            for chunk in extras_snap.iter().filter(|c| !c.trim().is_empty()) {
+                let reply_chain = smooblue_atproto::ReplyRef {
+                    root: smooblue_atproto::StrongRef {
+                        uri: root_record.uri.clone(),
+                        cid: root_record.cid.clone(),
+                    },
+                    parent: smooblue_atproto::StrongRef {
+                        uri: prev.uri.clone(),
+                        cid: prev.cid.clone(),
+                    },
+                };
+                // Re-run facet detection per chunk so mentions /
+                // links / tags work in continuation posts too.
+                let chunk_facets = client
+                    .build_facets_from_text(chunk)
+                    .await
+                    .unwrap_or_default();
+                match client
+                    .create_post_full(chunk, Some(&reply_chain), &[], &chunk_facets, None)
+                    .await
+                {
+                    Ok(rec) => {
+                        prev = rec;
+                    }
+                    Err(e) => {
+                        thread_error = Some(format!(
+                            "Posted the first {} of {} — couldn't post the rest: {e}",
+                            extras_snap.iter().position(|c| c == chunk).unwrap_or(0) + 1,
+                            extras_snap.len() + 1,
+                        ));
+                        break;
+                    }
+                }
+            }
+
+            posting.set(false);
+            if let Some(msg) = thread_error {
+                error.set(Some(msg));
+            } else {
+                text.set(String::new());
+                thread_extras.set(Vec::new());
+                // Drop the persisted draft now that the post is
+                // live — nothing left to recover.
+                let _ = crate::persistence::save_draft("");
+                attachments.set(Vec::new());
+                let mut w = ctx.write();
+                w.reply_to = None;
+                w.quote_to = None;
+                w.open = false;
             }
         });
     };
@@ -298,6 +353,7 @@ pub fn ComposeSheet() -> Element {
         w.reply_to = None;
             w.quote_to = None;
         w.open = false;
+        thread_extras.set(Vec::new());
     };
 
     // "+ Image" picker — sync rfd in spawn_blocking, then prep on a
@@ -412,7 +468,48 @@ pub fn ComposeSheet() -> Element {
                 if has_attachments {
                     AttachmentGrid { attachments }
                 }
+                // Thread extras — only shown when at least one extra
+                // has been added. Each is a smaller textarea with a
+                // remove (×) button. Plain text only (intentional).
+                if !thread_extras.read().is_empty() {
+                    div { class: "compose__thread",
+                        for (idx, extra) in thread_extras.read().clone().into_iter().enumerate() {
+                            div { class: "compose__thread-row",
+                                key: "extra-{idx}",
+                                span { class: "compose__thread-label", "{idx + 2}/" }
+                                textarea {
+                                    class: "input compose__thread-text",
+                                    placeholder: "Continue the thread…",
+                                    value: "{extra}",
+                                    oninput: move |e| {
+                                        let v = e.value();
+                                        if let Some(slot) = thread_extras.write().get_mut(idx) {
+                                            *slot = v;
+                                        }
+                                    },
+                                }
+                                button { class: "compose__thread-remove",
+                                    title: "Remove",
+                                    onclick: move |_| {
+                                        thread_extras.write().remove(idx);
+                                    },
+                                    icons::X { size: icons::Size::Sm }
+                                }
+                            }
+                        }
+                    }
+                }
                 div { class: "compose__bar",
+                    if reply_to.is_none() && quote_to.is_none() {
+                        button { class: "compose__thread-add",
+                            title: "Add another post to chain as a self-thread",
+                            onclick: move |_| {
+                                thread_extras.write().push(String::new());
+                            },
+                            icons::Plus { size: icons::Size::Sm }
+                            " Thread"
+                        }
+                    }
                     button {
                         class: if at_image_cap { "compose__attach compose__attach--disabled" } else { "compose__attach" },
                         title: if at_image_cap { "Image limit reached (4 max)" } else { "Attach image" },
