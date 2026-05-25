@@ -901,22 +901,34 @@ pub fn saved_feeds() -> Vec<(SavedFeedItem, Option<FeedGeneratorView>)> {
         (saved, Some(view))
     };
     vec![
-        make("at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot",
-             "Discover",
-             "The default 'what's hot' feed across Bluesky.",
-             "discover", true),
-        make("at://did:plc:demo/app.bsky.feed.generator/rust-makers",
-             "Rust makers",
-             "Posts from people building things in Rust. Curated weekly.",
-             "rust-makers", true),
-        make("at://did:plc:demo/app.bsky.feed.generator/indy-sports",
-             "Indianapolis Sports",
-             "All things Indy — Pacers, Colts, Indiana Fever, IndyCar.",
-             "indy-sports", false),
-        make("at://did:plc:demo/app.bsky.feed.generator/dev-news",
-             "Developer news",
-             "GitHub launches, language releases, conference talks.",
-             "dev-news", false),
+        make(
+            "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot",
+            "Discover",
+            "The default 'what's hot' feed across Bluesky.",
+            "discover",
+            true,
+        ),
+        make(
+            "at://did:plc:demo/app.bsky.feed.generator/rust-makers",
+            "Rust makers",
+            "Posts from people building things in Rust. Curated weekly.",
+            "rust-makers",
+            true,
+        ),
+        make(
+            "at://did:plc:demo/app.bsky.feed.generator/indy-sports",
+            "Indianapolis Sports",
+            "All things Indy — Pacers, Colts, Indiana Fever, IndyCar.",
+            "indy-sports",
+            false,
+        ),
+        make(
+            "at://did:plc:demo/app.bsky.feed.generator/dev-news",
+            "Developer news",
+            "GitHub launches, language releases, conference talks.",
+            "dev-news",
+            false,
+        ),
     ]
 }
 
@@ -940,8 +952,18 @@ pub fn own_lists() -> Vec<ListView> {
         list_item_count: Some(count),
     };
     vec![
-        mklist("Rust people", "Folks doing interesting Rust work.", 47, "rust"),
-        mklist("Indy 500 cooks", "Indianapolis food writers + chefs I follow.", 12, "indy-cooks"),
+        mklist(
+            "Rust people",
+            "Folks doing interesting Rust work.",
+            47,
+            "rust",
+        ),
+        mklist(
+            "Indy 500 cooks",
+            "Indianapolis food writers + chefs I follow.",
+            12,
+            "indy-cooks",
+        ),
     ]
 }
 
@@ -983,9 +1005,27 @@ pub fn popular_feeds() -> Vec<FeedGeneratorView> {
         like_count: likes,
     };
     vec![
-        mk("for-you", "For You", "Personalized algorithmic feed.", "popular-foryou", 12_400),
-        mk("rust-only", "Rust-only", "Posts mentioning Rust or cargo.", "popular-rust", 4_280),
-        mk("tech-news", "Tech News", "Curated tech news links.", "popular-tech", 9_810),
+        mk(
+            "for-you",
+            "For You",
+            "Personalized algorithmic feed.",
+            "popular-foryou",
+            12_400,
+        ),
+        mk(
+            "rust-only",
+            "Rust-only",
+            "Posts mentioning Rust or cargo.",
+            "popular-rust",
+            4_280,
+        ),
+        mk(
+            "tech-news",
+            "Tech News",
+            "Curated tech news links.",
+            "popular-tech",
+            9_810,
+        ),
     ]
 }
 

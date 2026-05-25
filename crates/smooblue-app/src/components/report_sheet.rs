@@ -20,10 +20,22 @@ use smooblue_oauth::Session;
 /// the `com.atproto.moderation.defs#reasonType` lexicon enum.
 const REASONS: &[(&str, &str)] = &[
     ("com.atproto.moderation.defs#reasonSpam", "Spam"),
-    ("com.atproto.moderation.defs#reasonViolation", "Community guidelines violation"),
-    ("com.atproto.moderation.defs#reasonMisleading", "Misleading content"),
-    ("com.atproto.moderation.defs#reasonSexual", "Unwanted sexual content"),
-    ("com.atproto.moderation.defs#reasonRude", "Anti-social / rude behavior"),
+    (
+        "com.atproto.moderation.defs#reasonViolation",
+        "Community guidelines violation",
+    ),
+    (
+        "com.atproto.moderation.defs#reasonMisleading",
+        "Misleading content",
+    ),
+    (
+        "com.atproto.moderation.defs#reasonSexual",
+        "Unwanted sexual content",
+    ),
+    (
+        "com.atproto.moderation.defs#reasonRude",
+        "Anti-social / rude behavior",
+    ),
     ("com.atproto.moderation.defs#reasonOther", "Something else"),
 ];
 
@@ -68,10 +80,14 @@ pub fn ReportSheet() -> Element {
             };
             let result = match target_now {
                 ReportTarget::Account { did } => {
-                    client.create_report_account(&did, &reason_type, &detail_text).await
+                    client
+                        .create_report_account(&did, &reason_type, &detail_text)
+                        .await
                 }
                 ReportTarget::Post { uri, cid } => {
-                    client.create_report_post(&uri, &cid, &reason_type, &detail_text).await
+                    client
+                        .create_report_post(&uri, &cid, &reason_type, &detail_text)
+                        .await
                 }
             };
             sending.set(false);

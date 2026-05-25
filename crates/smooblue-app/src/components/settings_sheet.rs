@@ -284,8 +284,8 @@ fn ModerationLists() -> Element {
         }
     });
 
-    let mut muted_list = use_signal(|| Vec::<smooblue_atproto::feed::ActorProfile>::new());
-    let mut blocked_list = use_signal(|| Vec::<smooblue_atproto::feed::ActorProfile>::new());
+    let mut muted_list = use_signal(Vec::<smooblue_atproto::feed::ActorProfile>::new);
+    let mut blocked_list = use_signal(Vec::<smooblue_atproto::feed::ActorProfile>::new);
 
     use_effect(move || {
         if let Some(Ok(r)) = &*mutes.read_unchecked() {
@@ -341,7 +341,10 @@ fn ModerationLists() -> Element {
 /// Which side of the mute/block divide a row is on. Determines the
 /// undo XRPC call (unmuteActor vs deleteRecord of the block).
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ModerationKind { Mute, Block }
+enum ModerationKind {
+    Mute,
+    Block,
+}
 
 #[component]
 fn ModerationRow(
@@ -357,10 +360,7 @@ fn ModerationRow(
     let handle = actor.handle.clone();
     let name = actor.display_name.clone().unwrap_or_else(|| handle.clone());
     let avatar = actor.avatar.clone();
-    let block_uri = actor
-        .viewer
-        .as_ref()
-        .and_then(|v| v.blocking.clone());
+    let block_uri = actor.viewer.as_ref().and_then(|v| v.blocking.clone());
 
     let remove = move |_| {
         if *pending.read() {

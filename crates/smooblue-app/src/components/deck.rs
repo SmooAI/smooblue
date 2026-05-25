@@ -2,10 +2,10 @@
 //! (compose) + the global compose sheet + the search-column add sheet.
 
 use crate::components::{
-    column::Column, compose::ComposeSheet, engagement::EngagementSheet,
-    profile::ProfileSheet, profile_edit_sheet::ProfileEditSheet,
-    report_sheet::ReportSheet, saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet,
-    settings_sheet::SettingsSheet, sidebar::Sidebar, thread::ThreadSheet,
+    column::Column, compose::ComposeSheet, engagement::EngagementSheet, profile::ProfileSheet,
+    profile_edit_sheet::ProfileEditSheet, report_sheet::ReportSheet,
+    saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
+    sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::keyboard::{self, KeyContext};

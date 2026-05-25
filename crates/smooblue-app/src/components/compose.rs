@@ -254,7 +254,7 @@ pub fn ComposeSheet() -> Element {
                 video_attachment.set(None);
                 let mut w = ctx.write();
                 w.reply_to = None;
-            w.quote_to = None;
+                w.quote_to = None;
                 w.open = false;
                 return;
             }
@@ -318,7 +318,14 @@ pub fn ComposeSheet() -> Element {
                 .await
                 .unwrap_or_default();
             let result = client
-                .create_post_full(&body, reply.as_ref(), &images, &facets, quote.as_ref(), video_post.as_ref())
+                .create_post_full(
+                    &body,
+                    reply.as_ref(),
+                    &images,
+                    &facets,
+                    quote.as_ref(),
+                    video_post.as_ref(),
+                )
                 .await;
             let root_record = match result {
                 Ok(rec) => rec,
@@ -399,7 +406,7 @@ pub fn ComposeSheet() -> Element {
     let close = move |_evt| {
         let mut w = ctx.write();
         w.reply_to = None;
-            w.quote_to = None;
+        w.quote_to = None;
         w.open = false;
         thread_extras.set(Vec::new());
     };
@@ -537,17 +544,16 @@ pub fn ComposeSheet() -> Element {
                     let path_for_read = path.clone();
                     // Read off the renderer thread — even 50 MB of
                     // disk I/O stutters the UI when done synchronously.
-                    let bytes = match tokio::task::spawn_blocking(move || {
-                        std::fs::read(&path_for_read)
-                    })
-                    .await
-                    {
-                        Ok(Ok(b)) => b,
-                        _ => {
-                            error.set(Some("Couldn't read the dropped video file.".into()));
-                            break;
-                        }
-                    };
+                    let bytes =
+                        match tokio::task::spawn_blocking(move || std::fs::read(&path_for_read))
+                            .await
+                        {
+                            Ok(Ok(b)) => b,
+                            _ => {
+                                error.set(Some("Couldn't read the dropped video file.".into()));
+                                break;
+                            }
+                        };
                     video_attachment.set(Some(VideoAttachment {
                         source_path: path,
                         bytes,
@@ -559,7 +565,10 @@ pub fn ComposeSheet() -> Element {
                     // we'd otherwise mix media types.
                     break;
                 }
-                if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic") {
+                if !matches!(
+                    ext.as_str(),
+                    "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic"
+                ) {
                     continue;
                 }
                 let att = AttachedImage::new(path.clone());

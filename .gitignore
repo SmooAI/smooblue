@@ -12,3 +12,13 @@ dist/
 
 # Logs
 *.log
+
+# Pearl boards live at .smooth/dolt/ and DO sync via git so other
+# agents/teammates can pull pearl state. Other .smooth/* state
+# (sessions, plugin caches, audit logs) stays local.
+.smooth/*
+!.smooth/dolt/
+
+# Obsidian — workspace state is per-user; vault content is shared.
+docs/.obsidian/workspace*
+docs/.obsidian/cache

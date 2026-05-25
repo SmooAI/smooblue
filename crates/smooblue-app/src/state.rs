@@ -268,7 +268,10 @@ impl ThemeMode {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    /// Parse from the persisted string. Named `parse` rather than
+    /// `from_str` so we don't collide with `std::str::FromStr` (which
+    /// would require a different return type).
+    pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "light" => Self::Light,
             _ => Self::Dark,
@@ -383,7 +386,7 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
     use_context_provider::<Signal<ThemeMode>>(|| {
         let mode = crate::persistence::load_theme()
-            .map(|s| ThemeMode::from_str(&s))
+            .map(|s| ThemeMode::parse(&s))
             .unwrap_or_default();
         Signal::new(mode)
     });
@@ -439,7 +442,11 @@ pub fn use_bootstrap() {
             let legacy = crate::persistence::load_session();
             match (keyed, legacy) {
                 (Some(k), Some(l)) => {
-                    if l.expires_at > k.expires_at { Some(l) } else { Some(k) }
+                    if l.expires_at > k.expires_at {
+                        Some(l)
+                    } else {
+                        Some(k)
+                    }
                 }
                 (Some(k), None) => Some(k),
                 (None, Some(l)) => Some(l),

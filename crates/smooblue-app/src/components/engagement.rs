@@ -67,7 +67,16 @@ pub fn EngagementSheet() -> Element {
                     .get_quotes(&uri, None, 50)
                     .await
                     .map(|r| {
-                        Loaded::Posts(r.posts.into_iter().map(|p| FeedItem { post: p, reply: None, reason: None }).collect())
+                        Loaded::Posts(
+                            r.posts
+                                .into_iter()
+                                .map(|p| FeedItem {
+                                    post: p,
+                                    reply: None,
+                                    reason: None,
+                                })
+                                .collect(),
+                        )
                     })
                     .map_err(|e| e.to_string()),
             }

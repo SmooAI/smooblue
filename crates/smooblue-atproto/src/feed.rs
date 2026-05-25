@@ -234,13 +234,7 @@ impl PostView {
 fn is_warning_label(val: &str) -> bool {
     matches!(
         val,
-        "porn"
-            | "sexual"
-            | "nudity"
-            | "graphic-media"
-            | "sensitive"
-            | "gore"
-            | "graphic"
+        "porn" | "sexual" | "nudity" | "graphic-media" | "sensitive" | "gore" | "graphic"
     )
 }
 
@@ -1024,7 +1018,8 @@ mod tests {
                     "pinned": ["at://feed/b"]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let saved = prefs.saved_feeds();
         assert_eq!(saved.len(), 3);
         // V1 entries are all treated as kind=feed.
@@ -1049,7 +1044,8 @@ mod tests {
                     "items": [{ "type": "feed", "value": "at://new/v2", "pinned": true }]
                 }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         let saved = prefs.saved_feeds();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].value, "at://new/v2");
@@ -1061,7 +1057,8 @@ mod tests {
             "preferences": [
                 { "$type": "app.bsky.actor.defs#interestsPref", "tags": ["rust"] }
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(prefs.saved_feeds().is_empty());
     }
 
@@ -1096,7 +1093,8 @@ mod tests {
                 "$type": "app.bsky.feed.defs#reasonRepost",
                 "by": { "did": "did:plc:rp", "handle": "rp.bsky.social" }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(item.reposter_display().as_deref(), Some("rp.bsky.social"));
     }
 
@@ -1111,7 +1109,8 @@ mod tests {
                 "record": { "text": "" }
             },
             "reason": { "$type": "app.bsky.feed.defs#reasonPin" }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(item.reposter_display().is_none());
         assert!(item.reposter_did().is_none());
     }
@@ -1132,7 +1131,8 @@ mod tests {
                     "record": { "text": "original post" }
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(
             item.reply_parent_handle().as_deref(),
             Some("parent.bsky.social")
@@ -1157,7 +1157,8 @@ mod tests {
                     "notFound": true
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(item.reply_parent_handle().is_none());
     }
 
@@ -1176,7 +1177,8 @@ mod tests {
                     "blocked": true
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(item.reply_parent_handle().is_none());
     }
 
@@ -1188,7 +1190,8 @@ mod tests {
                 "author": { "did": "d", "handle": "h" },
                 "record": { "text": "" }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(item.reposter_display().is_none());
         assert!(item.reposter_did().is_none());
         assert!(item.reply_parent_handle().is_none());
@@ -1206,7 +1209,8 @@ mod tests {
                 "record": { "text": "" }
             },
             "reason": { "weird": "no $type at all" }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(item.reposter_display().is_none());
         assert!(item.reposter_did().is_none());
     }

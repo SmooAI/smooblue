@@ -251,7 +251,11 @@ impl AtClient {
             feed: r
                 .posts
                 .into_iter()
-                .map(|p| crate::feed::FeedItem { post: p, reply: None, reason: None })
+                .map(|p| crate::feed::FeedItem {
+                    post: p,
+                    reply: None,
+                    reason: None,
+                })
                 .collect(),
         })
     }
@@ -565,7 +569,8 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, None, &[], &[], None, None).await
+        self.create_post_full(text, None, &[], &[], None, None)
+            .await
     }
 
     /// Same as [`Self::create_post`] but adds a reply context. The
@@ -576,7 +581,8 @@ impl AtClient {
         text: &str,
         reply: Option<&ReplyRef>,
     ) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, reply, &[], &[], None, None).await
+        self.create_post_full(text, reply, &[], &[], None, None)
+            .await
     }
 
     /// Full post creation — text + optional reply + optional image
@@ -590,8 +596,9 @@ impl AtClient {
     /// - text + images      → `app.bsky.embed.images`
     /// - text + quote       → `app.bsky.embed.record`
     /// - text + quote + img → `app.bsky.embed.recordWithMedia`
-    /// (Mutually exclusive on the wire — `recordWithMedia` is bsky's
-    /// "quote AND image" carrier.)
+    ///
+    /// Mutually exclusive on the wire — `recordWithMedia` is bsky's
+    /// "quote AND image" carrier.
     pub async fn create_post_full(
         &self,
         text: &str,
@@ -880,7 +887,10 @@ impl AtClient {
             .and_then(|c| c.as_str())
             .ok_or_else(|| AtError::Decode("getRecord response missing cid".into()))?
             .to_string();
-        let value = v.get("value").cloned().unwrap_or_else(|| serde_json::json!({}));
+        let value = v
+            .get("value")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
         Ok((value, cid))
     }
 
@@ -956,7 +966,9 @@ impl AtClient {
     /// in the public lexicon, so the shape is best-effort and may
     /// change without warning. We treat it as opt-in surface area:
     /// silent failure on the UI side, no retries.
-    pub async fn get_trending_topics(&self) -> Result<crate::feed::TrendingTopicsResponse, AtError> {
+    pub async fn get_trending_topics(
+        &self,
+    ) -> Result<crate::feed::TrendingTopicsResponse, AtError> {
         let url = self
             .session_pds_url("/xrpc/app.bsky.unspecced.getTrendingTopics?limit=25")
             .map_err(|e| AtError::Decode(e.to_string()))?;
@@ -1510,7 +1522,14 @@ mod tests {
             }),
         };
         let rec = client
-            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[], None, None)
+            .create_post_full(
+                "look at this cat",
+                None,
+                std::slice::from_ref(&img),
+                &[],
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
@@ -1706,7 +1725,9 @@ mod tests {
         let video = PostVideo {
             video: BlobRef {
                 kind: "blob".into(),
-                link: BlobLink { cid: "bafyMP4".into() },
+                link: BlobLink {
+                    cid: "bafyMP4".into(),
+                },
                 mime_type: "video/mp4".into(),
                 size: 42_000_000,
             },
@@ -1750,7 +1771,9 @@ mod tests {
         let video = PostVideo {
             video: BlobRef {
                 kind: "blob".into(),
-                link: BlobLink { cid: "bafyMP4".into() },
+                link: BlobLink {
+                    cid: "bafyMP4".into(),
+                },
                 mime_type: "video/mp4".into(),
                 size: 1_000_000,
             },
@@ -1780,7 +1803,10 @@ mod tests {
                 let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
                 let embed = &body["record"]["embed"];
                 assert_eq!(embed["$type"], "app.bsky.embed.video");
-                assert!(embed.get("images").is_none(), "images must NOT be in a video embed");
+                assert!(
+                    embed.get("images").is_none(),
+                    "images must NOT be in a video embed"
+                );
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({
                     "uri": "at://x", "cid": "y"
                 }))
@@ -1795,7 +1821,9 @@ mod tests {
         let video = PostVideo {
             video: BlobRef {
                 kind: "blob".into(),
-                link: BlobLink { cid: "bafyMP4".into() },
+                link: BlobLink {
+                    cid: "bafyMP4".into(),
+                },
                 mime_type: "video/mp4".into(),
                 size: 1,
             },
@@ -1805,7 +1833,9 @@ mod tests {
         let img = PostImage {
             blob: BlobRef {
                 kind: "blob".into(),
-                link: BlobLink { cid: "bafyJPG".into() },
+                link: BlobLink {
+                    cid: "bafyJPG".into(),
+                },
                 mime_type: "image/jpeg".into(),
                 size: 1,
             },
@@ -1813,7 +1843,14 @@ mod tests {
             aspect_ratio: None,
         };
         client
-            .create_post_full("both", None, std::slice::from_ref(&img), &[], None, Some(&video))
+            .create_post_full(
+                "both",
+                None,
+                std::slice::from_ref(&img),
+                &[],
+                None,
+                Some(&video),
+            )
             .await
             .unwrap();
     }

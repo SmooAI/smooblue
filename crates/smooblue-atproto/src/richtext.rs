@@ -116,7 +116,10 @@ fn detect_mentions(text: &str) -> Vec<FacetCandidate> {
         // it's an email address ("foo@bar.com") or similar, not a
         // mention.
         let prev_ok = i == 0
-            || matches!(bytes[i - 1], b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b',');
+            || matches!(
+                bytes[i - 1],
+                b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b','
+            );
         if !prev_ok {
             i += 1;
             continue;
@@ -165,15 +168,18 @@ fn detect_links(text: &str) -> Vec<FacetCandidate> {
     while i < bytes.len() {
         // Look for an "http" prefix; we only support http+https schemes
         // because that's what bsky's link cards understand.
-        if i + 7 < bytes.len() && (
-            &bytes[i..i + 7] == b"http://"
-                || (i + 8 <= bytes.len() && &bytes[i..i + 8] == b"https://")
-        ) {
+        if i + 7 < bytes.len()
+            && (&bytes[i..i + 7] == b"http://"
+                || (i + 8 <= bytes.len() && &bytes[i..i + 8] == b"https://"))
+        {
             // Require start-of-text or whitespace/punctuation
             // before — otherwise we're matching a URL embedded inside
             // another token, which isn't a real link.
             let prev_ok = i == 0
-                || matches!(bytes[i - 1], b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b'<' | b'"');
+                || matches!(
+                    bytes[i - 1],
+                    b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b'<' | b'"'
+                );
             if !prev_ok {
                 i += 1;
                 continue;
@@ -225,7 +231,10 @@ fn detect_tags(text: &str) -> Vec<FacetCandidate> {
             continue;
         }
         let prev_ok = i == 0
-            || matches!(bytes[i - 1], b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b',');
+            || matches!(
+                bytes[i - 1],
+                b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b','
+            );
         if !prev_ok {
             i += 1;
             continue;
@@ -266,6 +275,10 @@ fn detect_tags(text: &str) -> Vec<FacetCandidate> {
 mod tests {
     use super::*;
 
+    /// Test-only helper, kept for future tests that want to assert
+    /// the full (start, end, kind) tuple instead of the per-field
+    /// asserts the current tests use.
+    #[allow(dead_code)]
     fn ranges(out: &[FacetCandidate]) -> Vec<(usize, usize, &FacetKind)> {
         out.iter()
             .map(|c| (c.byte_start, c.byte_end, &c.kind))
@@ -309,7 +322,10 @@ mod tests {
         assert_eq!(uri, "https://example.com/foo");
         // Verify the byte range matches the trimmed URL, not the
         // original-with-period.
-        assert_eq!(&text[out[0].byte_start..out[0].byte_end], "https://example.com/foo");
+        assert_eq!(
+            &text[out[0].byte_start..out[0].byte_end],
+            "https://example.com/foo"
+        );
     }
 
     #[test]
@@ -325,7 +341,10 @@ mod tests {
     #[test]
     fn skips_numeric_only_tags() {
         let out = detect_facet_candidates("see #42 below");
-        assert!(out.is_empty(), "purely numeric tags shouldn't match: {out:?}");
+        assert!(
+            out.is_empty(),
+            "purely numeric tags shouldn't match: {out:?}"
+        );
     }
 
     #[test]
@@ -337,7 +356,10 @@ mod tests {
         assert_eq!(out.len(), 1);
         // 🦀 = 4 bytes + 1 space = byte 5.
         assert_eq!(out[0].byte_start, 5);
-        assert_eq!(&text[out[0].byte_start..out[0].byte_end], "@alice.bsky.social");
+        assert_eq!(
+            &text[out[0].byte_start..out[0].byte_end],
+            "@alice.bsky.social"
+        );
     }
 
     #[test]
@@ -365,7 +387,10 @@ mod tests {
         // "barhttps://..." — no whitespace before, so we shouldn't
         // mis-detect a link in the middle of a word.
         let out = detect_facet_candidates("foohttps://example.com/x");
-        assert!(out.is_empty(), "should not match link glued to preceding text: {out:?}");
+        assert!(
+            out.is_empty(),
+            "should not match link glued to preceding text: {out:?}"
+        );
     }
 
     #[test]

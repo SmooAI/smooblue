@@ -372,7 +372,9 @@ fn CustomFeedAdd(on_add: EventHandler<ColumnSpec>) -> Element {
             return;
         }
         // bsky.app links → at-uri. Form: /profile/<handleOrDid>/feed/<rkey>
-        let normalized: Option<String> = if let Some(rest) = raw.strip_prefix("https://bsky.app/profile/") {
+        let normalized: Option<String> = if let Some(rest) =
+            raw.strip_prefix("https://bsky.app/profile/")
+        {
             let mut parts = rest.split('/');
             let actor = parts.next().unwrap_or("");
             let kind = parts.next().unwrap_or("");
@@ -395,7 +397,9 @@ fn CustomFeedAdd(on_add: EventHandler<ColumnSpec>) -> Element {
         } else if raw.starts_with("at://") && raw.contains("/app.bsky.feed.generator/") {
             Some(raw.clone())
         } else {
-            err.set(Some("Paste an at://… feed URI or a bsky.app /feed/ link.".into()));
+            err.set(Some(
+                "Paste an at://… feed URI or a bsky.app /feed/ link.".into(),
+            ));
             None
         };
         if let Some(uri) = normalized {
@@ -403,11 +407,7 @@ fn CustomFeedAdd(on_add: EventHandler<ColumnSpec>) -> Element {
             value.set(String::new());
             // Title falls back to the rkey until the column header
             // fetch resolves the real generator name.
-            let title = uri
-                .rsplit('/')
-                .next()
-                .unwrap_or("Custom feed")
-                .to_string();
+            let title = uri.rsplit('/').next().unwrap_or("Custom feed").to_string();
             on_add.call(ColumnSpec::feed_with_title(uri, title));
         }
     };
@@ -477,7 +477,10 @@ fn PopularFeedRow(view: FeedGeneratorView, on_add: EventHandler<ColumnSpec>) -> 
     let uri = view.uri.clone();
     let title_for_add = display_name.clone();
     let add = move |_| {
-        on_add.call(ColumnSpec::feed_with_title(uri.clone(), title_for_add.clone()));
+        on_add.call(ColumnSpec::feed_with_title(
+            uri.clone(),
+            title_for_add.clone(),
+        ));
     };
     rsx! {
         div { class: "saved-feeds__row",
@@ -526,7 +529,10 @@ fn SavedFeedRow(
     let value = saved.value.clone();
     let title_for_add = display_name.clone();
     let add = move |_| {
-        on_add.call(ColumnSpec::feed_with_title(value.clone(), title_for_add.clone()));
+        on_add.call(ColumnSpec::feed_with_title(
+            value.clone(),
+            title_for_add.clone(),
+        ));
     };
     rsx! {
         div { class: "saved-feeds__row",

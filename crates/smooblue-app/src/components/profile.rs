@@ -164,20 +164,13 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
 
     // Mute is a server-side preference, not a record — no URI to track,
     // just a bool. We seed from viewer.muted and flip optimistically.
-    let initial_muted = p
-        .viewer
-        .as_ref()
-        .and_then(|v| v.muted)
-        .unwrap_or(false);
+    let initial_muted = p.viewer.as_ref().and_then(|v| v.muted).unwrap_or(false);
     let mut is_muted = use_signal(|| initial_muted);
     let mut mute_pending = use_signal(|| false);
 
     // Block IS a record (others need to see your block list). Track
     // the AT-URI so we can deleteRecord on unblock.
-    let initial_block_uri = p
-        .viewer
-        .as_ref()
-        .and_then(|v| v.blocking.as_ref().cloned());
+    let initial_block_uri = p.viewer.as_ref().and_then(|v| v.blocking.as_ref().cloned());
     let mut block_uri = use_signal(|| initial_block_uri.clone());
     let mut block_pending = use_signal(|| false);
     let is_blocking = block_uri.read().is_some();
