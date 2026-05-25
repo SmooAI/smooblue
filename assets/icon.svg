@@ -1,1 +1,64 @@
-<svg viewBox="0 0 135 135" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="112.93" x2="22.42" y1="113.22" y2="22.71"><stop offset=".3" stop-color="#f49f0a"/><stop offset=".79" stop-color="#fb7a4d"/><stop offset="1" stop-color="#ff6b6c"/></linearGradient><linearGradient id="b" gradientUnits="userSpaceOnUse" x1="-18" x2="18" y1="-14" y2="14"><stop offset="0" stop-color="#0560c4"/><stop offset=".55" stop-color="#1185fe"/><stop offset="1" stop-color="#5cb1ff"/></linearGradient><path d="m45.63 15.38c-12.39 5.21-22.54 14.64-28.65 26.61-6.12 11.97-7.8 25.72-4.77 38.81 3.04 13.09 10.6 24.69 21.36 32.75s24.02 12.05 37.44 11.28 26.13-6.26 35.9-15.5c9.76-9.24 15.95-21.63 17.46-34.99s-1.74-26.82-9.19-38.01c-1.07-1.61-.64-3.78.97-4.85s3.78-.64 4.85.97c8.36 12.56 12.02 27.68 10.32 42.67-1.7 15-8.64 28.91-19.61 39.28-10.96 10.37-25.24 16.54-40.31 17.4-15.07.87-29.96-3.62-42.04-12.66-12.08-9.05-20.58-22.07-23.99-36.77s-1.51-30.14 5.35-43.58c6.87-13.44 18.26-24.02 32.17-29.87s29.44-6.6 43.85-2.11c1.85.57 2.88 2.54 2.3 4.38-.57 1.85-2.54 2.88-4.38 2.3-12.83-4-26.67-3.33-39.06 1.88zm63.1 4.79c0 2.07-1.68 3.75-3.75 3.75s-3.75-1.68-3.75-3.75 1.68-3.75 3.75-3.75 3.75 1.68 3.75 3.75zm-46.75 40.17c0 1.91 2.39 2.56 7.69 3.88 3.89.97 6.6 2.18 8.15 3.63 1.53 1.45 2.29 3.53 2.29 6.25 0 3.57-1.03 6.26-3.11 8.08-2.07 1.82-5.09 2.73-9.09 2.73h-9.6c-1.97 0-3.57-1.6-3.59-3.57-.01-1.99 1.6-3.61 3.59-3.61h9.41c3.15-.12 4.79-.95 4.91-2.47 0-1.3-1.03-2.21-3.07-2.73-6.91-1.72-11.11-3.44-12.6-5.15-1.48-1.71-2.23-3.77-2.23-6.19 0-6.59 3.2-9.85 9.59-9.8h10.77c1.99 0 3.6 1.61 3.6 3.59s-1.61 3.59-3.6 3.59h-9.69c-1.83 0-3.43.06-3.43 1.77z" fill="url(#a)" fill-rule="evenodd"/><g transform="translate(110 105) scale(1.5)"><g stroke="#0560c4"><path d="m-2-11q-3-5-5-6" fill="none" stroke-linecap="round" stroke-width=".7"/><path d="m2-11q3-5 5-6" fill="none" stroke-linecap="round" stroke-width=".7"/><circle cx="-7" cy="-17" fill="#5cb1ff" r="1.3" stroke-width=".4"/><circle cx="7" cy="-17" fill="#5cb1ff" r="1.3" stroke-width=".4"/><g fill="url(#b)" stroke-linejoin="round" stroke-width=".5"><path d="m-2-6c-6-9-17-8-16 1 1 5 10 6 16 3z"/><path d="m2-6c6-9 17-8 16 1-1 5-10 6-16 3z"/><path d="m-2 2c-5 7-14 10-13 3 1-4 8-5 13-3z"/><path d="m2 2c5 7 14 10 13 3-1-4-8-5-13-3z"/></g></g><circle cx="-12" cy="-7" fill="#fff" opacity=".8" r="1.8"/><circle cx="12" cy="-7" fill="#fff" opacity=".8" r="1.8"/><circle cx="-10" cy="6" fill="#fff" opacity=".7" r="1.2"/><circle cx="10" cy="6" fill="#fff" opacity=".7" r="1.2"/><ellipse fill="#0560c4" rx="1.7" ry="8"/><circle cy="-9" fill="#1185fe" r="4.2" stroke="#0560c4" stroke-width=".5"/><circle cx="-2.7" cy="-8.2" fill="#ff9eb1" opacity=".75" r=".9"/><circle cx="2.7" cy="-8.2" fill="#ff9eb1" opacity=".75" r=".9"/><circle cx="-1.5" cy="-9.5" fill="#fff" r="1.15"/><circle cx="1.5" cy="-9.5" fill="#fff" r="1.15"/><circle cx="-1.2" cy="-9.3" fill="#020618" r=".6"/><circle cx="1.8" cy="-9.3" fill="#020618" r=".6"/><circle cx="-1" cy="-9.55" fill="#fff" r=".22"/><circle cx="2" cy="-9.55" fill="#fff" r=".22"/><path d="m-1.3-7.4q1.3.8 2.6 0" fill="none" stroke="#020618" stroke-linecap="round" stroke-width=".45"/></g></svg>
+<svg viewBox="0 0 135 135" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <!-- Brand mark: bluesky butterfly is the primary visual; the smoo
+       monogram lives small in the bottom-right to mark this as a
+       Smoo product. Flip of the original layout where smoo was
+       primary. -->
+  <defs>
+    <linearGradient id="a" gradientUnits="userSpaceOnUse" x1="112.93" x2="22.42" y1="113.22" y2="22.71">
+      <stop offset=".3" stop-color="#f49f0a"/>
+      <stop offset=".79" stop-color="#fb7a4d"/>
+      <stop offset="1" stop-color="#ff6b6c"/>
+    </linearGradient>
+    <linearGradient id="b" gradientUnits="userSpaceOnUse" x1="-18" x2="18" y1="-14" y2="14">
+      <stop offset="0" stop-color="#0560c4"/>
+      <stop offset=".55" stop-color="#1185fe"/>
+      <stop offset="1" stop-color="#5cb1ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Butterfly: centered, scaled up to dominate the canvas. Slight
+       upward shift (cy 60 vs 67.5) leaves visual room for the smoo
+       chip at bottom-right. -->
+  <g transform="translate(63 62) scale(3.2)">
+    <g stroke="#0560c4">
+      <path d="m-2-11q-3-5-5-6" fill="none" stroke-linecap="round" stroke-width=".7"/>
+      <path d="m2-11q3-5 5-6" fill="none" stroke-linecap="round" stroke-width=".7"/>
+      <circle cx="-7" cy="-17" fill="#5cb1ff" r="1.3" stroke-width=".4"/>
+      <circle cx="7" cy="-17" fill="#5cb1ff" r="1.3" stroke-width=".4"/>
+      <g fill="url(#b)" stroke-linejoin="round" stroke-width=".5">
+        <path d="m-2-6c-6-9-17-8-16 1 1 5 10 6 16 3z"/>
+        <path d="m2-6c6-9 17-8 16 1-1 5-10 6-16 3z"/>
+        <path d="m-2 2c-5 7-14 10-13 3 1-4 8-5 13-3z"/>
+        <path d="m2 2c5 7 14 10 13 3-1-4-8-5-13-3z"/>
+      </g>
+    </g>
+    <circle cx="-12" cy="-7" fill="#fff" opacity=".8" r="1.8"/>
+    <circle cx="12" cy="-7" fill="#fff" opacity=".8" r="1.8"/>
+    <circle cx="-10" cy="6" fill="#fff" opacity=".7" r="1.2"/>
+    <circle cx="10" cy="6" fill="#fff" opacity=".7" r="1.2"/>
+    <ellipse fill="#0560c4" rx="1.7" ry="8"/>
+    <circle cy="-9" fill="#1185fe" r="4.2" stroke="#0560c4" stroke-width=".5"/>
+    <circle cx="-2.7" cy="-8.2" fill="#ff9eb1" opacity=".75" r=".9"/>
+    <circle cx="2.7" cy="-8.2" fill="#ff9eb1" opacity=".75" r=".9"/>
+    <circle cx="-1.5" cy="-9.5" fill="#fff" r="1.15"/>
+    <circle cx="1.5" cy="-9.5" fill="#fff" r="1.15"/>
+    <circle cx="-1.2" cy="-9.3" fill="#020618" r=".6"/>
+    <circle cx="1.8" cy="-9.3" fill="#020618" r=".6"/>
+    <circle cx="-1" cy="-9.55" fill="#fff" r=".22"/>
+    <circle cx="2" cy="-9.55" fill="#fff" r=".22"/>
+    <path d="m-1.3-7.4q1.3.8 2.6 0" fill="none" stroke="#020618" stroke-linecap="round" stroke-width=".45"/>
+  </g>
+
+  <!-- Smoo monogram: shrunk to ~30% size, anchored bottom-right.
+       White ring + drop shadow give it a chip feel so it reads as
+       a brand stamp rather than competing with the butterfly. -->
+  <g transform="translate(109 109)">
+    <!-- subtle white halo so the orange pops against any photo
+         desktop wallpaper showing through Dock translucency -->
+    <circle r="20" fill="#020618" opacity=".35"/>
+    <circle r="18.5" fill="#fff"/>
+    <g transform="translate(-17 -17) scale(0.252)">
+      <path d="m45.63 15.38c-12.39 5.21-22.54 14.64-28.65 26.61-6.12 11.97-7.8 25.72-4.77 38.81 3.04 13.09 10.6 24.69 21.36 32.75s24.02 12.05 37.44 11.28 26.13-6.26 35.9-15.5c9.76-9.24 15.95-21.63 17.46-34.99s-1.74-26.82-9.19-38.01c-1.07-1.61-.64-3.78.97-4.85s3.78-.64 4.85.97c8.36 12.56 12.02 27.68 10.32 42.67-1.7 15-8.64 28.91-19.61 39.28-10.96 10.37-25.24 16.54-40.31 17.4-15.07.87-29.96-3.62-42.04-12.66-12.08-9.05-20.58-22.07-23.99-36.77s-1.51-30.14 5.35-43.58c6.87-13.44 18.26-24.02 32.17-29.87s29.44-6.6 43.85-2.11c1.85.57 2.88 2.54 2.3 4.38-.57 1.85-2.54 2.88-4.38 2.3-12.83-4-26.67-3.33-39.06 1.88zm63.1 4.79c0 2.07-1.68 3.75-3.75 3.75s-3.75-1.68-3.75-3.75 1.68-3.75 3.75-3.75 3.75 1.68 3.75 3.75zm-46.75 40.17c0 1.91 2.39 2.56 7.69 3.88 3.89.97 6.6 2.18 8.15 3.63 1.53 1.45 2.29 3.53 2.29 6.25 0 3.57-1.03 6.26-3.11 8.08-2.07 1.82-5.09 2.73-9.09 2.73h-9.6c-1.97 0-3.57-1.6-3.59-3.57-.01-1.99 1.6-3.61 3.59-3.61h9.41c3.15-.12 4.79-.95 4.91-2.47 0-1.3-1.03-2.21-3.07-2.73-6.91-1.72-11.11-3.44-12.6-5.15-1.48-1.71-2.23-3.77-2.23-6.19 0-6.59 3.2-9.85 9.59-9.8h10.77c1.99 0 3.6 1.61 3.6 3.59s-1.61 3.59-3.6 3.59h-9.69c-1.83 0-3.43.06-3.43 1.77z" fill="url(#a)" fill-rule="evenodd"/>
+    </g>
+  </g>
+</svg>

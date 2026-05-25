@@ -303,35 +303,18 @@ async fn fetch_once(
 /// appear twice when surfaced by two different reposters), so we
 /// suffix the repost actor DID when present.
 fn feed_item_key(item: &smooblue_atproto::FeedItem) -> String {
-    match &item.reason {
-        Some(smooblue_atproto::feed::FeedItemReason::Repost { by, .. }) => {
-            format!("{}|rp:{}", item.post.uri, by.did)
-        }
-        _ => item.post.uri.clone(),
+    match item.reposter_did() {
+        Some(did) => format!("{}|rp:{}", item.post.uri, did),
+        None => item.post.uri.clone(),
     }
 }
 
-/// Display string for the "Reposted by X" chip, or None if this
-/// row isn't a repost surface.
 fn feed_item_reposter(item: &smooblue_atproto::FeedItem) -> Option<String> {
-    match &item.reason {
-        Some(smooblue_atproto::feed::FeedItemReason::Repost { by, .. }) => Some(
-            by.display_name
-                .clone()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| by.handle.clone()),
-        ),
-        _ => None,
-    }
+    item.reposter_display()
 }
 
-/// Display string for the "Replying to @X" chip, or None when this
-/// row isn't surfaced as a reply.
 fn feed_item_parent_handle(item: &smooblue_atproto::FeedItem) -> Option<String> {
-    item.reply
-        .as_ref()
-        .and_then(|r| r.parent.author())
-        .map(|a| a.handle.clone())
+    item.reply_parent_handle()
 }
 
 /// Stable key for a notification group — used by Dioxus's `key:`

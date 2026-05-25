@@ -13,60 +13,71 @@ pub struct FeedResponse {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FeedItem {
     pub post: PostView,
-    /// Set when this row appears in the feed *because* the post is
-    /// a reply — carries the parent post (and grandparent root) so
-    /// the renderer can show a "Replying to @parent" chip.
-    /// `app.bsky.feed.defs#replyRef` shape.
+    /// Raw `replyRef` blob from `app.bsky.feed.defs#feedViewPost`.
+    /// Kept as a Value (not a typed struct) so a slightly-off shape
+    /// from the AppView never blows up feed decode for the whole
+    /// page. Pull a parent handle out via [`Self::reply_parent_handle`].
     #[serde(default)]
-    pub reply: Option<FeedItemReply>,
-    /// Set when this row appears in the feed because it was reposted
-    /// or surfaced by a feed generator. Used for the "Reposted by X"
-    /// chip and for de-dup keying (same post URI, different reposter).
+    pub reply: Option<serde_json::Value>,
+    /// Raw `reason` blob (reasonRepost / reasonPin / unknown future
+    /// variants). Same defensive read pattern as `reply`. Use
+    /// [`Self::reposter_display`] to pull out the reposter name.
     #[serde(default)]
-    pub reason: Option<FeedItemReason>,
+    pub reason: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct FeedItemReply {
-    /// The immediate parent post. `Unknown` covers `notFoundPost` /
-    /// `blockedPost` shapes from the lexicon — render a placeholder.
-    pub parent: ReplyParentView,
-}
-
-/// Either a real PostView for the parent, or a metadata-only shape
-/// when the parent is unavailable (deleted / blocked / not found).
-/// Untagged so serde just tries the rich form first.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(untagged)]
-pub enum ReplyParentView {
-    Post(Box<PostView>),
-    Other(serde_json::Value),
-}
-
-impl ReplyParentView {
-    /// Extract the parent author when we have a real PostView,
-    /// otherwise None (rendered as "a deleted post" downstream).
-    pub fn author(&self) -> Option<&PostAuthor> {
-        match self {
-            ReplyParentView::Post(p) => Some(&p.author),
-            _ => None,
+impl FeedItem {
+    /// Display name of the reposter when this row is surfaced via
+    /// `reasonRepost`, otherwise None. Falls back to the handle if
+    /// no displayName is set on the actor.
+    pub fn reposter_display(&self) -> Option<String> {
+        let r = self.reason.as_ref()?;
+        let ty = r.get("$type").and_then(|v| v.as_str())?;
+        if ty != "app.bsky.feed.defs#reasonRepost" {
+            return None;
+        }
+        let by = r.get("by")?;
+        let display = by.get("displayName").and_then(|v| v.as_str()).unwrap_or("");
+        let handle = by.get("handle").and_then(|v| v.as_str()).unwrap_or("");
+        if !display.is_empty() {
+            Some(display.to_string())
+        } else if !handle.is_empty() {
+            Some(handle.to_string())
+        } else {
+            None
         }
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(tag = "$type")]
-pub enum FeedItemReason {
-    #[serde(rename = "app.bsky.feed.defs#reasonRepost")]
-    Repost {
-        by: PostAuthor,
-        #[serde(rename = "indexedAt", default)]
-        indexed_at: Option<String>,
-    },
-    /// Custom feed generators sometimes attach a reasonPin or similar.
-    /// We catch the rest as Unknown so a new tag doesn't break decode.
-    #[serde(other)]
-    Other,
+    /// DID of the reposter — used as a key-disambiguator so two
+    /// reposts of the same post in the same page don't collide.
+    pub fn reposter_did(&self) -> Option<String> {
+        let r = self.reason.as_ref()?;
+        let ty = r.get("$type").and_then(|v| v.as_str())?;
+        if ty != "app.bsky.feed.defs#reasonRepost" {
+            return None;
+        }
+        r.get("by")
+            .and_then(|by| by.get("did"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    }
+
+    /// Handle of the post being replied to (parent), or None when
+    /// the row isn't a reply or the parent is unavailable
+    /// (notFound/blocked).
+    pub fn reply_parent_handle(&self) -> Option<String> {
+        let parent = self.reply.as_ref()?.get("parent")?;
+        // Skip notFoundPost / blockedPost shapes by checking $type.
+        let ty = parent.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+        if ty.ends_with("#notFoundPost") || ty.ends_with("#blockedPost") {
+            return None;
+        }
+        parent
+            .get("author")
+            .and_then(|a| a.get("handle"))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    }
 }
 
 /// `app.bsky.actor.defs#profileViewDetailed` — full profile shape.
