@@ -10,7 +10,7 @@ use crate::icons;
 use crate::keyboard::{self, KeyContext};
 use crate::state::{
     ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp, PendingChord,
-    ProfileFocus, ThreadFocus, Tick, UpdateBanner,
+    ProfileFocus, ThemeMode, ThreadFocus, Tick, UpdateBanner,
 };
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
@@ -204,6 +204,9 @@ pub fn DeckShell() -> Element {
         }
     }
 
+    let theme = use_context::<Signal<ThemeMode>>();
+    let theme_attr = theme.read().as_attr();
+
     let onkeydown = move |evt: KeyboardEvent| {
         // Modifier state for combos (Cmd-K, Ctrl-d, etc.)
         let modifiers = evt.modifiers();
@@ -223,6 +226,7 @@ pub fn DeckShell() -> Element {
         // synthetic keydown might miss the bubble.
         div { class: "deck-shell",
             tabindex: "0",
+            "data-theme": "{theme_attr}",
             onkeydown: onkeydown,
             Sidebar { search_open, saved_feeds_open, settings_open }
             div { class: "deck-columns",

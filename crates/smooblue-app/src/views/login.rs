@@ -19,6 +19,8 @@ pub fn LoginView() -> Element {
     let mut status = use_signal(|| Status::Idle);
     let mut share_with_smoo = use_signal(|| false);
     let session = use_context::<Signal<Option<Session>>>();
+    let theme = use_context::<Signal<crate::state::ThemeMode>>();
+    let theme_attr = theme.read().as_attr();
 
     let start_signin = move |_evt: MouseEvent| {
         // Strip a leading @ in case the user types "@alice.bsky.social".
@@ -65,7 +67,7 @@ pub fn LoginView() -> Element {
     };
 
     rsx! {
-        div { class: "login",
+        div { class: "login", "data-theme": "{theme_attr}",
             div { class: "login__card",
                 div { class: "login__logo",
                     dangerous_inner_html: "{smooblue_theme::BRAND_SVG}",

@@ -9,6 +9,7 @@
 
 use crate::icons;
 use crate::persistence;
+use crate::state::ThemeMode;
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
 
@@ -75,6 +76,12 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                         }
                     }
 
+                    // ── Appearance ─────────────────────────────────
+                    section { class: "settings__section",
+                        h3 { class: "settings__section-title", "Appearance" }
+                        ThemePicker {}
+                    }
+
                     // ── About ──────────────────────────────────────
                     section { class: "settings__section",
                         h3 { class: "settings__section-title", "About" }
@@ -99,12 +106,56 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                     section { class: "settings__section",
                         h3 { class: "settings__section-title", "Coming soon" }
                         p { class: "settings__roadmap",
-                            "Light theme · keyboard shortcuts · multi-account switching · "
-                            "mute / block lists · self-update notifier · DMs · "
-                            "rich-text mentions & link facets in compose."
+                            "Multi-account switching · DM inbox · profile editing · "
+                            "thread compose · pinned post · video upload."
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Two-pill theme switcher. Writes through to disk so the choice
+/// persists across launches. Lives inline here because no other
+/// component needs to render a theme picker.
+#[component]
+fn ThemePicker() -> Element {
+    let mut theme = use_context::<Signal<ThemeMode>>();
+    let current = *theme.read();
+
+    let set_dark = move |_| {
+        if current != ThemeMode::Dark {
+            theme.set(ThemeMode::Dark);
+            let _ = persistence::save_theme("dark");
+        }
+    };
+    let set_light = move |_| {
+        if current != ThemeMode::Light {
+            theme.set(ThemeMode::Light);
+            let _ = persistence::save_theme("light");
+        }
+    };
+
+    rsx! {
+        div { class: "theme-picker",
+            button {
+                class: if current == ThemeMode::Dark {
+                    "theme-picker__opt theme-picker__opt--selected"
+                } else {
+                    "theme-picker__opt"
+                },
+                onclick: set_dark,
+                "Dark"
+            }
+            button {
+                class: if current == ThemeMode::Light {
+                    "theme-picker__opt theme-picker__opt--selected"
+                } else {
+                    "theme-picker__opt"
+                },
+                onclick: set_light,
+                "Light"
             }
         }
     }

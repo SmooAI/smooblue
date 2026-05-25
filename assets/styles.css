@@ -1409,6 +1409,69 @@ a {
 }
 
 /* ===========================================================
+ *  Light theme — scoped overrides on [data-theme="light"]
+ *
+ *  The shared smooai-ui sheet is dark-first; we re-define the
+ *  semantic tokens here when the root container opts in via
+ *  data-theme="light". Brand color tokens (orange, blue) stay
+ *  untouched so the wordmark + smooblue identity reads the same
+ *  in both modes.
+ *
+ *  Light values picked with OKLCH lightness ~0.97–0.99 for the
+ *  paper-white surfaces, ~0.15 for foreground text, ~0.92 for
+ *  cards (subtle contrast vs. background), ~0.88 for borders.
+ * =========================================================== */
+[data-theme="light"] {
+    --background: oklch(0.985 0.003 247.9);
+    --foreground: oklch(0.205 0.014 265);
+    --card: oklch(0.965 0.004 250);
+    --muted: oklch(0.94 0.005 250);
+    --muted-foreground: oklch(0.45 0.01 260);
+    --border: oklch(0.88 0.007 255);
+    --input: oklch(0.92 0.006 258);
+    --sidebar: oklch(0.945 0.005 255);
+    --sidebar-border: oklch(0.85 0.008 255);
+}
+
+/* Brand-orange on bare white is harder to read at body-text
+ * weight — fall back to brand blue for link color in light mode. */
+[data-theme="light"] a {
+    color: var(--color-smooai-blue-500);
+}
+
+/* Theme picker — two-pill segmented control inside settings */
+.theme-picker {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.theme-picker__opt {
+    background: transparent;
+    border: 0;
+    color: var(--foreground);
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 120ms ease, color 120ms ease;
+}
+
+.theme-picker__opt:hover {
+    background: var(--muted);
+}
+
+.theme-picker__opt--selected {
+    background: var(--color-smooai-orange);
+    color: var(--color-smooai-dark-blue);
+    font-weight: 600;
+}
+
+.theme-picker__opt--selected:hover {
+    background: var(--color-smooai-orange);
+}
+
+/* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */
 .report__sheet {

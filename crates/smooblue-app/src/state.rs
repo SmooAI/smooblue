@@ -249,6 +249,33 @@ pub struct KeyboardHelp(pub bool);
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct UpdateBanner(pub Option<crate::updates::UpdateAvailable>);
 
+/// Current visual theme. Default Dark — the brand sheet from
+/// smooai-ui is dark-first; Light is implemented as a CSS token
+/// override scoped to `[data-theme="light"]`. Persisted across
+/// launches via [`crate::persistence::save_theme`].
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub fn as_attr(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "light" => Self::Light,
+            _ => Self::Dark,
+        }
+    }
+}
+
 /// What the report sheet is targeting (account or post). `None` when
 /// the sheet is closed. Set by ProfileSheet's Report action or a
 /// future per-post menu.
@@ -348,6 +375,12 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<KeyboardHelp>>(|| Signal::new(KeyboardHelp(false)));
     use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
     use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
+    use_context_provider::<Signal<ThemeMode>>(|| {
+        let mode = crate::persistence::load_theme()
+            .map(|s| ThemeMode::from_str(&s))
+            .unwrap_or_default();
+        Signal::new(mode)
+    });
     use_context_provider::<Signal<PendingChord>>(|| Signal::new(PendingChord::default()));
     use_context_provider::<Signal<ProfileFocus>>(|| {
         // SMOOBLUE_DEBUG_OPEN_PROFILE=<handle-or-did> → boot straight

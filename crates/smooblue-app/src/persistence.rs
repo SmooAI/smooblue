@@ -14,6 +14,7 @@ const KEYRING_ACCOUNT: &str = "oauth-session";
 const COLUMNS_FILE: &str = "columns.json";
 const LAST_HANDLE_FILE: &str = "last_handle.txt";
 const DRAFT_FILE: &str = "draft.txt";
+const THEME_FILE: &str = "theme.txt";
 
 /// Persist the OAuth session.
 pub fn save_session(session: &Session) -> Result<(), String> {
@@ -102,6 +103,24 @@ pub fn load_draft() -> Option<String> {
     } else {
         Some(s)
     }
+}
+
+/// Persist the user's chosen theme (currently "dark" or "light").
+/// Free-form string on purpose — keeps room for future variants
+/// (e.g., "system", "high-contrast") without a migration.
+pub fn save_theme(mode: &str) -> Result<(), String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
+        .ok_or_else(|| "no config dir".to_string())?;
+    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
+    let path = dir.config_dir().join(THEME_FILE);
+    std::fs::write(path, mode.trim()).map_err(|e| e.to_string())
+}
+
+pub fn load_theme() -> Option<String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")?;
+    let path = dir.config_dir().join(THEME_FILE);
+    let s = std::fs::read_to_string(path).ok()?.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
 }
 
 #[cfg(test)]
