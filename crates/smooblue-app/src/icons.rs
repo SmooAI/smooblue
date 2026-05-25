@@ -166,6 +166,24 @@ pub fn Sparkles(size: Size) -> Element {
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdSparkles } }
 }
 
+#[component]
+pub fn Users(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdUsers } }
+}
+
+#[component]
+pub fn Bookmark(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdBookmark } }
+}
+
+#[component]
+pub fn LogOut(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdLogOut } }
+}
+
 /// Small relative-time text ("11s", "1h", "3d") that updates every
 /// second by subscribing to the global `Tick` signal. Lifted out of
 /// PostCard / NotificationCard so the 1Hz tick re-renders only this

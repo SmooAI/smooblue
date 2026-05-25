@@ -33,6 +33,12 @@ pub enum ColumnKind {
     Feed {
         uri: String,
     },
+    /// `app.bsky.feed.getListFeed` — posts from members of a curated
+    /// list. Same shape as Feed/Home; the rendering side reuses the
+    /// standard PostCard path.
+    List {
+        uri: String,
+    },
     /// `app.bsky.actor.getSuggestions` — personalized list of actors
     /// the AppView thinks the viewer might want to follow. Renders as
     /// follow-row cards rather than posts.
@@ -83,6 +89,24 @@ impl ColumnSpec {
             id: "suggestions".into(),
             kind: ColumnKind::Suggestions,
             title: "Suggested follows".into(),
+        }
+    }
+
+    pub fn list(uri: impl Into<String>, title: impl Into<String>) -> Self {
+        let uri: String = uri.into();
+        Self {
+            id: format!("list:{uri}"),
+            kind: ColumnKind::List { uri },
+            title: title.into(),
+        }
+    }
+
+    pub fn feed_with_title(uri: impl Into<String>, title: impl Into<String>) -> Self {
+        let uri: String = uri.into();
+        Self {
+            id: format!("feed:{uri}"),
+            kind: ColumnKind::Feed { uri },
+            title: title.into(),
         }
     }
 

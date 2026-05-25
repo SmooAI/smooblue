@@ -11,7 +11,7 @@
 
 use smooblue_atproto::feed::{
     ActorProfile, ActorViewerState, Embed, EmbedExternal, EmbedImage, EmbedKind, EmbedRecordView,
-    FeedItem, PostAuthor, PostRecord, PostView, ThreadView,
+    FeedGeneratorView, FeedItem, PostAuthor, PostRecord, PostView, SavedFeedItem, ThreadView,
 };
 use smooblue_atproto::Notification;
 use smooblue_oauth::{dpop::DpopKey, Session};
@@ -839,6 +839,54 @@ pub fn suggestions() -> Vec<ActorProfile> {
              "The Rust Programming Language. github.com/rust-lang."),
         make("dioxuslabs.com", "Dioxus", "dioxus",
              "React-style Rust GUI. Web + desktop + mobile + LiveView from one codebase."),
+    ]
+}
+
+/// Demo: a handful of saved feeds for the SavedFeedsSheet, paired
+/// with their resolved generator views. Two pinned + two unpinned
+/// so the picker exercises both visual states.
+pub fn saved_feeds() -> Vec<(SavedFeedItem, Option<FeedGeneratorView>)> {
+    let make = |uri: &str, name: &str, desc: &str, seed: &str, pinned: bool| {
+        let saved = SavedFeedItem {
+            kind: "feed".into(),
+            value: uri.into(),
+            pinned,
+            id: Some(format!("demo-{seed}")),
+        };
+        let view = FeedGeneratorView {
+            uri: uri.into(),
+            cid: format!("bafy-demo-{seed}"),
+            did: format!("did:plc:demo-{seed}"),
+            display_name: name.into(),
+            description: Some(desc.into()),
+            avatar: Some(format!("https://picsum.photos/seed/{seed}/80")),
+            creator: PostAuthor {
+                did: format!("did:plc:demo-{seed}-creator"),
+                handle: format!("{seed}.bsky.social"),
+                display_name: Some(format!("{seed} creator")),
+                avatar: None,
+            },
+            like_count: 0,
+        };
+        (saved, Some(view))
+    };
+    vec![
+        make("at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot",
+             "Discover",
+             "The default 'what's hot' feed across Bluesky.",
+             "discover", true),
+        make("at://did:plc:demo/app.bsky.feed.generator/rust-makers",
+             "Rust makers",
+             "Posts from people building things in Rust. Curated weekly.",
+             "rust-makers", true),
+        make("at://did:plc:demo/app.bsky.feed.generator/indy-sports",
+             "Indianapolis Sports",
+             "All things Indy — Pacers, Colts, Indiana Fever, IndyCar.",
+             "indy-sports", false),
+        make("at://did:plc:demo/app.bsky.feed.generator/dev-news",
+             "Developer news",
+             "GitHub launches, language releases, conference talks.",
+             "dev-news", false),
     ]
 }
 

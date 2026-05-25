@@ -302,6 +302,46 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// `app.bsky.actor.getPreferences` — the user's preferences blob,
+    /// including saved feeds + lists. Backs the saved-feeds picker.
+    pub async fn get_preferences(&self) -> Result<crate::feed::PreferencesResponse, AtError> {
+        let url = self
+            .appview
+            .join("/xrpc/app.bsky.actor.getPreferences")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.get_json(&url).await
+    }
+
+    /// `app.bsky.feed.getFeedGenerators` — batch-resolve up to 25
+    /// feed-generator URIs into display views (name, description,
+    /// avatar). Pair with [`Self::get_preferences`] to render the
+    /// saved-feeds picker.
+    pub async fn get_feed_generators(
+        &self,
+        feed_uris: &[String],
+    ) -> Result<crate::feed::FeedGeneratorsResponse, AtError> {
+        if feed_uris.is_empty() {
+            return Ok(crate::feed::FeedGeneratorsResponse { feeds: Vec::new() });
+        }
+        let mut out_feeds: Vec<crate::feed::FeedGeneratorView> = Vec::new();
+        // The lexicon caps at 25 URIs per call.
+        for chunk in feed_uris.chunks(25) {
+            let mut url = self
+                .appview
+                .join("/xrpc/app.bsky.feed.getFeedGenerators")
+                .map_err(|e| AtError::Decode(e.to_string()))?;
+            {
+                let mut q = url.query_pairs_mut();
+                for u in chunk {
+                    q.append_pair("feeds", u);
+                }
+            }
+            let r: crate::feed::FeedGeneratorsResponse = self.get_json(&url).await?;
+            out_feeds.extend(r.feeds);
+        }
+        Ok(crate::feed::FeedGeneratorsResponse { feeds: out_feeds })
+    }
+
     /// `app.bsky.actor.getSuggestions` — a personalized list of
     /// actors the AppView thinks the viewer might want to follow.
     /// Backs the "Suggested follows" column.
@@ -402,6 +442,28 @@ impl AtClient {
             out.extend(r.posts);
         }
         Ok(out)
+    }
+
+    /// `app.bsky.feed.getListFeed` — posts from members of a curated
+    /// list. Reuses the standard FeedResponse shape so the column
+    /// renderer doesn't need a special branch.
+    pub async fn get_list_feed(
+        &self,
+        list_uri: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<FeedResponse, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.feed.getListFeed")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("list", list_uri)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
     }
 
     /// `app.bsky.feed.getFeed` — fetch a custom feed (e.g. "Indianapolis

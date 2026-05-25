@@ -66,6 +66,7 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         ColumnKind::Search { .. } => Duration::from_secs(30),
         ColumnKind::Feed { .. } => Duration::from_secs(25),
         ColumnKind::AuthorFeed { .. } => Duration::from_secs(45),
+        ColumnKind::List { .. } => Duration::from_secs(25),
         // Suggestions are personalized; refresh slowly — the user
         // doesn't want their suggested-follows list flickering.
         ColumnKind::Suggestions => Duration::from_secs(300),
@@ -93,8 +94,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
         async move {
             let interval = poll_interval(&kind);
             let mut first_fetch = true;
+            // Persistent across polls — used by the Notifications fetch
+            // path to avoid re-hydrating subject posts that are already
+            // known. Bounded at 500 entries so a long-running session
+            // doesn't grow this unboundedly.
+            let mut subjects_cache: HashMap<String, PostView> = HashMap::new();
             loop {
-                match fetch_once(&kind, session_sig).await {
+                match fetch_once(&kind, session_sig, &mut subjects_cache).await {
                     Ok(fresh) => {
                         error.set(None);
                         loading.set(false);
@@ -186,6 +192,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
 async fn fetch_once(
     kind: &ColumnKind,
     session_sig: Signal<Option<Session>>,
+    subjects_cache: &mut HashMap<String, PostView>,
 ) -> Result<ColumnData, String> {
     // Demo mode: canned data with no network.
     if crate::demo::is_active() {
@@ -197,9 +204,10 @@ async fn fetch_once(
             }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
             ColumnKind::Suggestions => ColumnData::Suggestions(crate::demo::suggestions()),
-            ColumnKind::Home | ColumnKind::Search { .. } | ColumnKind::Feed { .. } => {
-                ColumnData::Posts(crate::demo::home_feed())
-            }
+            ColumnKind::Home
+            | ColumnKind::Search { .. }
+            | ColumnKind::Feed { .. }
+            | ColumnKind::List { .. } => ColumnData::Posts(crate::demo::home_feed()),
         });
     }
     // OAuth-authenticated calls hit the user's PDS (which proxies app.bsky.*
@@ -229,22 +237,34 @@ async fn fetch_once(
                 .await
                 .map(|r| r.notifications)
                 .map_err(|e| e.to_string())?;
-            // Hydrate subject posts in one batched call. Failures here
-            // shouldn't blank the notifications — fall back to an empty
-            // map and the cards just render without quoted context.
-            let uris = collect_subject_uris(&items);
-            let subjects = if uris.is_empty() {
-                HashMap::new()
-            } else {
-                match client.get_posts(&uris).await {
-                    Ok(posts) => posts.into_iter().map(|p| (p.uri.clone(), p)).collect(),
-                    Err(_) => HashMap::new(),
+            // Hydrate subject posts in one batched call — but only
+            // the URIs we don't already have cached from a prior poll.
+            // For a notification-heavy user this can drop the per-
+            // poll get_posts payload from ~30 URIs to ~2.
+            let needed: Vec<String> = collect_subject_uris(&items)
+                .into_iter()
+                .filter(|u| !subjects_cache.contains_key(u))
+                .collect();
+            if !needed.is_empty() {
+                if let Ok(posts) = client.get_posts(&needed).await {
+                    for p in posts {
+                        subjects_cache.insert(p.uri.clone(), p);
+                    }
                 }
-            };
+            }
+            // Crude bounded-cache: blow it away when we hit 500 entries.
+            // A real LRU is overkill — a notification page can't reference
+            // more than ~30 subjects so the cap is generous.
+            if subjects_cache.len() > 500 {
+                subjects_cache.clear();
+            }
             // Collapse 20 likes on the same post into one card etc.
             // Done after hydration so the same subjects map keys still work.
             let groups = group_notifications(items);
-            Ok(ColumnData::Notifications { groups, subjects })
+            Ok(ColumnData::Notifications {
+                groups,
+                subjects: subjects_cache.clone(),
+            })
         }
         ColumnKind::Search { query } => client
             .search_posts(query, None, 30)
@@ -253,6 +273,11 @@ async fn fetch_once(
             .map_err(|e| e.to_string()),
         ColumnKind::Feed { uri } => client
             .get_feed(uri, None, 30)
+            .await
+            .map(|r| ColumnData::Posts(r.feed))
+            .map_err(|e| e.to_string()),
+        ColumnKind::List { uri } => client
+            .get_list_feed(uri, None, 30)
             .await
             .map(|r| ColumnData::Posts(r.feed))
             .map_err(|e| e.to_string()),
@@ -385,6 +410,7 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
                     ColumnKind::Search { .. } => rsx! { icons::Search { size: icons::Size::Sm } },
                     ColumnKind::AuthorFeed { .. } => rsx! { icons::User { size: icons::Size::Sm } },
                     ColumnKind::Feed { .. } => rsx! { icons::Compass { size: icons::Size::Sm } },
+                    ColumnKind::List { .. } => rsx! { icons::Users { size: icons::Size::Sm } },
                     ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
                     ColumnKind::Home => rsx! { icons::Home { size: icons::Size::Sm } },
                 }

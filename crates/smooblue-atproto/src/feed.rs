@@ -220,6 +220,76 @@ pub struct EmbedAspectRatio {
     pub height: u32,
 }
 
+/// `app.bsky.actor.getPreferences` response — opaque preferences
+/// blob; we only care about the savedFeedsPrefV2 entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PreferencesResponse {
+    #[serde(default)]
+    pub preferences: Vec<serde_json::Value>,
+}
+
+/// One entry in the `app.bsky.actor.defs#savedFeedsPrefV2` list.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SavedFeedItem {
+    /// `feed`, `list`, or `timeline`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// AT-URI of the feed generator / list, or the literal "following"
+    /// for the timeline entry.
+    pub value: String,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+impl PreferencesResponse {
+    /// Pull the user's saved-feeds list out of the opaque
+    /// preferences blob. Returns `None` if the user hasn't set any
+    /// preferences (account is fresh, or just hasn't customized).
+    pub fn saved_feeds(&self) -> Vec<SavedFeedItem> {
+        for entry in &self.preferences {
+            let ty = entry.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+            if ty == "app.bsky.actor.defs#savedFeedsPrefV2" {
+                if let Some(items) = entry.get("items").and_then(|v| v.as_array()) {
+                    let mut out = Vec::with_capacity(items.len());
+                    for it in items {
+                        if let Ok(sf) = serde_json::from_value::<SavedFeedItem>(it.clone()) {
+                            out.push(sf);
+                        }
+                    }
+                    return out;
+                }
+            }
+        }
+        Vec::new()
+    }
+}
+
+/// `app.bsky.feed.getFeedGenerators` — resolve a batch of feed-generator
+/// URIs into displayable view objects (name, description, avatar).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FeedGeneratorsResponse {
+    #[serde(default)]
+    pub feeds: Vec<FeedGeneratorView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct FeedGeneratorView {
+    pub uri: String,
+    pub cid: String,
+    pub did: String,
+    #[serde(rename = "displayName", default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    pub creator: PostAuthor,
+    #[serde(rename = "likeCount", default)]
+    pub like_count: u64,
+}
+
 /// `app.bsky.actor.getSuggestions` response — personalized list of
 /// actors the AppView thinks the viewer might want to follow.
 /// `ActorProfile` (the detailed view) is what the AppView returns,

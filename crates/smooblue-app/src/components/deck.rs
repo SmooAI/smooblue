@@ -3,7 +3,8 @@
 
 use crate::components::{
     column::Column, compose::ComposeSheet, engagement::EngagementSheet, profile::ProfileSheet,
-    search_sheet::SearchSheet, sidebar::Sidebar, thread::ThreadSheet,
+    saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
+    sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::state::{ColumnSpec, ComposeContext, Tick};
@@ -16,6 +17,8 @@ pub fn DeckShell() -> Element {
     let columns = cols.read().clone();
     let mut compose_ctx = use_context::<Signal<ComposeContext>>();
     let search_open = use_signal(|| false);
+    let saved_feeds_open = use_signal(|| false);
+    let settings_open = use_signal(|| false);
 
     // 1-second tick that drives time-relative re-renders (post timestamps
     // ticking "11s" → "12s" etc.). Reading the Tick context in
@@ -42,7 +45,7 @@ pub fn DeckShell() -> Element {
 
     rsx! {
         div { class: "deck-shell",
-            Sidebar { search_open }
+            Sidebar { search_open, saved_feeds_open, settings_open }
             div { class: "deck-columns",
                 for spec in columns {
                     Column { key: "{spec.id}", spec: spec.clone() }
@@ -56,6 +59,8 @@ pub fn DeckShell() -> Element {
             }
             ComposeSheet {}
             SearchSheet { open: search_open }
+            SavedFeedsSheet { open: saved_feeds_open }
+            SettingsSheet { open: settings_open }
             ThreadSheet {}
             ProfileSheet {}
             EngagementSheet {}
