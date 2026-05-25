@@ -425,9 +425,26 @@ pub fn use_bootstrap() {
         let initial = if crate::demo::is_active() {
             Some(crate::demo::fake_session())
         } else {
-            crate::persistence::load_session()
+            // Multi-account: prefer the keyed session for the active
+            // DID from accounts.json; fall back to legacy single slot.
+            let accounts = crate::persistence::load_accounts();
+            accounts
+                .active_did
+                .as_deref()
+                .and_then(crate::persistence::load_session_for)
+                .or_else(crate::persistence::load_session)
         };
         Signal::new(initial)
+    });
+    // Multi-account index — kept as its own signal so the settings
+    // sheet can list other accounts and the sidebar can offer a
+    // quick switcher without round-tripping through the session
+    // signal (which only carries the *active* account's tokens).
+    use_context_provider::<Signal<crate::persistence::Accounts>>(|| {
+        if crate::demo::is_active() {
+            return Signal::new(crate::persistence::Accounts::default());
+        }
+        Signal::new(crate::persistence::load_accounts())
     });
     use_context_provider::<Signal<Vec<ColumnSpec>>>(|| {
         let initial = if crate::demo::is_active() {

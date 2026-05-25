@@ -47,6 +47,21 @@ pub fn LoginView() -> Element {
                         )));
                         return;
                     }
+                    // Multi-account: also store keyed by DID and
+                    // upsert into the accounts index so the user
+                    // can switch back to this account later.
+                    let _ = crate::persistence::save_session_for(&s.did, &s);
+                    let mut accounts = crate::persistence::load_accounts();
+                    let already = accounts.accounts.iter().any(|a| a.did == s.did);
+                    if !already {
+                        accounts.accounts.push(crate::persistence::AccountRef {
+                            did: s.did.clone(),
+                            handle: s.handle.clone(),
+                        });
+                    }
+                    accounts.active_did = Some(s.did.clone());
+                    let _ = crate::persistence::save_accounts(&accounts);
+
                     // Remember handle so the next login pre-fills.
                     let _ = crate::persistence::save_last_handle(&entered);
                     // Opt-in CRM sync. Non-blocking — if it fails, the user is

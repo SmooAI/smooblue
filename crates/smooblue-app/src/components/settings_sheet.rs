@@ -26,8 +26,19 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
     };
 
     let mut open_signout = open;
+    let mut accounts_for_signout = use_context::<Signal<persistence::Accounts>>();
     let sign_out = move |_| {
+        // Pull the active DID *before* we wipe the legacy slot so
+        // we can also drop the keyed keyring entry for that account.
+        let active = accounts_for_signout.read().active_did.clone();
         let _ = persistence::clear_session();
+        if let Some(did) = active {
+            let _ = persistence::delete_session_for(&did);
+            let mut idx = accounts_for_signout.write();
+            idx.accounts.retain(|a| a.did != did);
+            idx.active_did = idx.accounts.first().map(|a| a.did.clone());
+            let _ = persistence::save_accounts(&idx);
+        }
         session.set(None);
         open_signout.set(false);
     };
@@ -82,6 +93,12 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                         ThemePicker {}
                     }
 
+                    // ── Multi-account switcher ─────────────────────
+                    section { class: "settings__section",
+                        h3 { class: "settings__section-title", "Accounts" }
+                        AccountSwitcher {}
+                    }
+
                     // ── Moderation: mutes + blocks ─────────────────
                     section { class: "settings__section",
                         h3 { class: "settings__section-title", "Mute & block lists" }
@@ -118,6 +135,124 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Account switcher — lists every signed-in account and lets the
+/// user flip the active one. Switching loads the keyed session
+/// out of keyring and swaps it into the active Session signal,
+/// which the rest of the app reads. "+ Add" signs out the current
+/// session so the LoginView appears; the new sign-in will append
+/// to the index.
+#[component]
+fn AccountSwitcher() -> Element {
+    let mut session = use_context::<Signal<Option<Session>>>();
+    let mut accounts_sig = use_context::<Signal<persistence::Accounts>>();
+    let snapshot = accounts_sig.read().clone();
+    let active_did = snapshot.active_did.clone();
+
+    // Switch to a different already-signed-in account.
+    let switch_to = move |did: String| {
+        let Some(s) = persistence::load_session_for(&did) else {
+            return;
+        };
+        // Also update the legacy single-slot keyring so anything
+        // (other tools, debug helpers) reading the old name sees
+        // the right session.
+        let _ = persistence::save_session(&s);
+        let mut idx = accounts_sig.write();
+        idx.active_did = Some(did);
+        let _ = persistence::save_accounts(&idx);
+        session.set(Some(s));
+    };
+
+    // Remove an account from the index (and its keyring entry).
+    // If we just deleted the active one, sign out — the user will
+    // land on LoginView and can pick another from there.
+    let remove = move |did: String| {
+        let _ = persistence::delete_session_for(&did);
+        let mut idx = accounts_sig.write();
+        idx.accounts.retain(|a| a.did != did);
+        if idx.active_did.as_deref() == Some(did.as_str()) {
+            idx.active_did = idx.accounts.first().map(|a| a.did.clone());
+            let _ = persistence::save_accounts(&idx);
+            drop(idx);
+            // Promote the next account if any.
+            let next = accounts_sig.read().active_did.clone();
+            match next {
+                Some(d) => {
+                    if let Some(s) = persistence::load_session_for(&d) {
+                        let _ = persistence::save_session(&s);
+                        session.set(Some(s));
+                    } else {
+                        let _ = persistence::clear_session();
+                        session.set(None);
+                    }
+                }
+                None => {
+                    let _ = persistence::clear_session();
+                    session.set(None);
+                }
+            }
+        } else {
+            let _ = persistence::save_accounts(&idx);
+        }
+    };
+
+    // Add: sign out, which routes back to LoginView. After the new
+    // OAuth completes, that flow appends the new account into the
+    // index via [`save_session_for`] + [`save_accounts`].
+    let add_account = move |_| {
+        // Don't drop existing accounts — just clear the active
+        // session so the LoginView paints. The keyed entries
+        // persist in keyring; the next switch_to can re-activate.
+        let _ = persistence::clear_session();
+        let mut idx = accounts_sig.write();
+        idx.active_did = None;
+        let _ = persistence::save_accounts(&idx);
+        session.set(None);
+    };
+
+    rsx! {
+        if snapshot.accounts.is_empty() {
+            p { class: "moderation__empty", "Only one account signed in." }
+        } else {
+            for acc in snapshot.accounts.iter().cloned() {
+                {
+                    let is_active = active_did.as_deref() == Some(acc.did.as_str());
+                    let did_for_switch = acc.did.clone();
+                    let did_for_remove = acc.did.clone();
+                    let mut switch_to = switch_to;
+                    let mut remove = remove;
+                    rsx! {
+                        div { class: "account-row",
+                            key: "{acc.did}",
+                            div { class: "account-row__id",
+                                span { class: "account-row__handle", "@{acc.handle}" }
+                                span { class: "account-row__did", "{acc.did}" }
+                            }
+                            if is_active {
+                                span { class: "account-row__active-badge", "Active" }
+                            } else {
+                                button { class: "btn btn--ghost account-row__switch",
+                                    onclick: move |_| switch_to(did_for_switch.clone()),
+                                    "Switch"
+                                }
+                            }
+                            button { class: "account-row__remove",
+                                title: "Remove account from this device",
+                                onclick: move |_| remove(did_for_remove.clone()),
+                                icons::X { size: icons::Size::Sm }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        button { class: "btn btn--ghost",
+            onclick: add_account,
+            "+ Add another account"
         }
     }
 }

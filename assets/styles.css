@@ -1727,6 +1727,73 @@ a {
 }
 
 /* ===========================================================
+ *  Account switcher rows (Settings → Accounts)
+ * =========================================================== */
+.account-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.account-row:last-of-type {
+    border-bottom: 0;
+    margin-bottom: 4px;
+}
+
+.account-row__id {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.account-row__handle {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--foreground);
+}
+
+.account-row__did {
+    font-size: 11px;
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.account-row__active-badge {
+    background: var(--color-smooai-green);
+    color: var(--color-smooai-dark-blue);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+}
+
+.account-row__switch {
+    min-width: 70px;
+}
+
+.account-row__remove {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+.account-row__remove:hover {
+    background: var(--muted);
+    color: var(--color-smooai-red);
+}
+
+/* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */
 .report__sheet {

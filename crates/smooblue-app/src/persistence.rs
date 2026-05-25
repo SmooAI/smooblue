@@ -11,6 +11,7 @@ use smooblue_oauth::Session;
 
 const KEYRING_SERVICE: &str = "ai.smoo.smooblue";
 const KEYRING_ACCOUNT: &str = "oauth-session";
+const ACCOUNTS_FILE: &str = "accounts.json";
 const COLUMNS_FILE: &str = "columns.json";
 const LAST_HANDLE_FILE: &str = "last_handle.txt";
 const DRAFT_FILE: &str = "draft.txt";
@@ -33,6 +34,96 @@ pub fn load_session() -> Option<Session> {
 /// Drop the persisted session (sign-out).
 pub fn clear_session() -> Result<(), String> {
     let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|e| e.to_string())?;
+    entry.delete_credential().map_err(|e| e.to_string())
+}
+
+/// One known account — kept in a small disk index alongside the
+/// keyring entries that store the actual session bytes.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AccountRef {
+    pub did: String,
+    pub handle: String,
+}
+
+/// On-disk index of all known accounts plus which one is currently
+/// active. Lives at `accounts.json` in the config dir; the session
+/// bytes for each account live in the OS keyring under the account
+/// name `oauth-session:<did>`.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Accounts {
+    pub active_did: Option<String>,
+    pub accounts: Vec<AccountRef>,
+}
+
+fn keyring_account_for(did: &str) -> String {
+    format!("{KEYRING_ACCOUNT}:{did}")
+}
+
+fn accounts_path() -> Option<std::path::PathBuf> {
+    Some(
+        directories::ProjectDirs::from("ai", "Smoo", "smooblue")?
+            .config_dir()
+            .join(ACCOUNTS_FILE),
+    )
+}
+
+/// Load the multi-account index. On first run after the multi-account
+/// migration ships, falls back to migrating a legacy single-account
+/// keyring entry into a fresh index — the user gets to keep their
+/// signed-in session without re-authing.
+pub fn load_accounts() -> Accounts {
+    if let Some(path) = accounts_path() {
+        if let Ok(s) = std::fs::read_to_string(&path) {
+            if let Ok(acc) = serde_json::from_str::<Accounts>(&s) {
+                return acc;
+            }
+        }
+    }
+    // Migrate legacy single-session: if `oauth-session` exists in
+    // keyring, write it under the new keyed name and synthesize an
+    // index pointing at it.
+    if let Some(s) = load_session() {
+        let did = s.did.clone();
+        let handle = s.handle.clone();
+        if save_session_for(&did, &s).is_ok() {
+            let accounts = Accounts {
+                active_did: Some(did.clone()),
+                accounts: vec![AccountRef { did, handle }],
+            };
+            let _ = save_accounts(&accounts);
+            return accounts;
+        }
+    }
+    Accounts::default()
+}
+
+pub fn save_accounts(accounts: &Accounts) -> Result<(), String> {
+    let path = accounts_path().ok_or_else(|| "no config dir".to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(accounts).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Persist a session keyed by DID. Independent of [`save_session`]
+/// (legacy single-slot) — multi-account callers should use this.
+pub fn save_session_for(did: &str, session: &Session) -> Result<(), String> {
+    let entry =
+        keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(session).map_err(|e| e.to_string())?;
+    entry.set_password(&json).map_err(|e| e.to_string())
+}
+
+pub fn load_session_for(did: &str) -> Option<Session> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).ok()?;
+    let json = entry.get_password().ok()?;
+    serde_json::from_str(&json).ok()
+}
+
+pub fn delete_session_for(did: &str) -> Result<(), String> {
+    let entry =
+        keyring::Entry::new(KEYRING_SERVICE, &keyring_account_for(did)).map_err(|e| e.to_string())?;
     entry.delete_credential().map_err(|e| e.to_string())
 }
 
