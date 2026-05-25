@@ -426,13 +426,25 @@ pub fn use_bootstrap() {
             Some(crate::demo::fake_session())
         } else {
             // Multi-account: prefer the keyed session for the active
-            // DID from accounts.json; fall back to legacy single slot.
+            // DID from accounts.json; fall back to the legacy single
+            // slot. Between the two, prefer the one with the freshest
+            // token / latest expiry so an out-of-sync write (e.g. a
+            // refresh that only landed in one slot) doesn't ship an
+            // already-dead session to the boot path.
             let accounts = crate::persistence::load_accounts();
-            accounts
+            let keyed = accounts
                 .active_did
                 .as_deref()
-                .and_then(crate::persistence::load_session_for)
-                .or_else(crate::persistence::load_session)
+                .and_then(crate::persistence::load_session_for);
+            let legacy = crate::persistence::load_session();
+            match (keyed, legacy) {
+                (Some(k), Some(l)) => {
+                    if l.expires_at > k.expires_at { Some(l) } else { Some(k) }
+                }
+                (Some(k), None) => Some(k),
+                (None, Some(l)) => Some(l),
+                (None, None) => None,
+            }
         };
         Signal::new(initial)
     });

@@ -59,8 +59,17 @@ async fn refresh_and_persist(
             // Best-effort persist; if the keyring write fails (e.g.,
             // user revoked permission) we still update the in-memory
             // signal so the current session keeps working until exit.
+            //
+            // Write BOTH the legacy single slot AND the multi-account
+            // keyed-by-DID slot. The boot path prefers the keyed slot
+            // (state.rs), so skipping it leaves an old refresh token
+            // there that fails with invalid_grant on next launch and
+            // forces the user to sign in again every restart.
             if let Err(e) = persistence::save_session(&new_session) {
-                tracing::warn!(error = %e, "smooblue: failed to persist refreshed session");
+                tracing::warn!(error = %e, "smooblue: failed to persist refreshed session (legacy slot)");
+            }
+            if let Err(e) = persistence::save_session_for(&new_session.did, &new_session) {
+                tracing::warn!(error = %e, "smooblue: failed to persist refreshed session (keyed slot)");
             }
             session_sig.set(Some(new_session.clone()));
             Some(new_session)
