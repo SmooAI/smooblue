@@ -77,6 +77,19 @@ pub struct PostImage {
     pub aspect_ratio: Option<AspectRatio>,
 }
 
+/// Single video attached to a post (`app.bsky.embed.video` view's
+/// underlying record shape). Pair with [`AtClient::upload_blob`] to
+/// mint the [`BlobRef`].
+#[derive(Clone, Debug, Serialize)]
+pub struct PostVideo {
+    pub video: BlobRef,
+    /// Optional alt text — same accessibility role as on images.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alt: String,
+    #[serde(rename = "aspectRatio", skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<AspectRatio>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct AspectRatio {
     pub width: u32,
@@ -552,7 +565,7 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, None, &[], &[], None).await
+        self.create_post_full(text, None, &[], &[], None, None).await
     }
 
     /// Same as [`Self::create_post`] but adds a reply context. The
@@ -563,7 +576,7 @@ impl AtClient {
         text: &str,
         reply: Option<&ReplyRef>,
     ) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, reply, &[], &[], None).await
+        self.create_post_full(text, reply, &[], &[], None, None).await
     }
 
     /// Full post creation — text + optional reply + optional image
@@ -586,6 +599,7 @@ impl AtClient {
         images: &[PostImage],
         facets: &[crate::richtext::Facet],
         quote: Option<&StrongRef>,
+        video: Option<&PostVideo>,
     ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -606,8 +620,32 @@ impl AtClient {
         } else {
             Some(&images[..images.len().min(4)])
         };
-        match (quote, trimmed_images) {
-            (Some(qr), Some(imgs)) => {
+        // Video > images > quote-only precedence. bsky lexicon
+        // doesn't allow video + images in the same record (only one
+        // media slot). Video + quote uses recordWithMedia like the
+        // image+quote case.
+        match (quote, video, trimmed_images) {
+            (_, Some(v), _) => {
+                let media = serde_json::to_value(v).map_err(|e| AtError::Decode(e.to_string()))?;
+                // Inject $type into the media object — the PostVideo
+                // struct serializes the bare fields but the lexicon
+                // tag is required at the embed level.
+                let mut media = media;
+                media["$type"] = serde_json::Value::String("app.bsky.embed.video".into());
+                if let Some(qr) = quote {
+                    record["embed"] = serde_json::json!({
+                        "$type": "app.bsky.embed.recordWithMedia",
+                        "record": {
+                            "$type": "app.bsky.embed.record",
+                            "record": { "uri": qr.uri, "cid": qr.cid }
+                        },
+                        "media": media,
+                    });
+                } else {
+                    record["embed"] = media;
+                }
+            }
+            (Some(qr), None, Some(imgs)) => {
                 record["embed"] = serde_json::json!({
                     "$type": "app.bsky.embed.recordWithMedia",
                     "record": {
@@ -620,19 +658,19 @@ impl AtClient {
                     }
                 });
             }
-            (Some(qr), None) => {
+            (Some(qr), None, None) => {
                 record["embed"] = serde_json::json!({
                     "$type": "app.bsky.embed.record",
                     "record": { "uri": qr.uri, "cid": qr.cid },
                 });
             }
-            (None, Some(imgs)) => {
+            (None, None, Some(imgs)) => {
                 record["embed"] = serde_json::json!({
                     "$type": "app.bsky.embed.images",
                     "images": imgs,
                 });
             }
-            (None, None) => {}
+            (None, None, None) => {}
         }
         if !facets.is_empty() {
             record["facets"] = serde_json::to_value(facets)
@@ -1472,7 +1510,7 @@ mod tests {
             }),
         };
         let rec = client
-            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[], None)
+            .create_post_full("look at this cat", None, std::slice::from_ref(&img), &[], None, None)
             .await
             .unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/abc");
@@ -1517,7 +1555,7 @@ mod tests {
             img,
         ];
         client
-            .create_post_full("six images", None, &many, &[], None)
+            .create_post_full("six images", None, &many, &[], None, None)
             .await
             .unwrap();
     }

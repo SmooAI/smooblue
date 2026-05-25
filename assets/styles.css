@@ -1876,6 +1876,71 @@ a {
     text-decoration: underline;
 }
 
+/* Video attachment tile (one per post). */
+.compose__video-tile {
+    margin-top: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.compose__video-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.compose__video-icon {
+    color: var(--color-smooai-orange);
+    flex-shrink: 0;
+}
+
+.compose__video-meta {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.compose__video-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.compose__video-size {
+    font-size: 11px;
+    color: var(--muted-foreground);
+}
+
+.compose__video-remove {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    padding: 4px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.compose__video-remove:hover {
+    background: var(--muted);
+    color: var(--color-smooai-red);
+}
+
+.compose__video-alt {
+    min-height: 50px;
+    resize: none;
+    font-size: 12px;
+    padding: 6px 8px;
+}
+
 .compose__sheet--drag {
     outline: 2px dashed var(--color-smooai-orange);
     outline-offset: -8px;

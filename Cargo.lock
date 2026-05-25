@@ -5112,7 +5112,7 @@ source = "git+https://github.com/SmooAI/ui.git?branch=main#f23080824d4731de1d4fc
 
 [[package]]
 name = "smooblue-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5147,7 +5147,7 @@ dependencies = [
 
 [[package]]
 name = "smooblue-atproto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5167,7 +5167,7 @@ dependencies = [
 
 [[package]]
 name = "smooblue-crm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -5181,7 +5181,7 @@ dependencies = [
 
 [[package]]
 name = "smooblue-oauth"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -5207,7 +5207,7 @@ dependencies = [
 
 [[package]]
 name = "smooblue-theme"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "smooai-ui",
 ]

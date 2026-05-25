@@ -25,7 +25,7 @@ use crate::image_prep::{prepare_from_path, PreparedImage};
 use crate::ocr;
 use crate::state::ComposeContext;
 use dioxus::prelude::*;
-use smooblue_atproto::{AspectRatio, BlobRef, PostImage, ReplyRef, StrongRef};
+use smooblue_atproto::{AspectRatio, BlobRef, PostImage, PostVideo, ReplyRef, StrongRef};
 use smooblue_oauth::Session;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -38,6 +38,17 @@ pub const MAX_LEN: usize = 300;
 pub const MAX_IMAGES: usize = 4;
 
 static ATTACHMENT_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Single attached video. Mutually exclusive with images. Held as
+/// raw bytes in memory until submit; bsky's lexicon caps video at
+/// ~50MB so the in-memory load is fine for normal usage.
+#[derive(Clone, PartialEq)]
+pub struct VideoAttachment {
+    pub source_path: PathBuf,
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    pub alt: String,
+}
 
 /// In-flight state of a single image attachment.
 ///
@@ -126,6 +137,11 @@ pub fn ComposeSheet() -> Element {
         crate::persistence::load_draft().unwrap_or_default()
     });
     let attachments = use_signal::<Vec<AttachedImage>>(Vec::new);
+    // Single video attachment (mutually exclusive with images per
+    // the lexicon — bsky records carry one media slot). Holds raw
+    // bytes + mime + an editable alt-text field. Empty until the
+    // user drops or picks a video file.
+    let mut video_attachment = use_signal::<Option<VideoAttachment>>(|| None);
     let mut posting = use_signal(|| false);
     let mut error = use_signal(|| None::<String>);
     // Extra posts that get chained as replies to the root after
@@ -169,9 +185,10 @@ pub fn ComposeSheet() -> Element {
     let any_failed = attachments_snap
         .iter()
         .any(|a| matches!(a.state, AttachmentState::Failed(_)));
-    // A post is "empty" only if there's no text AND no attached image.
-    // (Image-only posts are valid on bsky.)
-    let empty = text.read().trim().is_empty() && !has_attachments;
+    let has_video = video_attachment.read().is_some();
+    // A post is "empty" only if there's no text AND no attached
+    // media. Image-only / video-only posts are valid on bsky.
+    let empty = text.read().trim().is_empty() && !has_attachments && !has_video;
     let at_image_cap = attachments_snap.len() >= MAX_IMAGES;
 
     // Submit flow (shared by button click + ⌘↵ keyboard shortcut).
@@ -187,6 +204,7 @@ pub fn ComposeSheet() -> Element {
         }
         let body = text.read().clone();
         let sess = session.read().clone();
+        let video_snap = video_attachment.read().clone();
         let quote = ctx.read().quote_to.as_ref().map(|q| StrongRef {
             uri: q.uri.clone(),
             cid: q.cid.clone(),
@@ -226,6 +244,7 @@ pub fn ComposeSheet() -> Element {
                 text.set(String::new());
                 let _ = crate::persistence::save_draft("");
                 attachments.set(Vec::new());
+                video_attachment.set(None);
                 let mut w = ctx.write();
                 w.reply_to = None;
             w.quote_to = None;
@@ -261,6 +280,26 @@ pub fn ComposeSheet() -> Element {
                 });
             }
 
+            // Upload the video blob if present. Mutually exclusive
+            // with images per the lexicon — if both were somehow
+            // attached we'd hit a 400 on the embed step.
+            let video_post: Option<PostVideo> = if let Some(v) = video_snap {
+                match client.upload_blob(v.bytes, &v.mime).await {
+                    Ok(blob) => Some(PostVideo {
+                        video: blob,
+                        alt: v.alt,
+                        aspect_ratio: None,
+                    }),
+                    Err(e) => {
+                        posting.set(false);
+                        error.set(Some(format!("Video upload failed: {e}")));
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
+
             // Detect @mentions / links / #hashtags + resolve handles
             // to DIDs before posting. Failure here (network blip on
             // resolveHandle) silently degrades to a plain-text post
@@ -272,7 +311,7 @@ pub fn ComposeSheet() -> Element {
                 .await
                 .unwrap_or_default();
             let result = client
-                .create_post_full(&body, reply.as_ref(), &images, &facets, quote.as_ref())
+                .create_post_full(&body, reply.as_ref(), &images, &facets, quote.as_ref(), video_post.as_ref())
                 .await;
             let root_record = match result {
                 Ok(rec) => rec,
@@ -310,7 +349,7 @@ pub fn ComposeSheet() -> Element {
                     .await
                     .unwrap_or_default();
                 match client
-                    .create_post_full(chunk, Some(&reply_chain), &[], &chunk_facets, None)
+                    .create_post_full(chunk, Some(&reply_chain), &[], &chunk_facets, None, None)
                     .await
                 {
                     Ok(rec) => {
@@ -333,10 +372,12 @@ pub fn ComposeSheet() -> Element {
             } else {
                 text.set(String::new());
                 thread_extras.set(Vec::new());
+                video_attachment.set(None);
                 // Drop the persisted draft now that the post is
                 // live — nothing left to recover.
                 let _ = crate::persistence::save_draft("");
                 attachments.set(Vec::new());
+                video_attachment.set(None);
                 let mut w = ctx.write();
                 w.reply_to = None;
                 w.quote_to = None;
@@ -445,7 +486,7 @@ pub fn ComposeSheet() -> Element {
                 SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
             for name in names.into_iter().take(slots) {
                 // file_engine.files() returns paths on desktop;
-                // skip anything that isn't a readable image file.
+                // skip anything that isn't a readable file.
                 let path = PathBuf::from(&name);
                 if !path.is_file() {
                     continue;
@@ -455,6 +496,35 @@ pub fn ComposeSheet() -> Element {
                     .and_then(|s| s.to_str())
                     .map(|s| s.to_ascii_lowercase())
                     .unwrap_or_default();
+                // Video: replaces any prior video attachment (only
+                // one video per post per the lexicon). Loaded fully
+                // into memory — bsky caps video at ~50MB which is
+                // fine to hold; bigger files will OOM the renderer
+                // before we even hit the upload step (caller's
+                // responsibility to crop / compress).
+                if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm") {
+                    let bytes = match std::fs::read(&path) {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    };
+                    let mime = match ext.as_str() {
+                        "mp4" | "m4v" => "video/mp4",
+                        "mov" => "video/quicktime",
+                        "webm" => "video/webm",
+                        _ => "application/octet-stream",
+                    }
+                    .to_string();
+                    video_attachment.set(Some(VideoAttachment {
+                        source_path: path,
+                        bytes,
+                        mime,
+                        alt: String::new(),
+                    }));
+                    // One video per post — don't process more dropped
+                    // files; if the user dropped an image alongside
+                    // we'd otherwise mix media types.
+                    break;
+                }
                 if !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic") {
                     continue;
                 }
@@ -532,6 +602,37 @@ pub fn ComposeSheet() -> Element {
                 }
                 if has_attachments {
                     AttachmentGrid { attachments }
+                }
+                if let Some(v) = video_attachment.read().clone() {
+                    div { class: "compose__video-tile",
+                        div { class: "compose__video-row",
+                            span { class: "compose__video-icon", icons::Play { size: icons::Size::Md } }
+                            div { class: "compose__video-meta",
+                                span { class: "compose__video-name",
+                                    "{v.source_path.file_name().and_then(|s| s.to_str()).unwrap_or(\"video\")}"
+                                }
+                                span { class: "compose__video-size",
+                                    "{(v.bytes.len() as f64 / 1_048_576.0).round()} MB · {v.mime}"
+                                }
+                            }
+                            button { class: "compose__video-remove",
+                                title: "Remove video",
+                                onclick: move |_| video_attachment.set(None),
+                                icons::X { size: icons::Size::Sm }
+                            }
+                        }
+                        // Alt text editor for accessibility.
+                        textarea {
+                            class: "input compose__video-alt",
+                            placeholder: "Describe the video for screen readers (optional)",
+                            value: "{v.alt}",
+                            oninput: move |e| {
+                                if let Some(slot) = video_attachment.write().as_mut() {
+                                    slot.alt = e.value();
+                                }
+                            },
+                        }
+                    }
                 }
                 // Thread extras — only shown when at least one extra
                 // has been added. Each is a smaller textarea with a
