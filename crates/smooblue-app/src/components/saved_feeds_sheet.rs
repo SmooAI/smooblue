@@ -43,10 +43,14 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let cols = use_context::<Signal<Vec<ColumnSpec>>>();
 
-    let key = *open.read();
+    // Reactive: read `open` *inside* the closure so the resource
+    // re-runs when the sheet opens. Capturing `*open.read()` at the
+    // outer render freezes the value to whatever it was on first
+    // mount (false), then the cached Err("closed") leaks into the
+    // UI as 'Couldn't load: closed' after the user opens the sheet.
     let data = use_resource(move || {
         let session_sig = session;
-        let is_open = key;
+        let is_open = *open.read();
         async move {
             if !is_open {
                 return Err::<Loaded, String>("closed".into());
@@ -294,8 +298,14 @@ pub fn SavedFeedsSheet(open: Signal<bool>) -> Element {
                                 }
                             }
                         },
-                        Some(Err(e)) => rsx! {
-                            div { class: "saved-feeds__error", "Couldn't load: {e}" }
+                        Some(Err(e)) => {
+                            // Stale "closed" Err from the resource's
+                            // first run is not a user-visible error.
+                            if e == "closed" {
+                                rsx! { div { class: "saved-feeds__loading", "Loading…" } }
+                            } else {
+                                rsx! { div { class: "saved-feeds__error", "Couldn't load: {e}" } }
+                            }
                         },
                         None => rsx! {
                             div { class: "saved-feeds__loading", "Loading…" }
