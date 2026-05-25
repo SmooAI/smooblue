@@ -814,6 +814,28 @@ impl AtClient {
         Ok(())
     }
 
+    /// List the signed-in user's muted actors via
+    /// `app.bsky.graph.getMutes`. Returns the first page (limit 100).
+    /// The settings UI doesn't paginate yet — a single page is plenty
+    /// for any reasonable mute list (the largest in practice is
+    /// dozens, not thousands).
+    pub async fn get_mutes(&self) -> Result<crate::feed::MutedActorsResponse, AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.graph.getMutes?limit=100")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.get_json(&url).await
+    }
+
+    /// List the signed-in user's blocked actors via
+    /// `app.bsky.graph.getBlocks`. Same single-page approach as
+    /// [`Self::get_mutes`].
+    pub async fn get_blocks(&self) -> Result<crate::feed::BlockedActorsResponse, AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.graph.getBlocks?limit=100")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        self.get_json(&url).await
+    }
+
     /// Mute an actor (`app.bsky.graph.muteActor`). Procedure call,
     /// not a createRecord — bsky tracks mutes server-side as a
     /// preference, so there's no record to later delete. Use

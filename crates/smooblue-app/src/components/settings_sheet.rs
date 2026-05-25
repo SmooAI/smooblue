@@ -82,6 +82,12 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                         ThemePicker {}
                     }
 
+                    // ── Moderation: mutes + blocks ─────────────────
+                    section { class: "settings__section",
+                        h3 { class: "settings__section-title", "Mute & block lists" }
+                        ModerationLists {}
+                    }
+
                     // ── About ──────────────────────────────────────
                     section { class: "settings__section",
                         h3 { class: "settings__section-title", "About" }
@@ -111,6 +117,163 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Mute / block management inside Settings. Loads
+/// `app.bsky.graph.getMutes` + `getBlocks` lazily (only when this
+/// section paints) so opening Settings stays snappy when the user
+/// just wants to flip the theme. Each row has an Unmute / Unblock
+/// button that calls the inverse XRPC procedure and optimistically
+/// removes the row.
+#[component]
+fn ModerationLists() -> Element {
+    use crate::auth_refresh::fresh_client;
+
+    let session = use_context::<Signal<Option<Session>>>();
+
+    let mutes = use_resource(move || {
+        let session_sig = session;
+        async move {
+            let client = fresh_client(session_sig).await.ok_or("not signed in")?;
+            client.get_mutes().await.map_err(|e| e.to_string())
+        }
+    });
+    let blocks = use_resource(move || {
+        let session_sig = session;
+        async move {
+            let client = fresh_client(session_sig).await.ok_or("not signed in")?;
+            client.get_blocks().await.map_err(|e| e.to_string())
+        }
+    });
+
+    let mut muted_list = use_signal(|| Vec::<smooblue_atproto::feed::ActorProfile>::new());
+    let mut blocked_list = use_signal(|| Vec::<smooblue_atproto::feed::ActorProfile>::new());
+
+    use_effect(move || {
+        if let Some(Ok(r)) = &*mutes.read_unchecked() {
+            muted_list.set(r.mutes.clone());
+        }
+    });
+    use_effect(move || {
+        if let Some(Ok(r)) = &*blocks.read_unchecked() {
+            blocked_list.set(r.blocks.clone());
+        }
+    });
+
+    rsx! {
+        // Muted
+        div { class: "moderation__group",
+            h4 { class: "moderation__group-title", "Muted ({muted_list.read().len()})" }
+            if muted_list.read().is_empty() {
+                p { class: "moderation__empty", "No muted accounts." }
+            } else {
+                for actor in muted_list.read().clone().into_iter() {
+                    ModerationRow {
+                        key: "m-{actor.did}",
+                        actor: actor.clone(),
+                        kind: ModerationKind::Mute,
+                        on_remove: move |did: String| {
+                            muted_list.write().retain(|a| a.did != did);
+                        },
+                    }
+                }
+            }
+        }
+        // Blocked
+        div { class: "moderation__group",
+            h4 { class: "moderation__group-title", "Blocked ({blocked_list.read().len()})" }
+            if blocked_list.read().is_empty() {
+                p { class: "moderation__empty", "No blocked accounts." }
+            } else {
+                for actor in blocked_list.read().clone().into_iter() {
+                    ModerationRow {
+                        key: "b-{actor.did}",
+                        actor: actor.clone(),
+                        kind: ModerationKind::Block,
+                        on_remove: move |did: String| {
+                            blocked_list.write().retain(|a| a.did != did);
+                        },
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Which side of the mute/block divide a row is on. Determines the
+/// undo XRPC call (unmuteActor vs deleteRecord of the block).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModerationKind { Mute, Block }
+
+#[component]
+fn ModerationRow(
+    actor: smooblue_atproto::feed::ActorProfile,
+    kind: ModerationKind,
+    on_remove: EventHandler<String>,
+) -> Element {
+    use crate::auth_refresh::fresh_client;
+    let session = use_context::<Signal<Option<Session>>>();
+    let mut pending = use_signal(|| false);
+
+    let did = actor.did.clone();
+    let handle = actor.handle.clone();
+    let name = actor.display_name.clone().unwrap_or_else(|| handle.clone());
+    let avatar = actor.avatar.clone();
+    let block_uri = actor
+        .viewer
+        .as_ref()
+        .and_then(|v| v.blocking.clone());
+
+    let remove = move |_| {
+        if *pending.read() {
+            return;
+        }
+        pending.set(true);
+        let did_clone = did.clone();
+        let block_uri_clone = block_uri.clone();
+        spawn(async move {
+            let Some(client) = fresh_client(session).await else {
+                pending.set(false);
+                return;
+            };
+            let result = match kind {
+                ModerationKind::Mute => client.unmute_actor(&did_clone).await,
+                ModerationKind::Block => match block_uri_clone {
+                    Some(uri) => client.delete_record(&uri).await,
+                    None => Ok(()), // No block record to delete — already removed.
+                },
+            };
+            pending.set(false);
+            if result.is_ok() {
+                on_remove.call(did_clone);
+            }
+        });
+    };
+
+    let action_label = match kind {
+        ModerationKind::Mute => "Unmute",
+        ModerationKind::Block => "Unblock",
+    };
+
+    rsx! {
+        div { class: "moderation__row",
+            if let Some(url) = &avatar {
+                img { class: "moderation__avatar", src: "{url}",
+                    loading: "lazy", decoding: "async" }
+            } else {
+                div { class: "moderation__avatar moderation__avatar--blank" }
+            }
+            div { class: "moderation__id",
+                span { class: "moderation__name", "{name}" }
+                span { class: "moderation__handle", "@{handle}" }
+            }
+            button { class: "btn btn--ghost moderation__remove",
+                disabled: *pending.read(),
+                onclick: remove,
+                if *pending.read() { "…" } else { "{action_label}" }
             }
         }
     }

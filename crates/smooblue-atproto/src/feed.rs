@@ -442,6 +442,25 @@ pub struct SuggestionsResponse {
     pub cursor: Option<String>,
 }
 
+/// Single-page response shape for `app.bsky.graph.getMutes`. Same
+/// shape as Suggestions — a vec of profile views plus a cursor.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MutedActorsResponse {
+    #[serde(default)]
+    pub mutes: Vec<ActorProfile>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// Single-page response shape for `app.bsky.graph.getBlocks`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BlockedActorsResponse {
+    #[serde(default)]
+    pub blocks: Vec<ActorProfile>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
 /// Paginated list of actors who liked a post — backs the "tap heart
 /// count → see who liked" modal. The `Like` view is the like *record*
 /// (with createdAt etc.), but the only field we actually render is

@@ -1472,6 +1472,79 @@ a {
 }
 
 /* ===========================================================
+ *  Moderation lists (mutes + blocks in Settings)
+ * =========================================================== */
+.moderation__group {
+    margin-top: 10px;
+}
+
+.moderation__group-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted-foreground);
+    margin: 0 0 6px 2px;
+}
+
+.moderation__empty {
+    margin: 4px 2px 12px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    font-style: italic;
+}
+
+.moderation__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.moderation__row:last-child {
+    border-bottom: 0;
+}
+
+.moderation__avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.moderation__avatar--blank {
+    background: var(--muted);
+}
+
+.moderation__id {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.moderation__name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.moderation__handle {
+    font-size: 11px;
+    color: var(--muted-foreground);
+}
+
+.moderation__remove {
+    flex-shrink: 0;
+    min-width: 80px;
+}
+
+/* ===========================================================
  *  Report sheet — moderation flag dialog
  * =========================================================== */
 .report__sheet {
