@@ -110,7 +110,11 @@ a {
  *  Single column
  * =========================================================== */
 .deck-column {
-    flex: 0 0 350px;
+    /* 320 px feels right after the rail-style PostCard revert:
+     * narrow enough to fit more columns side-by-side, wide enough
+     * that text doesn't wrap awkwardly next to the 36 px avatar
+     * rail. Was 350 originally. */
+    flex: 0 0 320px;
     display: flex;
     flex-direction: column;
     background: var(--card);
