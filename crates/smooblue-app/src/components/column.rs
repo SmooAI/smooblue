@@ -726,6 +726,7 @@ mod tests {
                 record: PostRecord {
                     text: String::new(),
                     created_at: None,
+                    facets: None,
                 },
                 embed: None,
                 indexed_at: None,

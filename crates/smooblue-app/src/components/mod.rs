@@ -9,6 +9,7 @@ pub mod post;
 pub mod profile;
 pub mod profile_edit_sheet;
 pub mod report_sheet;
+pub mod rich_text;
 pub mod saved_feeds_sheet;
 pub mod search_sheet;
 pub mod settings_sheet;

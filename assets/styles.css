@@ -566,6 +566,32 @@ a {
     color: var(--color-smooai-orange);
 }
 
+/* Inline rich-text segments (mentions / links / tags) inside post
+ * body text. Styled as buttons but they read as links — no chrome,
+ * brand-blue color, underline on hover. */
+.post__text-link {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    color: var(--color-smooai-blue-300);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.post__text-link:hover {
+    text-decoration: underline;
+}
+
+.post__text-mention {
+    font-weight: 500;
+}
+
+.post__text-tag {
+    color: var(--color-smooai-orange);
+}
+
 .embed__quote--missing {
     color: var(--muted-foreground);
     font-style: italic;

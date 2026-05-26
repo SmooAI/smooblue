@@ -279,10 +279,145 @@ pub struct PostRecord {
     pub text: String,
     #[serde(rename = "createdAt", default)]
     pub created_at: Option<String>,
+    /// Raw `facets` array from the lexicon — `[{ index: { byteStart,
+    /// byteEnd }, features: [{ $type: "...#mention" | "#link" | "#tag",
+    /// did | uri | tag }] }, ...]`. Kept as a Value so a slightly-off
+    /// shape from one weird post doesn't blow up the whole feed
+    /// (same defensive pattern as FeedItem.reply / .reason). Parse
+    /// with [`PostRecord::resolved_facets`] for rendering.
+    #[serde(default)]
+    pub facets: Option<serde_json::Value>,
 }
 
+/// One styled segment of post text — the renderer walks an ordered
+/// list of these and either emits a plain `<span>` or a clickable
+/// `<button>` per segment.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FacetSegment {
+    /// Plain unstyled text.
+    Text(String),
+    /// `@handle.example` — click opens the actor's profile (we ship
+    /// the resolved DID along so the click site doesn't have to
+    /// resolveHandle again).
+    Mention { text: String, did: String },
+    /// `https://…` — click opens in the system browser via the
+    /// safe_open allowlist.
+    Link { text: String, uri: String },
+    /// `#hashtag` — click opens a search column for the tag.
+    Tag { text: String, tag: String },
+}
+
+impl PostRecord {
+    /// Walk `text` byte-by-byte, slicing it into [`FacetSegment`]s
+    /// at the byteStart / byteEnd offsets the lexicon ships. Out-of-
+    /// bound or overlapping facets fall through to plain text — we
+    /// never panic on a bad facet.
+    pub fn resolved_facets(&self) -> Vec<FacetSegment> {
+        let bytes = self.text.as_bytes();
+        let Some(arr) = self.facets.as_ref().and_then(|v| v.as_array()) else {
+            return vec![FacetSegment::Text(self.text.clone())];
+        };
+        // Collect (start, end, kind) tuples, ignoring malformed ones.
+        let mut ranges: Vec<(usize, usize, FacetKind)> = Vec::new();
+        for f in arr {
+            let Some(idx) = f.get("index") else { continue };
+            let Some(start) = idx.get("byteStart").and_then(|v| v.as_u64()) else {
+                continue;
+            };
+            let Some(end) = idx.get("byteEnd").and_then(|v| v.as_u64()) else {
+                continue;
+            };
+            let (start, end) = (start as usize, end as usize);
+            if end > bytes.len() || start >= end {
+                continue;
+            }
+            // Multiple features per facet is rare but legal — pick the
+            // first one we know how to render.
+            let Some(features) = f.get("features").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let mut kind = None;
+            for feat in features {
+                let ty = feat.get("$type").and_then(|v| v.as_str()).unwrap_or("");
+                match ty {
+                    "app.bsky.richtext.facet#mention" => {
+                        if let Some(d) = feat.get("did").and_then(|v| v.as_str()) {
+                            kind = Some(FacetKind::Mention(d.to_string()));
+                            break;
+                        }
+                    }
+                    "app.bsky.richtext.facet#link" => {
+                        if let Some(u) = feat.get("uri").and_then(|v| v.as_str()) {
+                            kind = Some(FacetKind::Link(u.to_string()));
+                            break;
+                        }
+                    }
+                    "app.bsky.richtext.facet#tag" => {
+                        if let Some(t) = feat.get("tag").and_then(|v| v.as_str()) {
+                            kind = Some(FacetKind::Tag(t.to_string()));
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(k) = kind {
+                ranges.push((start, end, k));
+            }
+        }
+        // Sort by start; drop ranges that overlap a previous one.
+        ranges.sort_by_key(|(s, _, _)| *s);
+        let mut deduped: Vec<(usize, usize, FacetKind)> = Vec::new();
+        for (s, e, k) in ranges {
+            if deduped.last().map(|(_, pe, _)| *pe).unwrap_or(0) > s {
+                continue;
+            }
+            deduped.push((s, e, k));
+        }
+        // Walk byte ranges + slice the text by valid UTF-8 char
+        // boundaries. If a facet's byte offsets don't align to char
+        // boundaries (shouldn't happen but lexicon doesn't validate)
+        // we drop the facet rather than panicking.
+        let mut out: Vec<FacetSegment> = Vec::new();
+        let mut cursor = 0;
+        for (s, e, kind) in deduped {
+            if !self.text.is_char_boundary(s) || !self.text.is_char_boundary(e) {
+                continue;
+            }
+            if s > cursor {
+                out.push(FacetSegment::Text(self.text[cursor..s].to_string()));
+            }
+            let chunk = self.text[s..e].to_string();
+            out.push(match kind {
+                FacetKind::Mention(did) => FacetSegment::Mention { text: chunk, did },
+                FacetKind::Link(uri) => FacetSegment::Link { text: chunk, uri },
+                FacetKind::Tag(tag) => FacetSegment::Tag { text: chunk, tag },
+            });
+            cursor = e;
+        }
+        if cursor < bytes.len() && self.text.is_char_boundary(cursor) {
+            out.push(FacetSegment::Text(self.text[cursor..].to_string()));
+        }
+        if out.is_empty() {
+            out.push(FacetSegment::Text(self.text.clone()));
+        }
+        out
+    }
+}
+
+enum FacetKind {
+    Mention(String),
+    Link(String),
+    Tag(String),
+}
+
+/// Outer untagged-enum wrapper so an embed whose `$type` we don't
+/// model decodes to `Unknown(Value)` instead of failing the whole
+/// post decode. The size delta between variants is intentional —
+/// `Known` carries the real thing.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)]
 pub enum Embed {
     Known(EmbedKind),
     Unknown(serde_json::Value),
@@ -1213,5 +1348,161 @@ mod tests {
         .unwrap();
         assert!(item.reposter_display().is_none());
         assert!(item.reposter_did().is_none());
+    }
+
+    // ── PostRecord.resolved_facets ─────────────────────────────────
+
+    fn rec(text: &str, facets: serde_json::Value) -> PostRecord {
+        PostRecord {
+            text: text.into(),
+            created_at: None,
+            facets: Some(facets),
+        }
+    }
+
+    #[test]
+    fn facets_none_returns_single_text_segment() {
+        let r = PostRecord {
+            text: "hello world".into(),
+            created_at: None,
+            facets: None,
+        };
+        let s = r.resolved_facets();
+        assert_eq!(s.len(), 1);
+        matches!(&s[0], FacetSegment::Text(t) if t == "hello world");
+    }
+
+    #[test]
+    fn mention_facet_resolves_to_did() {
+        // "hi @alice." — bytes 3..9 are "@alice".
+        let r = rec(
+            "hi @alice.",
+            serde_json::json!([{
+                "index": { "byteStart": 3, "byteEnd": 9 },
+                "features": [{
+                    "$type": "app.bsky.richtext.facet#mention",
+                    "did": "did:plc:alice"
+                }]
+            }]),
+        );
+        let s = r.resolved_facets();
+        assert_eq!(s.len(), 3);
+        assert!(matches!(&s[0], FacetSegment::Text(t) if t == "hi "));
+        assert!(
+            matches!(&s[1], FacetSegment::Mention { text, did } if text == "@alice" && did == "did:plc:alice")
+        );
+        assert!(matches!(&s[2], FacetSegment::Text(t) if t == "."));
+    }
+
+    #[test]
+    fn link_facet_resolves_to_uri() {
+        let r = rec(
+            "go here",
+            serde_json::json!([{
+                "index": { "byteStart": 3, "byteEnd": 7 },
+                "features": [{
+                    "$type": "app.bsky.richtext.facet#link",
+                    "uri": "https://example.com/x"
+                }]
+            }]),
+        );
+        let s = r.resolved_facets();
+        assert!(s.iter().any(|seg| matches!(seg, FacetSegment::Link { text, uri } if text == "here" && uri == "https://example.com/x")));
+    }
+
+    #[test]
+    fn tag_facet_strips_hash_from_text() {
+        let r = rec(
+            "love #rust today",
+            serde_json::json!([{
+                "index": { "byteStart": 5, "byteEnd": 10 },
+                "features": [{ "$type": "app.bsky.richtext.facet#tag", "tag": "rust" }]
+            }]),
+        );
+        let s = r.resolved_facets();
+        // The rendered segment text includes the hash (we slice
+        // straight from the post body); the tag value sans hash is
+        // what's used for searching.
+        assert!(s.iter().any(
+            |seg| matches!(seg, FacetSegment::Tag { text, tag } if text == "#rust" && tag == "rust")
+        ));
+    }
+
+    #[test]
+    fn out_of_bounds_facets_are_dropped() {
+        // byteEnd past end of text — drop this facet, fall through
+        // to plain text rendering.
+        let r = rec(
+            "short",
+            serde_json::json!([{
+                "index": { "byteStart": 0, "byteEnd": 999 },
+                "features": [{
+                    "$type": "app.bsky.richtext.facet#mention",
+                    "did": "did:plc:nope"
+                }]
+            }]),
+        );
+        let s = r.resolved_facets();
+        assert_eq!(s.len(), 1);
+        assert!(matches!(&s[0], FacetSegment::Text(t) if t == "short"));
+    }
+
+    #[test]
+    fn malformed_facets_dont_panic() {
+        let r = rec(
+            "hello",
+            serde_json::json!([
+                { "weird": "no index or features" },
+                { "index": { "byteStart": "not-a-number", "byteEnd": 5 } },
+                { "index": { "byteStart": 0, "byteEnd": 3 } },  // no features
+            ]),
+        );
+        let s = r.resolved_facets();
+        // Everything malformed got dropped — full text falls through.
+        assert_eq!(s.len(), 1);
+    }
+
+    #[test]
+    fn overlapping_facets_keep_first() {
+        // Two facets covering overlapping ranges — first one wins,
+        // second is dropped. Prevents the renderer from producing
+        // nested / corrupt segments.
+        let r = rec(
+            "hello world bsky",
+            serde_json::json!([
+                {
+                    "index": { "byteStart": 0, "byteEnd": 11 },
+                    "features": [{ "$type": "app.bsky.richtext.facet#tag", "tag": "hw" }]
+                },
+                {
+                    "index": { "byteStart": 6, "byteEnd": 11 },
+                    "features": [{ "$type": "app.bsky.richtext.facet#tag", "tag": "world" }]
+                }
+            ]),
+        );
+        let s = r.resolved_facets();
+        // Should be: tag("hello world") + text(" bsky"). NOT three
+        // overlapping segments.
+        assert_eq!(s.len(), 2);
+        assert!(matches!(&s[0], FacetSegment::Tag { text, .. } if text == "hello world"));
+    }
+
+    #[test]
+    fn unicode_text_with_emoji_handles_byte_offsets() {
+        // "👋 @alice" — the wave is 4 bytes, " @alice" is bytes 5..11.
+        let r = rec(
+            "👋 @alice",
+            serde_json::json!([{
+                "index": { "byteStart": 5, "byteEnd": 11 },
+                "features": [{
+                    "$type": "app.bsky.richtext.facet#mention",
+                    "did": "did:plc:alice"
+                }]
+            }]),
+        );
+        let s = r.resolved_facets();
+        assert!(s
+            .iter()
+            .any(|seg| matches!(seg, FacetSegment::Mention { text, .. } if text == "@alice")));
     }
 }

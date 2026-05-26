@@ -23,11 +23,11 @@ pub use client::{
 pub use error::AtError;
 pub use feed::{
     ActorProfile, ActorViewerState, Embed, EmbedAspectRatio, EmbedExternal, EmbedImage, EmbedKind,
-    EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FeedGeneratorView, FeedGeneratorsResponse,
-    FeedItem, FeedResponse, GetPostThreadResponse, KnownFollowersResponse, Label, LikeView,
-    LikesResponse, ListView, ListsResponse, PostAuthor, PostRecord, PostView, PostViewerState,
-    PreferencesResponse, QuotesResponse, RepostedByResponse, SavedFeedItem, SuggestionsResponse,
-    ThreadView,
+    EmbedMedia, EmbedRecordView, EmbedRecordWrapper, FacetSegment, FeedGeneratorView,
+    FeedGeneratorsResponse, FeedItem, FeedResponse, GetPostThreadResponse, KnownFollowersResponse,
+    Label, LikeView, LikesResponse, ListView, ListsResponse, PostAuthor, PostRecord, PostView,
+    PostViewerState, PreferencesResponse, QuotesResponse, RepostedByResponse, SavedFeedItem,
+    SuggestionsResponse, ThreadView,
 };
 pub use notifications::{
     group_notifications, Notification, NotificationGroup, NotificationsResponse,

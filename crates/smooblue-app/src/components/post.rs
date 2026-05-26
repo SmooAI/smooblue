@@ -397,7 +397,11 @@ pub fn PostCard(
                             span { class: "post__warning-action", "Tap to show" }
                         }
                     } else if !text.is_empty() {
-                        p { class: "post__text", "{text}" }
+                        p { class: "post__text",
+                            crate::components::rich_text::RichText {
+                                record: post.record.clone(),
+                            }
+                        }
                     }
                 }
                 if !show_warning {

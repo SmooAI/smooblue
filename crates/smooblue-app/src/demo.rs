@@ -295,6 +295,7 @@ fn curated_home_feed() -> Vec<FeedItem> {
                     value: PostRecord {
                         text: "The thing nobody tells you about open-source desktop clients is that the build pipeline IS the product. Get cross-compilation + auto-update + signing right and you have a chance; get any one wrong and nobody installs.".to_string(),
                         created_at: Some(m(240)),
+                        facets: None,
                     },
                     indexed_at: Some(m(240)),
                     embeds: Vec::new(),
@@ -588,6 +589,7 @@ fn synth_post(handle: &str, display: &str, text: &str, ts: &str) -> PostView {
         record: smooblue_atproto::PostRecord {
             text: text.to_string(),
             created_at: Some(ts.to_string()),
+            facets: None,
         },
         embed: None,
         reply_count: 0,
@@ -667,6 +669,7 @@ fn item(
             record: PostRecord {
                 text: text.to_string(),
                 created_at: Some(ts.to_string()),
+                facets: None,
             },
             embed,
             indexed_at: Some(ts.to_string()),
@@ -707,6 +710,7 @@ fn item_with_embed(
             record: PostRecord {
                 text: text.to_string(),
                 created_at: Some(ts.to_string()),
+                facets: None,
             },
             embed: Some(embed),
             indexed_at: Some(ts.to_string()),
