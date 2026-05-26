@@ -344,74 +344,74 @@ pub fn PostCard(
                     }
                 }
             }
-            // Head row: avatar + identity stack + time. Avatar lives
-            // here (not as a separate column) so the body below can
-            // span the full card width and reclaim the ~50px the old
-            // layout reserved for avatar-vertical-rail dead space.
-            div { class: "post__head",
-                div { class: "post__avatar post__avatar--clickable",
-                    onclick: open_profile,
-                    title: "Open profile column",
-                    if let Some(url) = avatar {
-                        img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
+            div { class: "post__avatar post__avatar--clickable",
+                onclick: open_profile,
+                title: "Open profile column",
+                if let Some(url) = avatar {
+                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
+                }
+            }
+            div { class: "post__body",
+                div { class: "post__body--clickable",
+                    onclick: open_thread,
+                    title: "Open thread",
+                    div { class: "post__head",
+                        // Name + handle stacked vertically so long
+                        // display names ("Doctor Charlton Cussans PhD")
+                        // don't push the handle off-screen or wrap into
+                        // a 4-line word salad. Both lines truncate with
+                        // ellipsis if they exceed the column width.
+                        div { class: "post__identity",
+                            span { class: "post__name", "{name}" }
+                            span { class: "post__handle", "@{handle}" }
+                        }
+                        // Timestamp is a permalink to bsky.app — opens
+                        // in the system default browser.
+                        button {
+                            class: "post__time post__time--link",
+                            title: "Open on bsky.app",
+                            onclick: {
+                                let uri = post_uri.clone();
+                                let handle = post.author.handle.clone();
+                                move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    if let Some(rkey) = uri.rsplit('/').next() {
+                                        let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
+                                        let _ = crate::safe_open::open_in_browser(&url);
+                                    }
+                                }
+                            },
+                            icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
+                        }
                     }
-                }
-                div { class: "post__identity",
-                    span { class: "post__name", "{name}" }
-                    span { class: "post__handle", "@{handle}" }
-                }
-                // Timestamp is a permalink to bsky.app — opens
-                // in the system default browser.
-                button {
-                    class: "post__time post__time--link",
-                    title: "Open on bsky.app",
-                    onclick: {
-                        let uri = post_uri.clone();
-                        let handle = post.author.handle.clone();
-                        move |e: MouseEvent| {
-                            e.stop_propagation();
-                            if let Some(rkey) = uri.rsplit('/').next() {
-                                let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
-                                let _ = crate::safe_open::open_in_browser(&url);
+                    if show_warning {
+                        // Interstitial replaces the body until user
+                        // taps to reveal. Per-card state so revealing
+                        // one labeled post doesn't reveal others.
+                        div { class: "post__warning",
+                            onclick: move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                content_revealed.set(true);
+                            },
+                            span { class: "post__warning-label", "{warning_summary}" }
+                            span { class: "post__warning-action", "Tap to show" }
+                        }
+                    } else if !text.is_empty() {
+                        p { class: "post__text",
+                            crate::components::rich_text::RichText {
+                                record: post.record.clone(),
                             }
                         }
-                    },
-                    icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
-                }
-            }
-            // Body — full width, click anywhere in the body block
-            // opens the thread.
-            div { class: "post__body-block",
-                onclick: open_thread,
-                title: "Open thread",
-                if show_warning {
-                    // Interstitial replaces the body until user
-                    // taps to reveal. Per-card state so revealing
-                    // one labeled post doesn't reveal others.
-                    div { class: "post__warning",
-                        onclick: move |evt: MouseEvent| {
-                            evt.stop_propagation();
-                            content_revealed.set(true);
-                        },
-                        span { class: "post__warning-label", "{warning_summary}" }
-                        span { class: "post__warning-action", "Tap to show" }
                     }
-                } else if !text.is_empty() {
-                    p { class: "post__text",
-                        crate::components::rich_text::RichText {
-                            record: post.record.clone(),
+                }
+                if !show_warning {
+                    if let Some(e) = embed {
+                        div { class: "post__embed",
+                            EmbedView { embed: e }
                         }
                     }
                 }
-            }
-            if !show_warning {
-                if let Some(e) = embed {
-                    div { class: "post__embed",
-                        EmbedView { embed: e }
-                    }
-                }
-            }
-            div { class: "post__actions",
+                div { class: "post__actions",
                     button { class: "post__action post__action--clickable",
                         onclick: move |evt: MouseEvent| { evt.stop_propagation(); open_reply(evt); },
                         title: "Reply",
@@ -501,6 +501,7 @@ pub fn PostCard(
                         icons::MoreHorizontal { size: icons::Size::Sm }
                     }
                 }
+            }
         }
     }
 }

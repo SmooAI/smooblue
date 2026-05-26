@@ -282,15 +282,14 @@ a {
  *  Post card
  * =========================================================== */
 .post {
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     display: flex;
-    /* Column-direction: head row (avatar + identity + time) sits on
-     * top, body text + embed + actions span the full card width
-     * below — reclaims the ~50px the old layout reserved for the
-     * empty rail next to the avatar. */
-    flex-direction: column;
-    gap: 6px;
+    /* flex-wrap so the optional .post__context chip (flex-basis: 100%)
+     * forces a line break and the avatar+body row flows below it
+     * instead of being squeezed into the same line. */
+    flex-wrap: wrap;
+    gap: 10px;
     transition: background 100ms;
 }
 
@@ -324,19 +323,16 @@ a {
     box-shadow: 0 0 0 2px var(--color-smooai-orange);
 }
 
-/* Legacy .post__body wrapper — no longer rendered after the
- * head-row + full-width body refactor. */
+.post__body {
+    flex: 1;
+    min-width: 0;
+}
 
 .post__head {
     display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-/* The body-block holds text + warning interstitial. Spans full
- * card width (no avatar-rail to dodge anymore). */
-.post__body-block {
-    cursor: pointer;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 4px;
 }
 
 /* Name + handle stack vertically; identity block flex-grows so the
@@ -2027,16 +2023,16 @@ a {
  * the "force a new row in a flex container" trick so the chip sits
  * above the avatar+body row without needing to restructure. */
 .post__context {
-    /* Parent is now flex-column so the chip naturally sits on its
-     * own row above the head — no flex-basis trick needed. */
+    /* Force a wrap so this chip sits on its own row above the
+     * avatar+body. flex-basis: 100% + flex-grow: 0 + flex-shrink: 0
+     * keeps it from being squashed by the row below. */
+    flex: 0 0 100%;
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     font-size: 12px;
     color: var(--muted-foreground);
-    /* No left padding now that the body spans full card width —
-     * chip aligns with the rest of the card content. */
-    padding: 0;
+    padding: 0 0 0 38px;
     margin: -2px 0 -4px;
     line-height: 1.2;
 }
@@ -3040,7 +3036,9 @@ a {
     user-select: none;
 }
 
-/* Legacy .post__body--clickable — replaced by .post__body-block. */
+.post__body--clickable {
+    cursor: pointer;
+}
 
 /* ===========================================================
  *  Profile sheet — modal author detail view
