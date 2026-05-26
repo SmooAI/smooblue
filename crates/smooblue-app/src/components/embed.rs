@@ -182,12 +182,15 @@ fn LinkCard(ext: EmbedExternal) -> Element {
 
 /// Quoted post — mini card with the quoted author + text. Nested
 /// image embeds inside the quoted post render shallowly (no quote
-/// chains).
+/// chains). The card is clickable: opens the **quoted** post's
+/// thread (not the parent post's — that's what the PostCard around
+/// us would do, so we stop_propagation). Avatar + name open the
+/// quoted author's profile via the same stop_propagation pattern.
 #[component]
 fn QuoteCard(record: EmbedRecordView) -> Element {
     match record {
         EmbedRecordView::View {
-            uri: _,
+            uri,
             author,
             value,
             embeds,
@@ -205,14 +208,54 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
                 EmbedKind::Images { images } => Some(images),
                 _ => None,
             });
+
+            // Click-through plumbing.
+            let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
+            let mut profile_focus = use_context::<Signal<crate::state::ProfileFocus>>();
+            let uri_for_thread = uri.clone();
+            let open_quoted_thread = move |e: MouseEvent| {
+                e.stop_propagation();
+                thread_focus.set(crate::state::ThreadFocus(Some(uri_for_thread.clone())));
+            };
+            // Two separate closures because Dioxus' MouseEvent
+            // handler is FnMut + consumed by each `onclick:` slot;
+            // the avatar and the name are sibling click targets.
+            let did_for_avatar = author.did.clone();
+            let open_quoted_profile_avatar = move |e: MouseEvent| {
+                e.stop_propagation();
+                profile_focus.set(crate::state::ProfileFocus(Some(did_for_avatar.clone())));
+            };
+            let did_for_name = author.did.clone();
+            let open_quoted_profile_name = move |e: MouseEvent| {
+                e.stop_propagation();
+                profile_focus.set(crate::state::ProfileFocus(Some(did_for_name.clone())));
+            };
             rsx! {
-                div { class: "embed__quote",
+                div { class: "embed__quote embed__quote--clickable",
+                    title: "Open quoted post",
+                    onclick: open_quoted_thread,
                     div { class: "embed__quote-head",
                         if let Some(av) = &author.avatar {
-                            img { loading: "lazy", decoding: "async", class: "embed__quote-avatar", src: "{av}", alt: "{author.handle}" }
+                            img {
+                                loading: "lazy",
+                                decoding: "async",
+                                class: "embed__quote-avatar embed__quote-avatar--clickable",
+                                src: "{av}",
+                                alt: "{author.handle}",
+                                onclick: open_quoted_profile_avatar,
+                            }
                         }
-                        span { class: "embed__quote-name", "{name}" }
-                        span { class: "embed__quote-handle", "@{author.handle}" }
+                        // Name + handle stacked vertically, same fix as
+                        // the parent post head — long display names
+                        // shouldn't push the handle into a wrap-jumble.
+                        div { class: "embed__quote-identity",
+                            span {
+                                class: "embed__quote-name embed__quote-name--clickable",
+                                onclick: open_quoted_profile_name,
+                                "{name}"
+                            }
+                            span { class: "embed__quote-handle", "@{author.handle}" }
+                        }
                     }
                     if !value.text.is_empty() {
                         p { class: "embed__quote-text", "{value.text}" }

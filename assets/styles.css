@@ -546,6 +546,24 @@ a {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* Clickable quote card — orange border + subtle wash on hover so
+ * the affordance is obvious. */
+.embed__quote--clickable {
+    cursor: pointer;
+}
+.embed__quote--clickable:hover {
+    border-color: var(--color-smooai-orange);
+    background: rgba(244, 159, 10, 0.04);
+}
+.embed__quote-avatar--clickable,
+.embed__quote-name--clickable {
+    cursor: pointer;
+}
+.embed__quote-name--clickable:hover {
+    color: var(--color-smooai-orange);
 }
 
 .embed__quote--missing {
@@ -570,14 +588,29 @@ a {
     object-fit: cover;
 }
 
+/* Name + handle stacked vertically, mirroring the parent
+ * .post__identity. */
+.embed__quote-identity {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.15;
+}
+
 .embed__quote-name {
     font-weight: 600;
     color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .embed__quote-handle {
     color: var(--muted-foreground);
     font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .embed__quote-text {
