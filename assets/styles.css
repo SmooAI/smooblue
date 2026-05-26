@@ -625,6 +625,26 @@ a {
     color: var(--foreground);
 }
 
+/* Sidebar profile slot — circular avatar in the same square the
+ * other rail buttons occupy. Falls back to the User glyph until
+ * we've resolved the profile (via get_profile) on first launch. */
+.rail__avatar-btn {
+    padding: 4px;
+}
+
+.rail__avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid transparent;
+    transition: border-color 120ms ease;
+}
+
+.rail__avatar-btn:hover .rail__avatar {
+    border-color: var(--color-smooai-orange);
+}
+
 .embed__quote--missing {
     color: var(--muted-foreground);
     font-style: italic;

@@ -216,6 +216,20 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
         ));
     };
 
+    // "Search posts" — add a Search column pre-scoped to this
+    // actor via bsky's `from:<handle>` filter operator (the same
+    // syntax bsky.app's own profile-search button uses).
+    let handle_for_search = handle.clone();
+    let name_for_search = name.clone();
+    let search_user_posts = move |_| {
+        let q = format!("from:{}", handle_for_search);
+        on_add_column.call(ColumnSpec {
+            id: format!("search:{}", q),
+            title: format!("Search · @{}", name_for_search),
+            kind: crate::state::ColumnKind::Search { query: q },
+        });
+    };
+
     let did_for_mute = did.clone();
     let toggle_mute = move |_| {
         if *mute_pending.read() {
@@ -385,7 +399,14 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
                 }
                 button {
                     class: "btn btn--ghost profile__add-column",
-                    title: "Add as a deck column",
+                    title: "Open a search column scoped to this user's posts (bsky `from:` filter)",
+                    onclick: search_user_posts,
+                    icons::Search { size: icons::Size::Sm }
+                    " Search posts"
+                }
+                button {
+                    class: "btn btn--ghost profile__add-column",
+                    title: "Add this profile as a permanent deck column",
                     onclick: add_column,
                     "+ Column"
                 }

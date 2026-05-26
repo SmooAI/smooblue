@@ -68,7 +68,33 @@ pub fn Sidebar(
         }
     };
 
+    // Fetch the signed-in user's profile once so we can render
+    // their actual avatar in the Profile slot instead of a generic
+    // User glyph. Cached in a signal so it sticks across re-renders.
+    let mut self_avatar = use_signal::<Option<String>>(|| None);
+    let mut self_handle = use_signal::<Option<String>>(|| None);
+    use_future(move || async move {
+        if crate::demo::is_active() {
+            self_avatar.set(Some("https://picsum.photos/seed/you/80".into()));
+            self_handle.set(Some("you.smoo.ai".into()));
+            return;
+        }
+        let Some(s) = session.read().clone() else {
+            return;
+        };
+        self_handle.set(Some(s.handle.clone()));
+        if let Some(client) = fresh_client(session).await {
+            if let Ok(p) = client.get_profile(&s.did).await {
+                if let Some(av) = p.avatar {
+                    self_avatar.set(Some(av));
+                }
+            }
+        }
+    });
+
     let unread_count = *unread.read();
+    let avatar_snap = self_avatar.read().clone();
+    let handle_snap = self_handle.read().clone();
 
     rsx! {
         nav { class: "rail",
@@ -88,7 +114,27 @@ pub fn Sidebar(
             // Search is its own button above — they're different intents.
             RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_saved_feeds }
             div { class: "rail__spacer" }
-            RailBtn { label: "Profile", active: false, kind: RailKind::Profile, badge: 0, onclick: open_self_profile }
+            // Profile slot — real avatar when we've resolved one,
+            // generic User glyph as fallback until the get_profile
+            // future settles. Tooltip shows the handle so the user
+            // can confirm which account is active in multi-account
+            // setups.
+            button {
+                class: "rail__btn rail__avatar-btn",
+                title: handle_snap.as_ref().map(|h| format!("@{h}")).unwrap_or_else(|| "Profile".into()),
+                onclick: open_self_profile,
+                if let Some(url) = avatar_snap {
+                    img {
+                        class: "rail__avatar",
+                        src: "{url}",
+                        alt: handle_snap.as_deref().unwrap_or("profile"),
+                        loading: "lazy",
+                        decoding: "async",
+                    }
+                } else {
+                    icons::User { size: icons::Size::Md }
+                }
+            }
             RailBtn { label: "Settings", active: false, kind: RailKind::Settings, badge: 0, onclick: open_settings }
         }
     }

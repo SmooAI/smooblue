@@ -126,8 +126,37 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // author displayName, reposter displayName, parent handle). No
     // levenshtein / fuzzy-skip — substring + lowercase is what users
     // mean when they say "filter for rust".
+    //
+    // Two-signal pattern for debouncing: `filter_text` tracks the
+    // raw input (re-renders the <input>'s value attr instantly so
+    // typing feels responsive); `filter_applied` lags 200ms behind
+    // and is what the render path actually filters against. Without
+    // this, every keystroke triggers a full Vec<FeedItem> filter +
+    // PostCard re-render for the whole column body (~2000 items
+    // worst case), which Dioxus diffs frame-by-frame and stutters.
     let mut filter_text = use_signal(String::new);
+    let mut filter_applied = use_signal(String::new);
     let mut filter_open = use_signal(|| false);
+
+    // Debounce: spawn a sleep-and-set on every keystroke. The
+    // closure captures the current value at spawn time; if a later
+    // keystroke arrived before we wake up, the captured value won't
+    // match the now-current input and we skip the set. Effectively
+    // a "trailing-edge debounce" — only the last typed value
+    // actually lands.
+    use_effect(move || {
+        let target = filter_text.read().clone();
+        spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            // If the input has moved on since we slept, abandon
+            // this stale apply. Reading filter_text.peek() here
+            // does NOT re-subscribe the effect (we already react
+            // to filter_text on the way in).
+            if *filter_text.peek() == target && *filter_applied.peek() != target {
+                filter_applied.set(target);
+            }
+        });
+    });
 
     // The polling loop. Top-of-feed refresh on each tick: merges new
     // items at the head, preserves the user's scrollback below.
@@ -284,8 +313,12 @@ pub fn Column(spec: ColumnSpec) -> Element {
         _ => "deck-column",
     };
 
+    // Raw input string is what the <input>'s `value` attribute
+    // shows (so typing feels instant); the *applied* debounced
+    // value is what we actually filter against.
     let filter_snap = filter_text.read().clone();
-    let filter_lower = filter_snap.trim().to_lowercase();
+    let applied_snap = filter_applied.read().clone();
+    let filter_lower = applied_snap.trim().to_lowercase();
     let has_filter = !filter_lower.is_empty();
 
     rsx! {
@@ -314,6 +347,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             title: "Clear filter",
                             onclick: move |_| {
                                 filter_text.set(String::new());
+                                // Apply immediately on explicit clear
+                                // so the user doesn't wait 200ms to
+                                // see the unfiltered feed return.
+                                filter_applied.set(String::new());
                                 filter_open.set(false);
                             },
                             icons::X { size: icons::Size::Sm }
@@ -333,7 +370,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         if filtered.is_empty() {
                             rsx! {
                                 div { class: "deck-column__empty",
-                                    "No posts match \"{filter_snap}\""
+                                    "No posts match \"{applied_snap}\""
                                 }
                             }
                         } else {
