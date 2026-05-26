@@ -412,63 +412,75 @@ pub fn PostCard(
                     }
                 }
                 div { class: "post__actions",
-                    button { class: "post__action post__action--clickable",
-                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); open_reply(evt); },
-                        title: "Reply",
-                        icons::MessageCircle { size: icons::Size::Sm }
-                        span { "{replies}" }
-                    }
-                    // Repost: icon toggles, count opens the reposters
-                    // sheet. Two separate buttons sharing the visual
-                    // grouping via CSS.
-                    button { class: "{repost_class}",
-                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_repost(evt); },
-                        title: if is_reposted { "Undo repost" } else { "Repost" },
-                        icons::Repeat2 { size: icons::Size::Sm }
-                    }
-                    // Quote-this-post — separate affordance from
-                    // Repost. Distinct MessageQuote icon so it
-                    // doesn't visually clash with the bare quote-
-                    // count Quote icon further down the row.
-                    button { class: "post__action post__action--clickable",
-                        onclick: open_quote_compose,
-                        title: "Quote this post",
-                        icons::MessageQuote { size: icons::Size::Sm }
-                    }
-                    if display_reposts > 0 {
-                        button { class: "post__action-count",
-                            onclick: open_reposters,
-                            title: "See who reposted",
-                            "{display_reposts}"
+                    // Each icon + count is wrapped in a .post__action-pair
+                    // span (tight internal gap). The outer .post__actions
+                    // sets the larger inter-pair gap so the row reads as
+                    // distinct groups instead of a uniform spread.
+                    span { class: "post__action-pair",
+                        button { class: "post__action post__action--clickable",
+                            onclick: move |evt: MouseEvent| { evt.stop_propagation(); open_reply(evt); },
+                            title: "Reply",
+                            icons::MessageCircle { size: icons::Size::Sm }
                         }
-                    } else {
-                        span { class: "post__action-count post__action-count--zero", "0" }
-                    }
-                    // Quote count — bsky's lexicon exposes this; we
-                    // show it inline if any quotes exist. Click opens
-                    // the quotes list.
-                    if quote_count > 0 {
-                        button { class: "post__action post__action--quote",
-                            onclick: open_quotes,
-                            title: "See who quoted",
-                            icons::Quote { size: icons::Size::Sm }
-                            span { "{quote_count}" }
+                        if replies > 0 {
+                            span { class: "post__action-count", "{replies}" }
+                        } else {
+                            span { class: "post__action-count post__action-count--zero", "0" }
                         }
                     }
-                    // Like: same split — icon toggles, count opens the likers sheet.
-                    button { class: "{like_class}",
-                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_like(evt); },
-                        title: if is_liked { "Unlike" } else { "Like" },
-                        icons::Heart { size: icons::Size::Sm }
-                    }
-                    if display_likes > 0 {
-                        button { class: "post__action-count",
-                            onclick: open_likes,
-                            title: "See who liked",
-                            "{display_likes}"
+                    // Repost: icon toggles, count opens the reposters sheet.
+                    span { class: "post__action-pair",
+                        button { class: "{repost_class}",
+                            onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_repost(evt); },
+                            title: if is_reposted { "Undo repost" } else { "Repost" },
+                            icons::Repeat2 { size: icons::Size::Sm }
                         }
-                    } else {
-                        span { class: "post__action-count post__action-count--zero", "0" }
+                        if display_reposts > 0 {
+                            button { class: "post__action-count",
+                                onclick: open_reposters,
+                                title: "See who reposted",
+                                "{display_reposts}"
+                            }
+                        } else {
+                            span { class: "post__action-count post__action-count--zero", "0" }
+                        }
+                    }
+                    // Quote — pair the "quote this post" icon with the
+                    // quote count (when any). Distinct MessageQuote vs
+                    // Quote icons so the two affordances don't read as
+                    // one button.
+                    span { class: "post__action-pair",
+                        button { class: "post__action post__action--clickable",
+                            onclick: open_quote_compose,
+                            title: "Quote this post",
+                            icons::MessageQuote { size: icons::Size::Sm }
+                        }
+                        if quote_count > 0 {
+                            button { class: "post__action-count",
+                                onclick: open_quotes,
+                                title: "See who quoted",
+                                "{quote_count}"
+                            }
+                        } else {
+                            span { class: "post__action-count post__action-count--zero", "0" }
+                        }
+                    }
+                    // Like: icon toggles, count opens the likers sheet.
+                    span { class: "post__action-pair",
+                        button { class: "{like_class}",
+                            onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_like(evt); },
+                            title: if is_liked { "Unlike" } else { "Like" },
+                            icons::Heart { size: icons::Size::Sm }
+                        }
+                        if display_likes > 0 {
+                            button { class: "post__action-count",
+                                onclick: open_likes,
+                                title: "See who liked",
+                                "{display_likes}"
+                            }
+                        } else {
+                            span { class: "post__action-count post__action-count--zero", "0" }
+                        }
                     }
                     // Copy the bsky.app permalink for this post.
                     // Builds the URL from the at-uri rkey rather than

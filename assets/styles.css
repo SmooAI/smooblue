@@ -751,7 +751,10 @@ a {
 .post__actions {
     display: flex;
     align-items: center;
-    gap: 20px;
+    /* gap between distinct action groups (reply / repost / quote /
+     * like / copy). Within a pair (icon + count) the gap is tighter
+     * — see .post__action-pair. */
+    gap: 14px;
     margin-top: 8px;
     color: var(--muted-foreground);
     font-size: 12px;
@@ -2892,6 +2895,15 @@ a {
 }
 
 /* The clickable counts next to like/repost icons in PostCard. */
+/* Wraps an icon button + its count so they sit visually tight
+ * together. The outer .post__actions handles the larger
+ * inter-group gap. */
+.post__action-pair {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
 .post__action-count {
     background: transparent;
     border: 0;
