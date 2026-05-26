@@ -38,7 +38,10 @@
        sizes). 22.5% radius = current macOS Big Sur+ shape. -->
   <rect x="0" y="0" width="135" height="135" rx="30" ry="30" fill="url(#bg)"/>
 
-  <g transform="translate(67.5 60) scale(3.2)">
+  <!-- Butterfly geometrically centered on the canvas (67.5, 67.5).
+       Slight overlap with the smoo chip at bottom-right reads as
+       "chip stamped on top" rather than "butterfly avoiding chip." -->
+  <g transform="translate(67.5 67.5) scale(3.2)">
     <g stroke="#0560c4" fill="none" stroke-linecap="round" stroke-width=".7">
       <path d="m-2-11q-3-5-5-6"/>
       <path d="m2-11q3-5 5-6"/>
