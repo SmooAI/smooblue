@@ -38,10 +38,16 @@ pub fn EngagementSheet() -> Element {
     let mut focus = use_context::<Signal<EngagementFocus>>();
     let snap = focus.read().0.clone();
 
-    let key = snap.clone();
+    // Reactive: read the focus signal INSIDE the resource closure
+    // so opening the sheet on a different post re-fires the fetch.
+    // Capturing a cloned `key` from the outer render would freeze
+    // the resource at the first-mount value (None), and the cached
+    // Err("no focus") would leak to the UI as "Couldn't load: no
+    // focus" on every open. Same gotcha we hit on Profile / Thread
+    // / SavedFeeds sheets — see docs/Architecture/Architecture-Overview.
     let data = use_resource(move || {
-        let kind = key.clone();
         let session_sig = session;
+        let kind = focus.read().0.clone();
         async move {
             let Some(kind) = kind else {
                 return Err::<Loaded, String>("no focus".into());
@@ -131,8 +137,16 @@ pub fn EngagementSheet() -> Element {
                                 }
                             }
                         },
-                        Some(Err(e)) => rsx! {
-                            div { class: "engagement__error", "Couldn't load: {e}" }
+                        Some(Err(e)) => {
+                            // Stale "no focus" Err from the resource's
+                            // first run is not a user-visible error —
+                            // render the loader until the real fetch
+                            // resolves.
+                            if e == "no focus" {
+                                rsx! { div { class: "engagement__loading", "Loading…" } }
+                            } else {
+                                rsx! { div { class: "engagement__error", "Couldn't load: {e}" } }
+                            }
                         },
                         None => rsx! {
                             div { class: "engagement__loading", "Loading…" }
