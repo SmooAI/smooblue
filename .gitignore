@@ -22,3 +22,6 @@ dist/
 # Obsidian — workspace state is per-user; vault content is shared.
 docs/.obsidian/workspace*
 docs/.obsidian/cache
+
+# pnpm + changesets workspace
+node_modules/

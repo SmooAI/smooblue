@@ -1,65 +1,26 @@
 name: Release
 
-# release-plz runs on every push to main:
-#   * `release-pr` job opens / updates a "release v0.X.0" pull request
-#     with version bumps + an auto-generated CHANGELOG entry. Until that
-#     PR is merged, nothing else happens — the project sits at the
-#     current version.
-#   * Once a human merges the release PR, the next push-to-main fires
-#     the `release` job, which:
-#       - tags the merge commit `v0.X.0`
-#       - creates a GitHub release with the changelog as its body
-#       - builds the macOS .app bundle (adhoc-signed; Developer ID
-#         notarization waits on SMOODEV-1163 / th-4149eb)
-#       - uploads `Smooblue-v0.X.0.zip` as a release asset
+# Tag-driven, NOT commit-message-driven.
 #
-# Skipping crates.io publish entirely — smooblue is an app, not a
-# library. release-plz.toml has `publish = false` per crate.
+# Versioning happens locally via the changesets flow (`pnpm changeset`
+# during development, then `pnpm version` + `pnpm release` to cut).
+# This workflow only fires when a vX.Y.Z tag is pushed: it builds the
+# macOS .app bundle and uploads it as an asset on the GitHub release
+# that the tag created.
 #
-# Mirrors the @changesets/cli flow we use in the smoo monorepo: open
-# a release PR, review, merge, get a tagged release.
+# See .changeset/README.md for the full release playbook.
 
 on:
     push:
-        branches: [main]
-
-env:
-    CARGO_TERM_COLOR: always
+        tags:
+            - "v*.*.*"
 
 permissions:
-    # release-plz needs to push the release branch + open PRs.
     contents: write
-    pull-requests: write
 
 jobs:
-    release-pr:
-        name: Open / update release PR
-        runs-on: ubuntu-latest
-        if: github.repository == 'SmooAI/smooblue'
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-              with:
-                  # release-plz reads the full history to parse
-                  # conventional-commits since the last release.
-                  fetch-depth: 0
-                  token: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
-
-            - name: Cache cargo
-              uses: Swatinem/rust-cache@v2
-
-            - name: release-plz release-pr
-              uses: MarcoIeni/release-plz-action@v0.5
-              with:
-                  command: release-pr
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    release:
-        name: Tag + GitHub release + build macOS .app
+    bundle:
+        name: Build + attach macOS .app
         runs-on: macos-latest
         if: github.repository == 'SmooAI/smooblue'
         steps:
@@ -67,7 +28,6 @@ jobs:
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
-                  token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
@@ -75,45 +35,44 @@ jobs:
             - name: Cache cargo
               uses: Swatinem/rust-cache@v2
 
-            # Run release-plz's `release` command. If the merged commit
-            # is a release PR (i.e. version was just bumped), this
-            # tags + creates the GitHub release. Otherwise it's a no-op
-            # and `releases_created` is `false`.
-            - name: release-plz release
-              id: rp
-              uses: MarcoIeni/release-plz-action@v0.5
-              with:
-                  command: release
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-            # Build + upload only when release-plz actually created a release.
-            # We bundle the .app and attach it to the tag the release-plz
-            # step just published.
+            # Build via the same script we use locally.
             - name: Build macOS .app bundle
-              if: steps.rp.outputs.releases_created == 'true'
               run: ./scripts/bundle-macos.sh
 
-            - name: Zip .app for release upload
-              if: steps.rp.outputs.releases_created == 'true'
+            # Use ditto so resource forks + symlinks survive the zip round-trip.
+            - name: Zip .app
               run: |
-                  # Use ditto so resource forks + symlinks survive the round-trip,
-                  # which matters for some bundle-internal links + xattrs.
                   cd dist
                   ditto -c -k --sequesterRsrc --keepParent Smooblue.app Smooblue-macos-arm64.zip
 
-            - name: Attach .app to GitHub release
-              if: steps.rp.outputs.releases_created == 'true'
+            # Pull the changelog entry for this tag out of CHANGELOG.md
+            # and use it as the GitHub release body. Falls back to a
+            # placeholder if the section isn't found.
+            - name: Extract changelog for this release
+              id: changelog
               run: |
-                  # release-plz's outputs.releases is a JSON array of release
-                  # objects. Each has a `tag` field. We attach the same zip
-                  # to every release in the batch (today there's only one
-                  # because we bump all crates in lockstep).
-                  echo '${{ steps.rp.outputs.releases }}' \
-                      | jq -r '.[].tag' \
-                      | while read tag; do
-                          echo "▸ uploading Smooblue-macos-arm64.zip to $tag"
-                          gh release upload "$tag" dist/Smooblue-macos-arm64.zip --clobber
-                        done
+                  TAG="${GITHUB_REF_NAME#v}"
+                  awk -v ver="$TAG" '
+                      $0 ~ "^## " ver { found=1; next }
+                      found && /^## [0-9]+\./ { exit }
+                      found { print }
+                  ' CHANGELOG.md > /tmp/release-notes.md
+                  if [[ ! -s /tmp/release-notes.md ]]; then
+                      echo "Release $GITHUB_REF_NAME — see CHANGELOG.md for details." > /tmp/release-notes.md
+                  fi
+                  echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
+
+            - name: Create / update GitHub release
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+                      gh release edit "$GITHUB_REF_NAME" \
+                          --notes-file "${{ steps.changelog.outputs.notes_file }}"
+                  else
+                      gh release create "$GITHUB_REF_NAME" \
+                          --title "$GITHUB_REF_NAME" \
+                          --notes-file "${{ steps.changelog.outputs.notes_file }}"
+                  fi
+                  gh release upload "$GITHUB_REF_NAME" \
+                      dist/Smooblue-macos-arm64.zip --clobber
