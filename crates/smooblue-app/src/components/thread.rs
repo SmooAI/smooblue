@@ -159,14 +159,30 @@ fn ParentRow(node: ThreadView) -> Element {
 
 #[component]
 fn FocusedRow(node: ThreadView) -> Element {
+    // Scroll the focused post into view as soon as the row mounts.
+    // Without this, opening a thread on a deeply-nested reply lands
+    // the scroll position at the top (root post) and the user has
+    // to hunt for the post they actually clicked. `Smooth` looks
+    // right because there's already a visible content swap on
+    // sheet-open — the smooth glide reads as "the app is taking
+    // you to the post," not as a janky reflow.
+    let on_mount = move |evt: Event<MountedData>| {
+        spawn(async move {
+            let _ = evt.data().scroll_to(ScrollBehavior::Smooth).await;
+        });
+    };
     match node {
         ThreadView::Post { post, .. } => rsx! {
-            div { class: "thread__focused",
+            div {
+                class: "thread__focused",
+                onmounted: on_mount,
                 PostCard { post }
             }
         },
         _ => rsx! {
-            div { class: "thread__placeholder thread__placeholder--focused",
+            div {
+                class: "thread__placeholder thread__placeholder--focused",
+                onmounted: on_mount,
                 "This post is unavailable"
             }
         },
