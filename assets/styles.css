@@ -110,7 +110,12 @@ a {
  *  Single column
  * =========================================================== */
 .deck-column {
-    flex: 0 0 350px;
+    /* Was 350px to fit the old (avatar + body) flex-row layout.
+     * Avatar moved into the head row + body spans full card width,
+     * so we can shrink columns by the avatar rail width (~36 +
+     * gap = 46) and fit more side-by-side. Applies to all column
+     * kinds (notifications inherit). */
+    flex: 0 0 310px;
     display: flex;
     flex-direction: column;
     background: var(--card);
