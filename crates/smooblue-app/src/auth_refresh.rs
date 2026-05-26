@@ -4,23 +4,47 @@
 //! token has more than ~30s left, this is a fast read from the
 //! Signal. If it's expiring, we transparently swap in a fresh token
 //! via the refresh-token flow (DPoP-signed POST to the token
-//! endpoint) and persist the rotated session to the OS keyring.
+//! endpoint) and persist the rotated session.
 //!
-//! Failure modes:
-//! - Network down / token endpoint 5xx → returns `None`, leaves the
-//!   session as-is. Next call retries.
-//! - `invalid_grant` (refresh token expired / revoked) → clears the
-//!   persisted session and signals out (`Signal::set(None)`), which
-//!   bounces the user back to the login view.
+//! ## Single-flight
 //!
-//! Sessions in demo mode skip refresh entirely — they're synthetic
-//! and never expire as far as the AppView is concerned.
+//! Multiple columns poll concurrently. Without a guard they all
+//! call `refresh_session` in parallel with the SAME refresh token
+//! when it's expiring. ATproto refresh tokens **rotate** — only one
+//! call wins and gets the new token; the others fail with
+//! `invalid_grant`, which we used to interpret as "refresh token
+//! revoked, sign the user out." Result: the user got bounced to
+//! login every ~2h.
+//!
+//! [`REFRESH_LOCK`] is a global `tokio::sync::Mutex` — the first
+//! caller actually hits the network; concurrent callers await the
+//! lock, then re-check expiry (it's now fresh) and skip the network
+//! call entirely.
+//!
+//! ## Sign-out semantics
+//!
+//! We only flip session → None on `invalid_grant` from the server
+//! when we DID hold the lock (so we're certain we used the canonical
+//! refresh token, not a stale one). Transient errors (network /
+//! 5xx) never sign the user out; the next call retries.
+//!
+//! Demo mode bypasses refresh entirely.
 
 use crate::persistence;
 use dioxus::prelude::{Readable, Signal, Writable};
 use smooblue_atproto::AtClient;
 use smooblue_oauth::{OAuthClientConfig, Session};
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
 use url::Url;
+
+/// Process-global lock so only one refresh hits the network at a
+/// time. tokio::Mutex (not std::Mutex) so concurrent awaiters yield
+/// instead of blocking the runtime worker.
+fn refresh_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 /// Return a ready-to-use [`AtClient`] for the current session,
 /// refreshing the access token first if it's expired or expiring.
@@ -45,6 +69,16 @@ pub async fn ensure_fresh_session(session_sig: Signal<Option<Session>>) -> Optio
     if !session.is_expired() {
         return Some(session);
     }
+    // Serialize with the global refresh lock. Concurrent callers
+    // await here; only the first one actually hits the network.
+    let _guard = refresh_lock().lock().await;
+    // Re-check after acquiring the lock — another task may have
+    // refreshed while we were waiting. Reading the signal here
+    // picks up the freshly-installed session.
+    let session = session_sig.read().clone()?;
+    if !session.is_expired() {
+        return Some(session);
+    }
     refresh_and_persist(session, session_sig).await
 }
 
@@ -56,15 +90,15 @@ async fn refresh_and_persist(
     let cfg = OAuthClientConfig::default_public();
     match smooblue_oauth::refresh_session(&http, &session, &cfg.client_id).await {
         Ok(new_session) => {
-            // Best-effort persist; if the keyring write fails (e.g.,
-            // user revoked permission) we still update the in-memory
-            // signal so the current session keeps working until exit.
+            // Best-effort persist. We update the in-memory signal
+            // either way so the current session keeps working until
+            // exit — if the write fails the user just has to re-auth
+            // on next launch instead of immediately.
             //
             // Write BOTH the legacy single slot AND the multi-account
             // keyed-by-DID slot. The boot path prefers the keyed slot
             // (state.rs), so skipping it leaves an old refresh token
-            // there that fails with invalid_grant on next launch and
-            // forces the user to sign in again every restart.
+            // there that fails with invalid_grant on next launch.
             if let Err(e) = persistence::save_session(&new_session) {
                 tracing::warn!(error = %e, "smooblue: failed to persist refreshed session (legacy slot)");
             }
@@ -75,18 +109,22 @@ async fn refresh_and_persist(
             Some(new_session)
         }
         Err(e) => {
-            // Refresh failed. If it's an invalid_grant we MUST drop
-            // the session — the refresh token is dead. Other errors
-            // (transient network, 5xx) shouldn't boot the user, but
-            // we can't distinguish without parsing the inner error
-            // string. Conservative: only sign-out on invalid_grant.
+            // Refresh failed. We're holding the global refresh lock,
+            // so this isn't a "lost a race against another refresh"
+            // false positive — if the server said invalid_grant, the
+            // refresh token really is dead and the user has to re-auth.
+            //
+            // Even so, leave the in-memory session untouched and let
+            // the next fetch attempt retry; the only thing we drop is
+            // the access token's effective freshness. Sign out only
+            // on confirmed invalid_grant.
             let msg = e.to_string();
             if msg.contains("invalid_grant") || msg.contains("re-auth") {
-                tracing::warn!(error = %msg, "smooblue: refresh rejected, signing out");
+                tracing::warn!(error = %msg, "smooblue: refresh rejected (invalid_grant) — signing out");
                 let _ = persistence::clear_session();
                 session_sig.set(None);
             } else {
-                tracing::warn!(error = %msg, "smooblue: refresh failed (transient)");
+                tracing::warn!(error = %msg, "smooblue: refresh failed (transient) — will retry");
             }
             None
         }
