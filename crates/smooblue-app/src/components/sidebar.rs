@@ -4,7 +4,7 @@
 
 use crate::auth_refresh::fresh_client;
 use crate::icons;
-use crate::state::{add_column_unique, ColumnSpec, ProfileFocus};
+use crate::state::{add_or_focus_column, ColumnSpec, FocusColumn, ProfileFocus};
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
 use std::time::Duration;
@@ -48,10 +48,16 @@ pub fn Sidebar(
         }
     });
 
-    let add_home = move |_| add_column_unique(&mut cols, ColumnSpec::home());
-    let add_notif = move |_| add_column_unique(&mut cols, ColumnSpec::notifications());
-    let add_discover = move |_| add_column_unique(&mut cols, ColumnSpec::discover());
-    let add_suggestions = move |_| add_column_unique(&mut cols, ColumnSpec::suggestions());
+    // Add-or-focus: if the column already exists, scroll to it
+    // and flash its border so the user can see *where* it is.
+    let mut focus_col = use_context::<Signal<FocusColumn>>();
+    let add_home = move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::home());
+    let add_notif =
+        move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::notifications());
+    let add_discover =
+        move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::discover());
+    let add_suggestions =
+        move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::suggestions());
     let open_search = move |_| search_open.set(true);
     let mut sf_open = saved_feeds_open;
     let open_saved_feeds = move |_| sf_open.set(true);

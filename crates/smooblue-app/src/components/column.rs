@@ -22,7 +22,7 @@ use crate::auth_refresh::fresh_client;
 use crate::components::notification_card::NotificationCard;
 use crate::components::post::PostCard;
 use crate::icons;
-use crate::state::{ColumnDrag, ColumnKind, ColumnSpec};
+use crate::state::{ColumnDrag, ColumnKind, ColumnSpec, FocusColumn};
 use dioxus::prelude::*;
 use smooblue_atproto::{
     group_notifications, ActorProfile, FeedItem, Notification, NotificationGroup, PostView,
@@ -137,6 +137,34 @@ pub fn Column(spec: ColumnSpec) -> Element {
     let mut filter_text = use_signal(String::new);
     let mut filter_applied = use_signal(String::new);
     let mut filter_open = use_signal(|| false);
+
+    // Scroll-into-view + flash when the sidebar focuses us.
+    // Stores the mounted root element so the effect can call
+    // scroll_to; toggles `flash` on for ~1.5s to animate the border.
+    let mut root_el = use_signal::<Option<std::rc::Rc<MountedData>>>(|| None);
+    let mut flash = use_signal(|| false);
+    let focus_sig = use_context::<Signal<FocusColumn>>();
+    let id_for_effect = spec_id.clone();
+    use_effect(move || {
+        let focused = focus_sig.read();
+        if focused.id.as_deref() != Some(id_for_effect.as_str()) {
+            return;
+        }
+        // Both effects below run synchronously in the event-loop tick
+        // following the signal change; use spawn for the actual
+        // scroll/sleep so we don't block the signal write.
+        let mounted_snap = root_el.peek().clone();
+        spawn(async move {
+            if let Some(m) = mounted_snap {
+                let _ = m.scroll_to(ScrollBehavior::Smooth).await;
+            }
+        });
+        flash.set(true);
+        spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            flash.set(false);
+        });
+    });
 
     // Debounce: spawn a sleep-and-set on every keystroke. The
     // closure captures the current value at spawn time; if a later
@@ -307,10 +335,16 @@ pub fn Column(spec: ColumnSpec) -> Element {
         && drag_snap.dragging.as_deref() != Some(spec_id.as_str());
     drop(drag_snap);
 
-    let section_class = match (is_dragging, is_target) {
+    let flash_now = *flash.read();
+    let base = match (is_dragging, is_target) {
         (true, _) => "deck-column deck-column--dragging",
         (_, true) => "deck-column deck-column--drop-target",
         _ => "deck-column",
+    };
+    let section_class = if flash_now {
+        format!("{base} deck-column--flash")
+    } else {
+        base.to_string()
     };
 
     // Raw input string is what the <input>'s `value` attribute
@@ -323,6 +357,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
 
     rsx! {
         section { class: "{section_class}",
+            onmounted: move |e| root_el.set(Some(e.data())),
             ColumnHeader {
                 id: spec.id.clone(),
                 title: spec.title.clone(),

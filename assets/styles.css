@@ -645,6 +645,22 @@ a {
     border-color: var(--color-smooai-orange);
 }
 
+/* Column-focus flash. Applied briefly (~1.5s) when the sidebar nav
+ * focuses a column that's already in the deck — orange glow that
+ * draws the eye, then fades back to default. */
+@keyframes deck-column-flash {
+    0% {
+        box-shadow: 0 0 0 3px var(--color-smooai-orange);
+    }
+    100% {
+        box-shadow: 0 0 0 0 transparent;
+    }
+}
+
+.deck-column--flash {
+    animation: deck-column-flash 1.5s ease-out;
+}
+
 .embed__quote--missing {
     color: var(--muted-foreground);
     font-style: italic;

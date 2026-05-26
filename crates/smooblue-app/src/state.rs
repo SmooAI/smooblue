@@ -131,6 +131,23 @@ pub fn add_column_unique(cols: &mut Signal<Vec<ColumnSpec>>, spec: ColumnSpec) {
     let _ = crate::persistence::save_columns(&list);
 }
 
+/// Add the column if missing, then signal the deck to scroll the
+/// matching column into view + briefly flash its border so the
+/// user can see *where* it went. Tick is always bumped so repeat
+/// clicks on the same sidebar button keep triggering the scroll
+/// (signal equality on `id` alone would drop redundant sets).
+pub fn add_or_focus_column(
+    cols: &mut Signal<Vec<ColumnSpec>>,
+    focus: &mut Signal<FocusColumn>,
+    spec: ColumnSpec,
+) {
+    let id = spec.id.clone();
+    add_column_unique(cols, spec);
+    let mut w = focus.write();
+    w.id = Some(id);
+    w.tick = w.tick.wrapping_add(1);
+}
+
 /// Remove the column with the given id and persist.
 pub fn remove_column(cols: &mut Signal<Vec<ColumnSpec>>, id: &str) {
     let mut list = cols.write();
@@ -284,6 +301,22 @@ impl ThemeMode {
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct ProfileEditOpen(pub bool);
 
+/// Transient "scroll-into-view + flash this column" signal. Set
+/// by the sidebar nav buttons (and anywhere else that adds a
+/// column) so the user can see *where* the requested column went
+/// — both when it was just added and when it was already there.
+///
+/// The `tick` counter is bumped on each set so consecutive
+/// requests for the SAME column id (e.g. mashing the Notifications
+/// button) still trigger a fresh scroll/flash even though `id`
+/// didn't change. Signal equality on the outer struct would
+/// otherwise drop the redundant set.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct FocusColumn {
+    pub id: Option<String>,
+    pub tick: u64,
+}
+
 /// In-app lightbox for images / videos. `None` ⇒ closed; `Some(item)`
 /// ⇒ render a full-screen overlay with the media centered.
 /// Clicks on a post image / video populate this rather than shelling
@@ -403,6 +436,7 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
     use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
     use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
+    use_context_provider::<Signal<FocusColumn>>(|| Signal::new(FocusColumn::default()));
     use_context_provider::<Signal<LightboxFocus>>(|| Signal::new(LightboxFocus::default()));
     use_context_provider::<Signal<ThemeMode>>(|| {
         let mode = crate::persistence::load_theme()
