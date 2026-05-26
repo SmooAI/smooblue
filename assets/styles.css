@@ -854,12 +854,29 @@ a {
  *  Notification card
  * =========================================================== */
 .notif {
+    /* Column-direction: head row (icon + avatars + phrase + time)
+     * on top, subject quote full-width below. deck.blue does the
+     * same — notification subject is the payload, give it the room.
+     * (PostCards keep the avatar-rail layout to match bsky.app's
+     * feed conventions.) */
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     transition: background 100ms;
+    cursor: pointer;
+}
+
+.notif__head-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.notif__phrase-block {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .notif:hover {

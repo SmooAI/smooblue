@@ -71,36 +71,42 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
     rsx! {
         article { class: "{unread_class}",
             onclick: click_card,
-            div { class: "{icon_color_class}",
-                match reason.as_str() {
-                    "like" => rsx! { icons::Heart { size: icons::Size::Sm } },
-                    "repost" => rsx! { icons::Repeat2 { size: icons::Size::Sm } },
-                    "follow" => rsx! { icons::UserPlus { size: icons::Size::Sm } },
-                    "mention" => rsx! { icons::AtSign { size: icons::Size::Sm } },
-                    "reply" => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
-                    "quote" => rsx! { icons::Quote { size: icons::Size::Sm } },
-                    "starterpack-joined" => rsx! { icons::Package { size: icons::Size::Sm } },
-                    _ => rsx! { icons::Bell { size: icons::Size::Sm } },
-                }
-            }
-            // Avatar block: for singletons it's the one actor; for
-            // groups it's a stack of up to three overlapping avatars
-            // (newest-first because `group.items` is in input order).
-            div { class: "notif__avatars",
-                AvatarStack { actors: group.items.iter().take(3).map(|n| n.author.clone()).collect::<Vec<_>>() }
-            }
-            div { class: "notif__body",
-                div { class: "notif__head",
-                    NotifPhrase { group: group.clone() }
-                    span { class: "notif__time",
-                        icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
+            // Head row: reaction icon + avatar stack + phrase + time
+            // in a single row at the top. Subject quote (the post
+            // you're being notified about) spans the full card
+            // width below — same layout deck.blue uses, reclaims
+            // the ~50px the old avatar-rail layout reserved.
+            //
+            // PostCards keep the rail-style layout (avatar column +
+            // body) because that's the conventional bsky.app feed
+            // look; notifications get this treatment because the
+            // payload (the subject quote) needs the extra room.
+            div { class: "notif__head-row",
+                div { class: "{icon_color_class}",
+                    match reason.as_str() {
+                        "like" => rsx! { icons::Heart { size: icons::Size::Sm } },
+                        "repost" => rsx! { icons::Repeat2 { size: icons::Size::Sm } },
+                        "follow" => rsx! { icons::UserPlus { size: icons::Size::Sm } },
+                        "mention" => rsx! { icons::AtSign { size: icons::Size::Sm } },
+                        "reply" => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
+                        "quote" => rsx! { icons::Quote { size: icons::Size::Sm } },
+                        "starterpack-joined" => rsx! { icons::Package { size: icons::Size::Sm } },
+                        _ => rsx! { icons::Bell { size: icons::Size::Sm } },
                     }
                 }
-                // Subject quote (for likes/reposts of your post, or
-                // for the inbound text of a reply/mention/quote).
-                if let Some(post) = subject {
-                    SubjectQuote { post: post, reason: reason.clone() }
+                div { class: "notif__avatars",
+                    AvatarStack { actors: group.items.iter().take(3).map(|n| n.author.clone()).collect::<Vec<_>>() }
                 }
+                div { class: "notif__phrase-block",
+                    NotifPhrase { group: group.clone() }
+                }
+                span { class: "notif__time",
+                    icons::TimeAgo { text_at_render: time_initial.clone(), source_ts: time_source.clone() }
+                }
+            }
+            // Subject quote — full card width.
+            if let Some(post) = subject {
+                SubjectQuote { post: post, reason: reason.clone() }
             }
         }
     }
