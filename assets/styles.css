@@ -592,6 +592,39 @@ a {
     color: var(--color-smooai-orange);
 }
 
+/* Per-column filter row — sits between header and body. */
+.deck-column__filter {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+}
+
+.deck-column__filter-input {
+    flex: 1 1 auto;
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.deck-column__filter-clear {
+    background: transparent;
+    border: 0;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deck-column__filter-clear:hover {
+    background: var(--muted);
+    color: var(--foreground);
+}
+
 .embed__quote--missing {
     color: var(--muted-foreground);
     font-style: italic;

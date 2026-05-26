@@ -121,6 +121,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // `true` when the server tells us the bottom-of-feed cursor is
     // None — we've hit the end and shouldn't keep firing fetches.
     let mut at_end = use_signal(|| false);
+    // Per-column fuzzy filter input. Empty string = show everything.
+    // Match is case-insensitive substring on (text, author handle,
+    // author displayName, reposter displayName, parent handle). No
+    // levenshtein / fuzzy-skip — substring + lowercase is what users
+    // mean when they say "filter for rust".
+    let mut filter_text = use_signal(String::new);
+    let mut filter_open = use_signal(|| false);
 
     // The polling loop. Top-of-feed refresh on each tick: merges new
     // items at the head, preserves the user's scrollback below.
@@ -277,28 +284,76 @@ pub fn Column(spec: ColumnSpec) -> Element {
         _ => "deck-column",
     };
 
+    let filter_snap = filter_text.read().clone();
+    let filter_lower = filter_snap.trim().to_lowercase();
+    let has_filter = !filter_lower.is_empty();
+
     rsx! {
         section { class: "{section_class}",
-            ColumnHeader { id: spec.id.clone(), title: spec.title.clone(), kind: spec.kind.clone() }
+            ColumnHeader {
+                id: spec.id.clone(),
+                title: spec.title.clone(),
+                kind: spec.kind.clone(),
+                filter_open,
+            }
+            // Filter input — slides in below the header when the
+            // funnel button on the header is clicked or when the
+            // user has anything typed (so a non-empty filter is
+            // always visible).
+            if *filter_open.read() || has_filter {
+                div { class: "deck-column__filter",
+                    input {
+                        class: "input deck-column__filter-input",
+                        placeholder: "Filter posts in this column…",
+                        autofocus: true,
+                        value: "{filter_snap}",
+                        oninput: move |e| filter_text.set(e.value()),
+                    }
+                    if has_filter {
+                        button { class: "deck-column__filter-clear",
+                            title: "Clear filter",
+                            onclick: move |_| {
+                                filter_text.set(String::new());
+                                filter_open.set(false);
+                            },
+                            icons::X { size: icons::Size::Sm }
+                        }
+                    }
+                }
+            }
             div { class: "deck-column__body",
                 match (&*data.read(), &*error.read(), *loading.read()) {
                     (_, _, true) if data.read().is_empty() => rsx! { div { class: "deck-column__loading", "Loading…" } },
                     (data, _, _) if data.is_empty() => rsx! { div { class: "deck-column__empty", "Nothing here yet." } },
-                    (ColumnData::Posts(items), _, _) => rsx! {
-                        for item in items.iter() {
-                            // Same post URI can appear twice in a
-                            // feed (e.g. two reposters surfaced it).
-                            // Disambiguate the key with the reposter
-                            // DID when present so Dioxus's keyed-diff
-                            // assertion holds.
-                            PostCard {
-                                key: "{feed_item_key(item)}",
-                                post: item.post.clone(),
-                                reposter: feed_item_reposter(item),
-                                reply_parent_handle: feed_item_parent_handle(item),
+                    (ColumnData::Posts(items), _, _) => {
+                        let filtered: Vec<&FeedItem> = items
+                            .iter()
+                            .filter(|it| !has_filter || feed_item_matches(it, &filter_lower))
+                            .collect();
+                        if filtered.is_empty() {
+                            rsx! {
+                                div { class: "deck-column__empty",
+                                    "No posts match \"{filter_snap}\""
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                for item in filtered.into_iter() {
+                                    // Same post URI can appear twice in a
+                                    // feed (e.g. two reposters surfaced it).
+                                    // Disambiguate the key with the reposter
+                                    // DID when present so Dioxus's keyed-diff
+                                    // assertion holds.
+                                    PostCard {
+                                        key: "{feed_item_key(item)}",
+                                        post: item.post.clone(),
+                                        reposter: feed_item_reposter(item),
+                                        reply_parent_handle: feed_item_parent_handle(item),
+                                    }
+                                }
                             }
                         }
-                    },
+                    }
                     (ColumnData::Notifications { groups, subjects }, _, _) => rsx! {
                         for (i, g) in groups.iter().enumerate() {
                             NotificationCard {
@@ -569,6 +624,28 @@ fn feed_item_reposter(item: &smooblue_atproto::FeedItem) -> Option<String> {
     item.reposter_display()
 }
 
+/// True when the item matches a (case-insensitive, already-lowercased)
+/// filter substring. Checks post text, author handle, author display
+/// name, reposter display name, and reply-parent handle so the
+/// user's mental model of "filter to anything with X in it" works.
+pub fn feed_item_matches(item: &smooblue_atproto::FeedItem, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    // Bind owned Options into locals so .as_deref() borrows from
+    // them instead of dropped temporaries.
+    let reposter = item.reposter_display();
+    let parent = item.reply_parent_handle();
+    let haystacks: [&str; 5] = [
+        item.post.record.text.as_str(),
+        item.post.author.handle.as_str(),
+        item.post.author.display_name.as_deref().unwrap_or(""),
+        reposter.as_deref().unwrap_or(""),
+        parent.as_deref().unwrap_or(""),
+    ];
+    haystacks.iter().any(|h| h.to_lowercase().contains(needle))
+}
+
 fn feed_item_parent_handle(item: &smooblue_atproto::FeedItem) -> Option<String> {
     item.reply_parent_handle()
 }
@@ -630,12 +707,17 @@ fn subject_for<'a>(
 }
 
 #[component]
-fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
+fn ColumnHeader(id: String, title: String, kind: ColumnKind, filter_open: Signal<bool>) -> Element {
     let mut cols = use_context::<Signal<Vec<crate::state::ColumnSpec>>>();
     let mut drag_ctx = use_context::<Signal<ColumnDrag>>();
     let id_for_close = id.clone();
     let close = move |_| {
         crate::state::remove_column(&mut cols, &id_for_close);
+    };
+    let mut filter_open_w = filter_open;
+    let toggle_filter = move |_| {
+        let now = !*filter_open_w.read();
+        filter_open_w.set(now);
     };
 
     // Drag-and-drop handlers — header is the drag handle (grip icon),
@@ -700,6 +782,11 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind) -> Element {
                 }
             }
             span { class: "deck-column__title", "{title}" }
+            button { class: "deck-column__action",
+                title: if *filter_open.read() { "Hide filter" } else { "Filter this column" },
+                onclick: toggle_filter,
+                icons::ListFilter { size: icons::Size::Sm }
+            }
             button { class: "deck-column__action", title: "Close column", onclick: close,
                 icons::X { size: icons::Size::Sm }
             }
@@ -868,5 +955,47 @@ mod tests {
             MAX_POSTS_PER_COLUMN,
             stack_bytes / MAX_POSTS_PER_COLUMN,
         );
+    }
+
+    // ── feed_item_matches (per-column fuzzy filter) ────────────────
+
+    fn mk_with(text: &str, handle: &str, display: Option<&str>) -> FeedItem {
+        let mut item = mk("at://x/one");
+        item.post.record.text = text.into();
+        item.post.author.handle = handle.into();
+        item.post.author.display_name = display.map(String::from);
+        item
+    }
+
+    #[test]
+    fn filter_empty_needle_matches_everything() {
+        let item = mk_with("hello", "alice.bsky", None);
+        assert!(feed_item_matches(&item, ""));
+    }
+
+    #[test]
+    fn filter_matches_post_text_case_insensitive() {
+        // Matcher contract: needle is already lowercased (callers
+        // call .to_lowercase() once up front — the column does this
+        // exactly once per render, not per item).
+        let item = mk_with("I love Rust today", "anon.bsky", None);
+        assert!(feed_item_matches(&item, "rust"));
+        assert!(feed_item_matches(&item, "love"));
+        assert!(!feed_item_matches(&item, "javascript"));
+    }
+
+    #[test]
+    fn filter_matches_handle_and_display_name() {
+        let item = mk_with("ok", "alice.bsky.social", Some("Alice McEntire"));
+        assert!(feed_item_matches(&item, "alice"));
+        assert!(feed_item_matches(&item, "bsky.social"));
+        assert!(feed_item_matches(&item, "mcentire"));
+    }
+
+    #[test]
+    fn filter_returns_false_for_no_match() {
+        let item = mk_with("just a post", "x.test", Some("X"));
+        assert!(!feed_item_matches(&item, "rust"));
+        assert!(!feed_item_matches(&item, "🦀"));
     }
 }
