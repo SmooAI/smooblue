@@ -941,6 +941,22 @@ a {
     background: rgba(244, 159, 10, 0.06);
 }
 
+/* Inbound quote rendered as a full PostCard for like/repost/quote/
+ * reply affordances. The wrapper still draws the orange left-border
+ * so the visual cue stays; we just strip our own padding so the
+ * nested PostCard's padding doesn't double-up. */
+.notif__quote--rich {
+    padding: 0;
+    overflow: hidden;
+}
+
+.notif__quote--rich .post {
+    /* PostCard normally draws its own bottom border to separate
+     * adjacent feed items — inside the rich quote it's the only
+     * card so the border is just visual noise. */
+    border-bottom: 0;
+}
+
 /* "Your" content echoed back — the post they liked/reposted. Subtler;
    you already know what you wrote, the quote is just the reminder. */
 .notif__quote--own {

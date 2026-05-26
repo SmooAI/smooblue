@@ -238,8 +238,17 @@ fn AvatarStack(actors: Vec<PostAuthor>) -> Element {
     }
 }
 
-/// The quoted-post block shown under a notification — unchanged from
-/// the pre-grouping renderer.
+/// The quoted-post block shown under a notification.
+///
+/// Inbound reasons (reply / mention / quote) get a full [`PostCard`]
+/// so the user can like / repost / quote / reply / open-thread on
+/// the post directly from the Notifications column. The orange
+/// left-border wrapper stays to mark "this is the inbound thing."
+///
+/// Outbound reasons (like / repost / starterpack-joined on your OWN
+/// post) get the lighter display-only block — actions on your own
+/// post in a notification context aren't useful and would clutter
+/// the row.
 #[component]
 fn SubjectQuote(post: PostView, reason: String) -> Element {
     let text = post.record.text.clone();
@@ -248,13 +257,15 @@ fn SubjectQuote(post: PostView, reason: String) -> Element {
         return rsx! { Fragment {} };
     }
     let is_inbound = matches!(reason.as_str(), "reply" | "mention" | "quote");
-    let class = if is_inbound {
-        "notif__quote notif__quote--inbound"
-    } else {
-        "notif__quote notif__quote--own"
-    };
+    if is_inbound {
+        return rsx! {
+            div { class: "notif__quote notif__quote--inbound notif__quote--rich",
+                crate::components::post::PostCard { post }
+            }
+        };
+    }
     rsx! {
-        div { class: "{class}",
+        div { class: "notif__quote notif__quote--own",
             if !text.is_empty() {
                 p { class: "notif__quote-text", "{text}" }
             }
