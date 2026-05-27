@@ -4,9 +4,9 @@ name: Release
 #
 # Versioning happens locally via the changesets flow (`pnpm changeset`
 # during development, then `pnpm version` + `pnpm release` to cut).
-# This workflow only fires when a vX.Y.Z tag is pushed: it builds the
-# macOS .app bundle and uploads it as an asset on the GitHub release
-# that the tag created.
+# This workflow only fires when a vX.Y.Z tag is pushed: it builds
+# release binaries (macOS .app + Linux tarball) and uploads them as
+# assets on the GitHub release that the tag created.
 #
 # See .changeset/README.md for the full release playbook.
 
@@ -19,7 +19,8 @@ permissions:
     contents: write
 
 jobs:
-    bundle:
+    # Build the macOS .app bundle on macos-latest (arm64 runner).
+    bundle-macos:
         name: Build + attach macOS .app
         runs-on: macos-latest
         if: github.repository == 'SmooAI/smooblue'
@@ -35,19 +36,15 @@ jobs:
             - name: Cache cargo
               uses: Swatinem/rust-cache@v2
 
-            # Build via the same script we use locally.
             - name: Build macOS .app bundle
               run: ./scripts/bundle-macos.sh
 
-            # Use ditto so resource forks + symlinks survive the zip round-trip.
+            # ditto so resource forks + symlinks survive the zip round-trip.
             - name: Zip .app
               run: |
                   cd dist
                   ditto -c -k --sequesterRsrc --keepParent Smooblue.app Smooblue-macos-arm64.zip
 
-            # Pull the changelog entry for this tag out of CHANGELOG.md
-            # and use it as the GitHub release body. Falls back to a
-            # placeholder if the section isn't found.
             - name: Extract changelog for this release
               id: changelog
               run: |
@@ -62,7 +59,7 @@ jobs:
                   fi
                   echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
 
-            - name: Create / update GitHub release
+            - name: Create / update GitHub release + upload .app
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
@@ -76,3 +73,74 @@ jobs:
                   fi
                   gh release upload "$GITHUB_REF_NAME" \
                       dist/Smooblue-macos-arm64.zip --clobber
+
+    # Build the Linux x86_64 binary on ubuntu-latest. Webkit-gtk +
+    # friends are runtime deps the end-user installs (the binary
+    # dynamically links against them); the build-time deps installed
+    # below are just to compile.
+    bundle-linux:
+        name: Build + attach Linux x86_64 tarball
+        runs-on: ubuntu-latest
+        if: github.repository == 'SmooAI/smooblue'
+        # macOS job creates the release before this one runs. If the
+        # macOS build fails we still want the Linux asset attached
+        # to whatever release does land.
+        needs: [bundle-macos]
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+
+            # Build-time prereqs for compiling wry / webkit2gtk
+            # bindings. Runtime deps for end users are documented in
+            # the README + install.sh.
+            - name: Install build deps
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y \
+                      libwebkit2gtk-4.1-dev \
+                      libgtk-3-dev \
+                      libayatana-appindicator3-dev \
+                      librsvg2-dev \
+                      libssl-dev \
+                      build-essential
+
+            - name: cargo build --release
+              run: cargo build --release -p smooblue-app
+
+            - name: Stage tarball contents
+              run: |
+                  STAGE="dist/Smooblue-linux-x86_64"
+                  mkdir -p "$STAGE"
+                  cp target/release/smooblue-app "$STAGE/smooblue"
+                  cp assets/icons/icon-256.png "$STAGE/smooblue.png"
+                  cat > "$STAGE/README.txt" <<'EOF'
+                  Smooblue — Linux x86_64 build
+
+                  Runtime prerequisites (Debian/Ubuntu):
+                    sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 \
+                                     libayatana-appindicator3-1 librsvg2-2
+
+                  Run:
+                    ./smooblue
+
+                  Or copy the binary somewhere on your PATH:
+                    install -m755 smooblue ~/.local/bin/smooblue
+
+                  See https://github.com/SmooAI/smooblue for docs.
+                  EOF
+                  tar -czf dist/Smooblue-linux-x86_64.tar.gz -C dist Smooblue-linux-x86_64
+
+            - name: Upload to GitHub release
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  gh release upload "$GITHUB_REF_NAME" \
+                      dist/Smooblue-linux-x86_64.tar.gz --clobber

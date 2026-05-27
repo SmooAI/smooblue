@@ -112,37 +112,33 @@ launchctl load ~/Library/LaunchAgents/ai.smoo.smooblue.updater.plist
 
 The updater is a no-op when there are no new commits on `main` or your working tree is dirty — safe to leave running.
 
-### Linux (untested but probably works)
+### Linux (x86_64)
 
-Smooblue is a Dioxus desktop app — Dioxus uses `wry`, which on Linux renders via `webkit2gtk`. The core deck + OAuth flow should run; a few macOS-specific niceties degrade gracefully:
-
-- Apple Vision OCR for auto-alt-text is macOS-only — alt text falls back to the LLM scene description.
-- "Copy link" on a post uses `pbcopy`; you'll want to wire `xclip` / `wl-copy` (one-line patch in `crates/smooblue-app/src/components/post.rs`).
-- `bundle-macos.sh` produces a macOS `.app` — for Linux you just run the binary directly (no bundling story written yet).
-
-**Prerequisites** (Debian/Ubuntu names; pick your distro's equivalents):
+Same one-liner as macOS — it auto-detects platform and grabs `Smooblue-linux-x86_64.tar.gz` instead:
 
 ```bash
-sudo apt install \
-    libwebkit2gtk-4.1-dev \
-    libgtk-3-dev \
-    libayatana-appindicator3-dev \
-    librsvg2-dev \
-    libssl-dev \
-    build-essential
+curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
 ```
 
-**Build + run:**
+Installs the binary to `~/.local/bin/smooblue` and drops a `.desktop` file in `~/.local/share/applications/`. **You'll need the webkit2gtk runtime libs**; the installer prints the apt command after install. Debian/Ubuntu:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2
+```
+
+(Other distros: install the equivalents of `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`, `librsvg`.)
+
+A few macOS-specific niceties degrade gracefully on Linux:
+- Apple Vision OCR for auto-alt-text → falls back to the LLM scene description.
+- "Copy link" on a post uses `pbcopy` — needs a one-line patch to call `xclip` / `wl-copy` instead.
+
+Or build from source (needs the `-dev` versions of the runtime libs above + `build-essential`):
 
 ```bash
 git clone https://github.com/SmooAI/smooblue.git
 cd smooblue
 cargo run --release -p smooblue-app
 ```
-
-The release binary lands at `target/release/smooblue-app` — copy it wherever you keep local binaries (e.g. `~/.local/bin/smooblue`). The shared smooai-ui CSS + brand icon are baked into the binary at compile time, so a single file is the whole app.
-
-A `.desktop` file + xdg auto-update story is a future pearl — PRs welcome.
 
 ### Windows (not yet)
 
