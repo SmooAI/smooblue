@@ -5,6 +5,36 @@ release's section is generated from the `.changeset/*.md` files that landed
 since the last release. See [.changeset/README.md](.changeset/README.md) for
 the workflow.
 
+## 1.2.0
+
+### Minor Changes
+
+- [`f0d9008`](https://github.com/SmooAI/smooblue/commit/f0d900888412f5e745cbb438aff0a2b0ffabf6cc) Thanks [@brentrager](https://github.com/brentrager)! - Linux x86_64 release builds + one-line installer.
+
+  The release workflow now has a second job that compiles a Linux x86_64 binary on ubuntu-latest and uploads `Smooblue-linux-x86_64.tar.gz` (binary + icon + README) as a release asset alongside the macOS .app.
+
+  `install.sh` auto-detects platform and pulls the right asset:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
+  ```
+
+  On Linux it installs the binary to `~/.local/bin/smooblue`, drops a `.desktop` entry into `~/.local/share/applications/`, copies the icon into the hicolor theme, refreshes the desktop database, and prints the runtime-deps apt line (webkit2gtk-4.1 / gtk-3 / libayatana-appindicator / librsvg).
+
+### Patch Changes
+
+- [`72ee460`](https://github.com/SmooAI/smooblue/commit/72ee4609934d3f8c95430367a9c57959db088f32) Thanks [@brentrager](https://github.com/brentrager)! - `install.sh` at the repo root: one-line installer that pulls the latest GitHub release zip, drops `Smooblue.app` into `/Applications` (or `~/Applications` if that's not writable), strips the quarantine xattr, and opens it.
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
+  ```
+
+  Idempotent — re-running upgrades in place. Apple Silicon only today (the release pipeline only ships `Smooblue-macos-arm64.zip`); x86_64 + Linux + Windows users get a clear error pointing at the build-from-source steps. `SMOOBLUE_NO_OPEN=1` to install without launching.
+
+- [`71a53f3`](https://github.com/SmooAI/smooblue/commit/71a53f3a52afd3b74f30005f2f6503986e921570) Thanks [@brentrager](https://github.com/brentrager)! - README: split Install into per-platform sections. Adds Linux build instructions (webkit2gtk prerequisites, `cargo run --release` to launch) with honest caveats about macOS-only niceties (Apple Vision OCR, pbcopy-based copy-link, bundle-macos.sh) that degrade gracefully when missing. Notes Windows as theoretically buildable but untested.
+
+- [`6b7cb32`](https://github.com/SmooAI/smooblue/commit/6b7cb327ebd61aab7f6284d30c820c3ae5827311) Thanks [@brentrager](https://github.com/brentrager)! - Tighten the post-action row — each icon+count is now wrapped in a `.post__action-pair` span with a 2px internal gap, while the gap between distinct groups (reply / repost / quote / like / copy) stays at 14px. Counts now read as belonging to their icons instead of floating mid-row. Reposts + quote now also show a zero count (matching reply + like) so the row stays the same width regardless of engagement state.
+
 ## 1.1.0
 
 ### Minor Changes
