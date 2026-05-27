@@ -48,7 +48,18 @@ Full playbook in [`.changeset/README.md`](.changeset/README.md).
 1. `cargo fmt --all`
 2. `cargo clippy --workspace --tests` — must be zero warnings
 3. `cargo test --workspace --lib` — must be green
-4. **Drop a changeset** when the change is user-visible (any `crates/smooblue-*` source change qualifies):
+4. **Rebuild and install the .app locally** so the user can verify the change without waiting for a release. Skip only for changes that can't affect the running app (docs-only, CI tweaks, `.gitignore`). Hot-reload / `cargo run` is NOT a substitute — the bundle is what the user actually has open.
+
+    ```bash
+    bash scripts/bundle-macos.sh
+    rm -rf /Applications/Smooblue.app
+    cp -R dist/Smooblue.app /Applications/Smooblue.app
+    xattr -dr com.apple.quarantine /Applications/Smooblue.app
+    ```
+
+    On Linux: `cargo build --release -p smooblue-app && cp target/release/smooblue ~/.local/bin/smooblue`.
+
+5. **Drop a changeset** when the change is user-visible (any `crates/smooblue-*` source change qualifies):
 
     ```bash
     pnpm changeset
@@ -56,8 +67,8 @@ Full playbook in [`.changeset/README.md`](.changeset/README.md).
 
     Plain-English summary, pick `patch` / `minor` / `major` per impact. Internal-only changes (CI tweaks, docs-only, `.gitignore`) can skip.
 
-5. `git add -A && git commit -m "Plain English subject"` — let the pre-commit hook re-run fmt/clippy/tests
-6. `git push` — local-only is "halfway landed"; not done until origin has it
+6. `git add -A && git commit -m "Plain English subject"` — let the pre-commit hook re-run fmt/clippy/tests
+7. `git push` — local-only is "halfway landed"; not done until origin has it
 
 If a CI check fails after push, fix it in a follow-up commit. Don't leave a red build for the next session.
 
