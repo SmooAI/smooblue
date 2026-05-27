@@ -82,6 +82,16 @@ Built fast, single-binary, ~11 MB native app — feels closer to a Finder window
 
 ### macOS (supported)
 
+One-liner — grabs the latest release, installs to `/Applications` (or `~/Applications` if that's not writable), and opens it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
+```
+
+Apple Silicon only today (`Smooblue-macos-arm64.zip`). Re-running upgrades in place. To install without launching after, set `SMOOBLUE_NO_OPEN=1`.
+
+Or build from source:
+
 ```bash
 git clone https://github.com/SmooAI/smooblue.git
 cd smooblue
