@@ -584,7 +584,13 @@ pub fn ComposeSheet() -> Element {
     };
 
     rsx! {
-        div { class: "modal__backdrop", onclick: close,
+        // The compose sheet is always the topmost modal: you can
+        // open it from inside a thread / profile / engagement sheet
+        // (e.g. "Quote post" while reading a thread), and the
+        // expectation is that the compose dialog lands ON TOP of
+        // whatever you were reading — not buried behind it.
+        // `--compose` lifts the z-index above the other sheets.
+        div { class: "modal__backdrop modal__backdrop--compose", onclick: close,
             div {
                 class: if *dragging.read() {
                     "modal__sheet compose__sheet compose__sheet--drag"

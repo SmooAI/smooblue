@@ -3645,3 +3645,22 @@ a {
 .login__consent-text {
     flex: 1;
 }
+
+/* ===========================================================
+ *  Compose-on-top stacking
+ *
+ *  All sheets share `.modal__backdrop` (z-index: 50 from
+ *  smooai-ui). Because every sheet picks up the same z-index,
+ *  DOM order decides who paints on top — and the compose sheet
+ *  is rendered first in deck.rs, which means thread / profile /
+ *  engagement sheets paint OVER it.
+ *
+ *  That's wrong: you can fire "Quote post" or the FAB while
+ *  inside any other sheet, and the compose dialog needs to land
+ *  on top of whatever you were reading (not hidden behind it).
+ *  Lifting the compose backdrop one rung handles every case
+ *  without re-ordering the children in deck.rs.
+ * =========================================================== */
+.modal__backdrop--compose {
+    z-index: 60;
+}
