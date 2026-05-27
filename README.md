@@ -17,6 +17,22 @@ A native, multi-column [Bluesky](https://bsky.app) client for macOS desktop. Wri
 
 ---
 
+## Install (one-liner)
+
+**macOS (Apple Silicon)** — installs to `/Applications`, opens it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
+```
+
+**Linux (x86_64)** — same one-liner, auto-detects platform, drops the binary in `~/.local/bin` + a launcher entry:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
+```
+
+(Linux needs `libwebkit2gtk-4.1 libgtk-3 libayatana-appindicator3 librsvg2` — the installer prints the apt command. See [Install](#install) for build-from-source + Windows status.)
+
 ## What it is
 
 A TweetDeck-style desktop client for Bluesky. Stack as many columns as you want — Home, Notifications, Discover, your saved feeds, lists, search, individual profiles, suggested-follows — and watch them all live-update side-by-side. No app passwords; sign in once via OAuth and Smooblue holds DPoP-bound tokens on disk (0600, your config dir).
