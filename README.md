@@ -80,6 +80,8 @@ Built fast, single-binary, ~11 MB native app — feels closer to a Finder window
 
 ## Install
 
+### macOS (supported)
+
 ```bash
 git clone https://github.com/SmooAI/smooblue.git
 cd smooblue
@@ -99,6 +101,42 @@ launchctl load ~/Library/LaunchAgents/ai.smoo.smooblue.updater.plist
 ```
 
 The updater is a no-op when there are no new commits on `main` or your working tree is dirty — safe to leave running.
+
+### Linux (untested but probably works)
+
+Smooblue is a Dioxus desktop app — Dioxus uses `wry`, which on Linux renders via `webkit2gtk`. The core deck + OAuth flow should run; a few macOS-specific niceties degrade gracefully:
+
+- Apple Vision OCR for auto-alt-text is macOS-only — alt text falls back to the LLM scene description.
+- "Copy link" on a post uses `pbcopy`; you'll want to wire `xclip` / `wl-copy` (one-line patch in `crates/smooblue-app/src/components/post.rs`).
+- `bundle-macos.sh` produces a macOS `.app` — for Linux you just run the binary directly (no bundling story written yet).
+
+**Prerequisites** (Debian/Ubuntu names; pick your distro's equivalents):
+
+```bash
+sudo apt install \
+    libwebkit2gtk-4.1-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libssl-dev \
+    build-essential
+```
+
+**Build + run:**
+
+```bash
+git clone https://github.com/SmooAI/smooblue.git
+cd smooblue
+cargo run --release -p smooblue-app
+```
+
+The release binary lands at `target/release/smooblue-app` — copy it wherever you keep local binaries (e.g. `~/.local/bin/smooblue`). The shared smooai-ui CSS + brand icon are baked into the binary at compile time, so a single file is the whole app.
+
+A `.desktop` file + xdg auto-update story is a future pearl — PRs welcome.
+
+### Windows (not yet)
+
+Wry supports Windows via WebView2, so the core should build, but nobody's tried. The `safe_open` shell-out, the macOS activation hook, and the bundle script would all need a Windows arm.
 
 ## Privacy — what Smooblue sends where
 
