@@ -127,12 +127,43 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
     } else {
         ""
     };
+    // Reserve the right amount of vertical space BEFORE the image
+    // decodes so single-image embeds (no grid aspect-ratio CSS to
+    // fall back on) don't reflow when lazy-loading fires mid-scroll.
+    // Falls through to no inline style when the lexicon omitted
+    // aspectRatio — the CSS default (`aspect-ratio: 16/9` on
+    // .embed__images--1) still keeps us flash-free.
+    let aspect_style = if total == 1 {
+        img.aspect_ratio
+            .as_ref()
+            .filter(|ar| ar.width > 0 && ar.height > 0)
+            .map(|ar| format!("aspect-ratio: {} / {};", ar.width, ar.height))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    // Same dims forwarded onto the <img> so the browser can pre-
+    // allocate the slot even when CSS aspect-ratio is overridden.
+    let (w_attr, h_attr) = img
+        .aspect_ratio
+        .as_ref()
+        .filter(|ar| ar.width > 0 && ar.height > 0)
+        .map(|ar| (ar.width.to_string(), ar.height.to_string()))
+        .unwrap_or_default();
     rsx! {
         button {
             class: "embed__image{pos_class}",
+            style: "{aspect_style}",
             title: "{alt}",
             onclick: open_fullsize,
-            img { loading: "lazy", decoding: "async", src: "{img.thumb}", alt: "{alt}" }
+            img {
+                loading: "lazy",
+                decoding: "async",
+                src: "{img.thumb}",
+                alt: "{alt}",
+                width: "{w_attr}",
+                height: "{h_attr}",
+            }
             if !img.alt.is_empty() {
                 span { class: "embed__image-alt-badge", title: "{alt}", "ALT" }
             }

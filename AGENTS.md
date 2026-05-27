@@ -28,7 +28,47 @@ Don't use TodoWrite/ad-hoc markdown lists for multi-turn task tracking — use p
 
 ## Commits
 
-Conventional-commit prefixes (`feat:` / `fix:` / `chore:` / `perf:` / `docs:`) — release-plz reads them to generate CHANGELOG entries and bump versions. Use `feat!:` for breaking changes.
+Plain-English commit subjects. **No conventional-commit prefixes** (`feat:` / `fix:` / `chore:` / etc.) — versioning is decoupled from commit messages and runs through changesets instead.
+
+## Versioning — changesets
+
+```bash
+pnpm changeset           # drop a changeset alongside any user-visible change
+pnpm changeset:status    # see what's queued for the next release
+pnpm run version         # consume changesets → bump Cargo.toml + write CHANGELOG.md
+pnpm run release         # tag vX.Y.Z + push (CI builds + uploads the .app)
+```
+
+Full playbook in [`.changeset/README.md`](.changeset/README.md).
+
+## Land the plane (session completion)
+
+**Work is NOT done until everything is pushed AND a changeset is filed.** When you finish a chunk of work, run these in order. Skip steps only when they obviously don't apply (typo fix → no test run needed; nothing user-visible → no changeset).
+
+1. `cargo fmt --all`
+2. `cargo clippy --workspace --tests` — must be zero warnings
+3. `cargo test --workspace --lib` — must be green
+4. **Drop a changeset** when the change is user-visible (any `crates/smooblue-*` source change qualifies):
+
+    ```bash
+    pnpm changeset
+    ```
+
+    Plain-English summary, pick `patch` / `minor` / `major` per impact. Internal-only changes (CI tweaks, docs-only, `.gitignore`) can skip.
+
+5. `git add -A && git commit -m "Plain English subject"` — let the pre-commit hook re-run fmt/clippy/tests
+6. `git push` — local-only is "halfway landed"; not done until origin has it
+
+If a CI check fails after push, fix it in a follow-up commit. Don't leave a red build for the next session.
+
+**Cutting a release** (after a chunk of changesets has accumulated):
+
+```bash
+GITHUB_TOKEN=$(gh auth token) pnpm run version     # bumps + writes CHANGELOG.md
+git add -A && git commit -m "Release vX.Y.Z"
+git push
+pnpm run release                                    # tags + pushes; CI uploads .app + linux tarball
+```
 
 ## Before doing anything load-bearing
 

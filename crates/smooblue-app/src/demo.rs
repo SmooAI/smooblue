@@ -653,6 +653,7 @@ fn item(
                 thumb: url.to_string(),
                 fullsize: url.to_string(),
                 alt: String::new(),
+                aspect_ratio: None,
             }],
         })
     });
@@ -1125,6 +1126,7 @@ fn embed_image(url: &str, alt: &str) -> EmbedImage {
         thumb: url.to_string(),
         fullsize: url.to_string(),
         alt: alt.to_string(),
+        aspect_ratio: None,
     }
 }
 

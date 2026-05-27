@@ -853,6 +853,13 @@ pub struct EmbedImage {
     pub fullsize: String,
     #[serde(default)]
     pub alt: String,
+    /// Per-image dimensions from the lexicon. Used by the renderer
+    /// to reserve a correctly-shaped placeholder before the image
+    /// decodes — without this single-image embeds reflow from
+    /// 0-height to the decoded height while scrolling, producing
+    /// the "flashing" jank in long threads.
+    #[serde(rename = "aspectRatio", default)]
+    pub aspect_ratio: Option<EmbedAspectRatio>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]

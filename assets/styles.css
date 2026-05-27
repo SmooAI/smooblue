@@ -295,6 +295,17 @@ a {
     flex-wrap: wrap;
     gap: 10px;
     transition: background 100ms;
+    /* Long threads / busy feeds: each card is its own paint +
+     * layout island. WebKit skips rendering off-screen cards
+     * entirely (content-visibility: auto) and never invalidates
+     * the rest of the column when one card changes (contain: …).
+     * Big win for thread sheets with 100+ posts; cheap default
+     * for short feeds. contain-intrinsic-size reserves an
+     * estimated height for off-screen cards so the scrollbar
+     * stays accurate. */
+    content-visibility: auto;
+    contain-intrinsic-size: 0 200px;
+    contain: layout style paint;
 }
 
 .post:hover {
@@ -457,6 +468,23 @@ a {
 /* 1-up cap so a single tall image doesn't dominate the column. */
 .embed__images--1 .embed__image {
     max-height: 360px;
+    /* Default placeholder shape before the image decodes. The Rust
+     * side overrides this inline when the lexicon shipped an
+     * aspectRatio, so this only fires for images we don't have
+     * dimensions for. 16/9 is a sane "won't surprise anyone"
+     * default that prevents the 0px → image-height reflow that
+     * caused scroll-flashing in long threads. */
+    aspect-ratio: 16 / 9;
+    /* Object-fit so the cell shape stays right when the actual
+     * image is portrait or has different proportions than the
+     * placeholder. */
+    object-fit: cover;
+}
+
+.embed__images--1 .embed__image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .embed__image-alt-badge {
@@ -873,6 +901,11 @@ a {
     border-bottom: 1px solid var(--border);
     transition: background 100ms;
     cursor: pointer;
+    /* Same off-screen-skip / paint-isolation trick as .post —
+     * notification columns can grow long. */
+    content-visibility: auto;
+    contain-intrinsic-size: 0 180px;
+    contain: layout style paint;
 }
 
 .notif__head-row {
