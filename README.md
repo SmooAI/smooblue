@@ -1,10 +1,24 @@
-# Smooblue
+<a name="readme-top"></a>
 
-A native, multi-column [Bluesky](https://bsky.app) client for macOS desktop. Written in Rust + [Dioxus](https://dioxuslabs.com/), backed by Bluesky's official OAuth flow (PAR + PKCE + DPoP-bound tokens).
+<div align="center">
+  <a href="https://smoo.ai">
+    <img src="assets/icons/icon-256.png" alt="Smooblue" width="180" />
+  </a>
+</div>
 
-<p align="center">
-  <img src="assets/icons/icon-256.png" alt="Smooblue" width="180" />
-</p>
+## About SmooAI
+
+SmooAI is an AI-powered platform for helping businesses multiply their customer, employee, and developer experience.
+
+Learn more on [smoo.ai](https://smoo.ai).
+
+## SmooAI Open Source
+
+Check out other SmooAI open-source packages at [smoo.ai/open-source](https://smoo.ai/open-source).
+
+## About Smooblue
+
+A native, multi-column [Bluesky](https://bsky.app) desktop client for macOS and Linux. Written in Rust + [Dioxus](https://dioxuslabs.com/), backed by Bluesky's official OAuth flow (PAR + PKCE + DPoP-bound tokens).
 
 <p align="center">
   <img src="media/smooblue-demo.gif" alt="Smooblue demo" width="720" />
@@ -222,6 +236,22 @@ smooblue/
 ## Contributing
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Contact
+
+Brent Rager
+
+- [Email](mailto:brent@smoo.ai)
+- [LinkedIn](https://www.linkedin.com/in/brentrager/)
+- [Bluesky](https://bsky.app/profile/brentragertech.bsky.social)
+- [TikTok](https://www.tiktok.com/@brentragertech)
+- [Instagram](https://www.instagram.com/brentragertech/)
+
+SmooAI on GitHub: [https://github.com/SmooAI](https://github.com/SmooAI)
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 

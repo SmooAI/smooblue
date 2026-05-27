@@ -106,22 +106,79 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                     }
 
                     // ── About ──────────────────────────────────────
-                    section { class: "settings__section",
+                    // Doubles as a soft promo for Smoo AI — Smooblue
+                    // is open-source goodwill from the broader SmooAI
+                    // platform, mirrors what we do in every other
+                    // SmooAI OSS README (see ~/dev/smooai/config,
+                    // ~/dev/smooai/logger, etc.).
+                    section { class: "settings__section settings__about",
                         h3 { class: "settings__section-title", "About" }
-                        div { class: "settings__row",
-                            span { class: "settings__row-label", "Version" }
-                            span { class: "settings__row-value", "{version}" }
+                        div { class: "settings__about-brand",
+                            div { class: "settings__about-chip", "S" }
+                            div { class: "settings__about-brand-text",
+                                div { class: "settings__about-name", "Smooblue" }
+                                div { class: "settings__about-tagline",
+                                    "A native multi-column Bluesky desktop client."
+                                }
+                                div { class: "settings__about-version",
+                                    "v{version}"
+                                }
+                            }
                         }
-                        div { class: "settings__row",
-                            span { class: "settings__row-label", "Source" }
+                        div { class: "settings__about-from",
+                            "Open-source from "
                             a { class: "settings__row-link",
-                                href: "https://github.com/SmooAI/smooblue",
-                                "github.com/SmooAI/smooblue"
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://smoo.ai");
+                                },
+                                "Smoo AI"
+                            }
+                            " — the AI-powered platform for multiplying customer, "
+                            "employee, and developer experience."
+                        }
+                        div { class: "settings__about-links",
+                            a { class: "settings__about-link",
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://smoo.ai");
+                                },
+                                "smoo.ai →"
+                            }
+                            a { class: "settings__about-link",
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://smoo.ai/open-source");
+                                },
+                                "More open source →"
+                            }
+                            a { class: "settings__about-link",
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://github.com/SmooAI/smooblue");
+                                },
+                                "Source on GitHub →"
+                            }
+                            a { class: "settings__about-link",
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://bsky.app/profile/brentragertech.bsky.social");
+                                },
+                                "@brentragertech on Bluesky →"
                             }
                         }
                         button { class: "settings__action",
                             onclick: reveal_config_dir,
                             "Reveal config folder in Finder"
+                        }
+                        div { class: "settings__about-license",
+                            "MIT-licensed. Bluesky is a trademark of Bluesky Social, PBC. "
+                            "Smooblue is not affiliated with Bluesky Social."
                         }
                     }
 
