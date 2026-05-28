@@ -87,7 +87,11 @@ impl ColumnData {
 fn poll_interval(kind: &ColumnKind) -> Duration {
     match kind {
         ColumnKind::Home => Duration::from_secs(15),
-        ColumnKind::Notifications => Duration::from_secs(20),
+        // Notifications churn slower than the home feed AND each
+        // poll allocates ~30 hydrated subject posts + groups + clones
+        // them on every render down the tree. 30s halves the GC
+        // pressure without users noticing the latency difference.
+        ColumnKind::Notifications => Duration::from_secs(30),
         ColumnKind::Search { .. } => Duration::from_secs(30),
         ColumnKind::Feed { .. } => Duration::from_secs(25),
         ColumnKind::AuthorFeed { .. } => Duration::from_secs(45),
@@ -567,8 +571,12 @@ async fn fetch_page(
         ColumnKind::Notifications => {
             // Notifications don't paginate via fetch_more — top-poll
             // only. We don't expose a cursor.
+            // 30 per fetch is the sweet spot: enough to give the user
+            // a meaningful window, small enough that the cascade of
+            // get_posts hydration + grouping + per-card clones stays
+            // snappy. 50 was visibly laggy on busy accounts.
             let items = client
-                .list_notifications(cur, 50)
+                .list_notifications(cur, 30)
                 .await
                 .map(|r| r.notifications)
                 .map_err(|e| e.to_string())?;

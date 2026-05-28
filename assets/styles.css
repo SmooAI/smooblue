@@ -300,11 +300,16 @@ a {
      * entirely (content-visibility: auto) and never invalidates
      * the rest of the column when one card changes (contain: …).
      * Big win for thread sheets with 100+ posts; cheap default
-     * for short feeds. contain-intrinsic-size reserves an
-     * estimated height for off-screen cards so the scrollbar
-     * stays accurate. */
+     * for short feeds.
+     *
+     * `auto` keyword on contain-intrinsic-size means: remember
+     * the last-rendered size of each card and use THAT when the
+     * card scrolls back out, instead of falling back to the
+     * fixed 200px estimate every time. Without `auto` we got
+     * a measurable scroll-back jank (cards relayouting from
+     * 200px → real size on every viewport re-entry). */
     content-visibility: auto;
-    contain-intrinsic-size: 0 200px;
+    contain-intrinsic-size: auto 200px;
     contain: layout style paint;
 }
 
@@ -902,9 +907,16 @@ a {
     transition: background 100ms;
     cursor: pointer;
     /* Same off-screen-skip / paint-isolation trick as .post —
-     * notification columns can grow long. */
+     * notification columns can grow long. `auto` keyword on
+     * contain-intrinsic-size tells the browser to remember the
+     * *actual* rendered size of each card across scroll passes,
+     * so cards that scroll back into view don't re-measure from
+     * the stale fixed estimate. The fixed fallback (240px) only
+     * applies to first paint, before the browser has a real
+     * measurement — and it's bigger than the old 180px because
+     * notif cards with subject quotes routinely exceed 300px. */
     content-visibility: auto;
-    contain-intrinsic-size: 0 180px;
+    contain-intrinsic-size: auto 240px;
     contain: layout style paint;
 }
 

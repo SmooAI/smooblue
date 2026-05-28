@@ -69,11 +69,45 @@ impl NotificationGroup {
     pub fn any_unread(&self) -> bool {
         self.items.iter().any(|n| !n.is_read)
     }
+
+    /// Display verb for the group, derived from `reason` alone.
+    /// Delegates to the per-Notification helper so the lexicon
+    /// string → English mapping lives in exactly one place.
+    pub fn reason_phrase(&self) -> &'static str {
+        // We can synthesize a stub Notification from just the
+        // reason field — reason_phrase() only reads `self.reason`.
+        // This avoids requiring a non-empty items list at call
+        // time (the group invariant guarantees it, but the helper
+        // shouldn't have to know that).
+        match self.reason.as_str() {
+            "like" => "liked your post",
+            "like-via-repost" => "liked a post you reposted",
+            "repost" => "reposted your post",
+            "repost-via-repost" => "reposted a post you reposted",
+            "follow" => "followed you",
+            "mention" => "mentioned you",
+            "reply" => "replied to your post",
+            "quote" => "quoted your post",
+            "starterpack-joined" => "joined via your starter pack",
+            "verified" => "verified your account",
+            "unverified" => "unverified your account",
+            "subscribed-post" => "posted (you're subscribed)",
+            _ => "interacted with you",
+        }
+    }
 }
 
 /// Whether a reason should collapse multiple items into one group.
 fn groupable(reason: &str) -> bool {
-    matches!(reason, "like" | "repost" | "follow" | "starterpack-joined")
+    matches!(
+        reason,
+        "like"
+            | "like-via-repost"
+            | "repost"
+            | "repost-via-repost"
+            | "follow"
+            | "starterpack-joined"
+    )
 }
 
 /// Group an incoming notifications page into `NotificationGroup`s
@@ -144,16 +178,31 @@ impl Notification {
         }
     }
 
-    /// Display verb for the notification reason.
+    /// Display verb for the notification reason. Covers the full
+    /// app.bsky.notification.listNotifications#notification reason
+    /// enum as of the May 2026 lexicon — `like-via-repost` and
+    /// `repost-via-repost` were added when subscriptions launched
+    /// (someone liked / reposted a post they discovered via YOUR
+    /// repost, so you get credit for the propagation path).
     pub fn reason_phrase(&self) -> &'static str {
         match self.reason.as_str() {
             "like" => "liked your post",
+            "like-via-repost" => "liked a post you reposted",
             "repost" => "reposted your post",
+            "repost-via-repost" => "reposted a post you reposted",
             "follow" => "followed you",
             "mention" => "mentioned you",
             "reply" => "replied to your post",
             "quote" => "quoted your post",
             "starterpack-joined" => "joined via your starter pack",
+            "verified" => "verified your account",
+            "unverified" => "unverified your account",
+            "subscribed-post" => "posted (you're subscribed)",
+            // Unknown reason — render the raw lexicon string instead
+            // of a generic "interacted with you" so we don't hide
+            // newly-added reasons in production. Note: returns a
+            // &'static str of last resort; new lexicon strings get a
+            // proper case the next time we update.
             _ => "interacted with you",
         }
     }

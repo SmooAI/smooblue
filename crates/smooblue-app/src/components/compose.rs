@@ -634,14 +634,21 @@ pub fn ComposeSheet() -> Element {
                     value: "{text}",
                     oninput: move |e| {
                         let v = e.value();
-                        // Persist on every keystroke — file write is
-                        // cheap, max 300 chars, and the alternative is
-                        // a debounce that loses the last second of
-                        // typing if the user quits suddenly.
+                        // Update the signal first — the textarea must
+                        // reflect the keystroke immediately.
+                        text.set(v.clone());
+                        // Move the file write OFF the render thread.
+                        // Was blocking inline before, causing visible
+                        // keystroke lag on long drafts / slower disks
+                        // (every keystroke = create_dir_all + write).
+                        // spawn_blocking is safe + cheap; a few
+                        // redundant writes per second is fine, the
+                        // file just gets overwritten with the latest.
                         if !crate::demo::is_active() {
-                            let _ = crate::persistence::save_draft(&v);
+                            tokio::task::spawn_blocking(move || {
+                                let _ = crate::persistence::save_draft(&v);
+                            });
                         }
-                        text.set(v);
                     },
                     onkeydown: move |e| {
                         if e.key() == Key::Enter && (e.modifiers().meta() || e.modifiers().ctrl()) {

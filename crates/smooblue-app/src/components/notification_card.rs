@@ -35,8 +35,8 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
         "notif"
     };
     let icon_color_class = match reason.as_str() {
-        "like" => "notif__icon notif__icon--like",
-        "repost" => "notif__icon notif__icon--repost",
+        "like" | "like-via-repost" => "notif__icon notif__icon--like",
+        "repost" | "repost-via-repost" => "notif__icon notif__icon--repost",
         "follow" => "notif__icon notif__icon--follow",
         _ => "notif__icon",
     };
@@ -54,7 +54,9 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
     let mut profile_focus = use_context::<Signal<ProfileFocus>>();
     let click_target: Option<String> = match reason.as_str() {
         "reply" | "mention" | "quote" => Some(first.uri.clone()),
-        "like" | "repost" => first.reason_subject.clone(),
+        "like" | "like-via-repost" | "repost" | "repost-via-repost" | "subscribed-post" => {
+            first.reason_subject.clone()
+        }
         _ => None,
     };
     let click_target_for_profile = first.author.did.clone();
@@ -84,8 +86,8 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
             div { class: "notif__head-row",
                 div { class: "{icon_color_class}",
                     match reason.as_str() {
-                        "like" => rsx! { icons::Heart { size: icons::Size::Sm } },
-                        "repost" => rsx! { icons::Repeat2 { size: icons::Size::Sm } },
+                        "like" | "like-via-repost" => rsx! { icons::Heart { size: icons::Size::Sm } },
+                        "repost" | "repost-via-repost" => rsx! { icons::Repeat2 { size: icons::Size::Sm } },
                         "follow" => rsx! { icons::UserPlus { size: icons::Size::Sm } },
                         "mention" => rsx! { icons::AtSign { size: icons::Size::Sm } },
                         "reply" => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
@@ -118,18 +120,12 @@ pub fn NotificationCard(group: NotificationGroup, subject: Option<PostView>) -> 
 #[component]
 fn NotifPhrase(group: NotificationGroup) -> Element {
     let mut profile_focus = use_context::<Signal<ProfileFocus>>();
-    let reason = group.reason.clone();
     let count = group.count();
-    let verb = match reason.as_str() {
-        "like" => "liked your post",
-        "repost" => "reposted your post",
-        "follow" => "followed you",
-        "mention" => "mentioned you",
-        "reply" => "replied to your post",
-        "quote" => "quoted your post",
-        "starterpack-joined" => "joined via your starter pack",
-        _ => "interacted with you",
-    };
+    // Single source of truth for the verb phrase — delegated to
+    // group.reason_phrase() (which itself wraps the canonical
+    // Notification::reason_phrase()) so adding a new lexicon reason
+    // only requires editing notifications.rs.
+    let verb = group.reason_phrase();
 
     if count == 1 {
         let actor = group.items[0].author.clone();
