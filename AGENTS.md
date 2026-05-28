@@ -75,11 +75,17 @@ If a CI check fails after push, fix it in a follow-up commit. Don't leave a red 
 **Cutting a release** (after a chunk of changesets has accumulated):
 
 ```bash
-GITHUB_TOKEN=$(gh auth token) pnpm run version     # bumps + writes CHANGELOG.md
-git add -A && git commit -m "Release vX.Y.Z"
-git push
-pnpm run release                                    # tags + pushes; CI uploads .app + linux tarball
+pnpm run release    # bumps versions, commits, pushes, tags, pushes tag
 ```
+
+That's the whole ritual. The script:
+1. Refuses to start on a dirty tree (so the Release commit only contains the version bump)
+2. `git pull --rebase` so we don't push a Release commit on top of stale main
+3. Consumes pending changesets → bumps `package.json` + `Cargo.toml` + writes CHANGELOG.md
+4. Commits + pushes the bump
+5. Tags + pushes `vX.Y.Z`
+
+CI takes it from there — builds .app + .deb + tarball, attaches them to the GitHub release, and auto-bumps the Homebrew tap. `GITHUB_TOKEN` is auto-derived from `gh auth token` if not exported; needed by the `@changesets/changelog-github` plugin to resolve PR titles. Idempotent — re-runs with no pending changesets or an existing tag no-op cleanly.
 
 ## Before doing anything load-bearing
 
