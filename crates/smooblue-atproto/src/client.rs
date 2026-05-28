@@ -386,6 +386,32 @@ impl AtClient {
         Ok(crate::feed::FeedGeneratorsResponse { feeds: out_feeds })
     }
 
+    /// `app.bsky.actor.searchActorsTypeahead` — fast prefix-match
+    /// actor search optimised for autocomplete-style as-you-type
+    /// suggestions. Returns the same `ActorProfile` shape as the
+    /// suggestions / known-followers endpoints, so it can feed
+    /// any of our actor-row renderers.
+    pub async fn search_actors(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<crate::feed::ActorProfile>, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.actor.searchActorsTypeahead")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("limit", &limit.to_string());
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            #[serde(default)]
+            actors: Vec<crate::feed::ActorProfile>,
+        }
+        let r: Resp = self.get_json(&url).await?;
+        Ok(r.actors)
+    }
+
     /// `app.bsky.actor.getSuggestions` — a personalized list of
     /// actors the AppView thinks the viewer might want to follow.
     /// Backs the "Suggested follows" column.

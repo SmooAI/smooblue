@@ -3665,6 +3665,163 @@ a {
 }
 
 /* ===========================================================
+ *  Search sheet — live results (users + posts) with per-row
+ *  "open" + an optional "+ column" pin.
+ * =========================================================== */
+.search__sheet {
+    /* Wider + taller than the default modal sheet — the body
+     * needs to hold both an actor list and a post list at once. */
+    max-width: min(640px, calc(100vw - 48px));
+    max-height: calc(100vh - var(--space-8));
+    display: flex;
+    flex-direction: column;
+}
+
+.search__input {
+    /* Sits inside .modal__sheet padding; visual margin so the
+     * input doesn't kiss the header. */
+    margin: 0 0 10px;
+}
+
+.search__body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    /* Negative-margin trick so the actor / post rows can paint
+     * to the sheet edges (they have their own padding) while
+     * the input + footer stay inset. */
+    margin: 0 -6px;
+    padding: 4px 6px;
+}
+
+.search__hint {
+    color: var(--text-muted);
+    font-size: 13px;
+    padding: 16px 8px;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.search__error {
+    color: var(--color-smooai-red);
+    font-size: 13px;
+    padding: 12px 8px;
+}
+
+.search__section {
+    margin-top: 8px;
+}
+
+.search__section + .search__section {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.search__section-title {
+    margin: 0 0 6px;
+    padding: 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+
+.search__actor-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 80ms;
+}
+
+.search__actor-row:hover {
+    background: var(--card);
+}
+
+.search__actor-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+}
+
+.search__actor-avatar--empty {
+    background: var(--card);
+    border: 1px solid var(--border);
+}
+
+.search__actor-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.search__actor-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search__actor-handle {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.search__actor-pin {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 80ms, color 80ms, border-color 80ms;
+}
+
+.search__actor-pin:hover {
+    background: var(--card);
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+.search__post-row {
+    border-radius: var(--radius-md);
+    margin: 0 -10px;
+    cursor: pointer;
+    transition: background 80ms;
+}
+
+.search__post-row:hover {
+    background: var(--card);
+}
+
+.search__post-row .post {
+    /* Override post-card border-bottom so consecutive search-row
+     * posts don't look like a stacked feed. */
+    border-bottom: 1px solid transparent;
+}
+
+.search__post-row + .search__post-row .post {
+    border-top: 1px solid var(--border);
+}
+
+/* ===========================================================
  *  Compose-on-top stacking
  *
  *  All sheets share `.modal__backdrop` (z-index: 50 from

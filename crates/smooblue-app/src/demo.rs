@@ -839,6 +839,35 @@ pub fn engagement_for(kind: &crate::state::Engagement) -> crate::components::eng
     }
 }
 
+/// Demo: synthetic search results for the SearchSheet's live
+/// preview. Mixes a few canned actors + a slice of the home feed
+/// so both sections render with content.
+pub fn search_results_for(q: &str) -> crate::components::search_sheet::SearchResults {
+    use smooblue_atproto::ActorProfile;
+    let avatar = |seed: &str| Some(format!("https://picsum.photos/seed/{seed}/80"));
+    let actor = |handle: &str, display: &str, seed: &str| ActorProfile {
+        did: format!("did:plc:demo-{handle}"),
+        handle: handle.to_string(),
+        display_name: Some(display.to_string()),
+        description: None,
+        avatar: avatar(seed),
+        banner: None,
+        followers_count: None,
+        follows_count: None,
+        posts_count: None,
+        viewer: None,
+        pinned_post: None,
+    };
+    crate::components::search_sheet::SearchResults {
+        actors: vec![
+            actor(&format!("{q}.bsky.social"), &format!("{q} (demo)"), "demo1"),
+            actor("alice.bsky.social", "Alice Mendez", "alice"),
+            actor("rustlang.bsky.social", "Rust", "rust"),
+        ],
+        posts: home_feed().into_iter().take(4).collect(),
+    }
+}
+
 /// Demo: a handful of suggested actors for the Suggestions column,
 /// shaped like the real getSuggestions response so the
 /// SuggestionRow renders end-to-end (avatar + name + handle + bio +
