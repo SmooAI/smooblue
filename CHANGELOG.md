@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.1
+
+### Patch Changes
+
+- [`fdd07b8`](https://github.com/SmooAI/smooblue/commit/fdd07b8f2e5905d57c06ef52b7835f157f2edc6c) Thanks [@brentrager](https://github.com/brentrager)! - Three fixes from the field:
+
+  **Notifications: "interacted with you" generic phrase replaced with proper reasons.** The lexicon ships `like-via-repost` / `repost-via-repost` / `verified` / `unverified` / `subscribed-post` in addition to the original six, and the phrase mapping only knew about the originals — so likes on YOUR reposts showed up as the meaningless "X interacted with you." Now they read "X liked a post you reposted." Also unified the phrase + icon mapping into one source of truth on `NotificationGroup` so the next lexicon add only requires editing one file.
+
+  **Compose typing lag.** Every keystroke into the post box was doing an inline `create_dir_all + fs::write` for draft persistence — on long drafts this stacked up enough to be visibly laggy. Moved the save off the render thread via `tokio::task::spawn_blocking`; the textarea now updates instantly and the draft saves asynchronously.
+
+  **Notifications column slowness.** Three knobs: bumped poll interval from 20s → 30s (notifications churn slower than feeds and each poll allocates a chunk of memory for hydrated subject posts), dropped page size from 50 → 30 (50 was visibly laggy on busy accounts), and switched `.notif` / `.post` containment to `contain-intrinsic-size: auto …` so cards that scroll back into view use their _actual_ last-rendered size instead of falling back to the fixed estimate every time.
+
+- [`b2ae9b7`](https://github.com/SmooAI/smooblue/commit/b2ae9b7688f58feaa72ebde1c5e66d9c16b1885c) Thanks [@brentrager](https://github.com/brentrager)! - Fix: "Quote post" fired from inside a thread (or any other sheet) now opens the compose dialog ON TOP of the thread instead of hidden behind it. Same fix applies to the FAB when fired with another sheet open. Root cause: every sheet shared the same `.modal__backdrop` z-index, so DOM order decided stacking — and compose was rendered first in `deck.rs`, putting it under everything else. Added a `.modal__backdrop--compose` modifier (z-index 60 vs the default 50) so the compose sheet always wins.
+
+- [`76ea27f`](https://github.com/SmooAI/smooblue/commit/76ea27feb16c28adbc5e5ff0fd20c3a1544a53d3) Thanks [@brentrager](https://github.com/brentrager)! - Add a Smoo AI promo block to Settings → About — branded chip, tagline, version, and links out to smoo.ai / smoo.ai/open-source / source on GitHub / @brentragertech on Bluesky. Plus an MIT + Bluesky-trademark line at the bottom. Matches the same about-block pattern the other SmooAI open-source repos (config, logger, observability) already use in their READMEs.
+
+  README also gets the canonical SmooAI top-of-file framing ("About SmooAI" → "SmooAI Open Source" → "About Smooblue") plus a Contact section at the bottom with email / socials / SmooAI GitHub link.
+
+- [`7d46ecd`](https://github.com/SmooAI/smooblue/commit/7d46ecd9fdec124753ffe0ab5e7932006e07a86e) Thanks [@brentrager](https://github.com/brentrager)! - Long-thread scroll performance pass. The "flashing while scrolling a big thread" came from two compounding sources:
+
+  1. **Single-image embeds had no reserved space.** The 2/3/4-up image grids set `aspect-ratio: 2/1` in CSS but the 1-up grid didn't, so single-image cards started at 0 height and reflowed to the decoded height the moment `loading=lazy` fired — and the cascade of reflows looked like a flash storm in WebKit. `EmbedImage` now carries the per-image `aspectRatio` from the lexicon; the render plumbs it onto the embed div as an inline `aspect-ratio` style + `width`/`height` attrs on the `<img>`. Fallback CSS reserves 16:9 when the lexicon omitted dims so legacy posts still don't flash.
+
+  2. **Off-screen post cards were being laid out + painted on every scroll tick.** Added `content-visibility: auto` + `contain: layout style paint` (with `contain-intrinsic-size: 0 200px`) to `.post` and `.notif`. WebKit can now skip rendering off-screen cards entirely and never re-invalidate the rest of the column when one card changes. Biggest win on thread sheets with 100+ posts.
+
+  Plus an AGENTS.md / CLAUDE.md update codifying the "land the plane" workflow: every chunk of work runs fmt → clippy → tests → drop a changeset → commit → push, in that order, before being called done.
+
+- [`06f6021`](https://github.com/SmooAI/smooblue/commit/06f60213846517e3b6234a40c9bb69c5e692a38e) Thanks [@brentrager](https://github.com/brentrager)! - Hydrate + render the subject post for `like-via-repost` and `repost-via-repost` notifications. The reason mapping was fixed in the previous changeset but the subject-hydration code still only fetched URIs for `like` / `repost` / `quote`, so via-repost notifications had no post to show. Now they hydrate + display the post you reposted (the one that got the new engagement) with a "From your repost of @handle" caption so it's clear it's not your own post. Subscribed-post notifications get the same treatment.
+
 Written by [@changesets/cli](https://github.com/changesets/changesets) — each
 release's section is generated from the `.changeset/*.md` files that landed
 since the last release. See [.changeset/README.md](.changeset/README.md) for
