@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0
+
+### Minor Changes
+
+- [`29da70c`](https://github.com/SmooAI/smooblue/commit/29da70cc386dd3b65dbff39d84b50b1965f20288) Thanks [@brentrager](https://github.com/brentrager)! - Search is now live results, not a column-builder. Typing in the search sheet fires a debounced `searchActorsTypeahead` + `searchPosts` in parallel; results appear in two stacked sections (Users + Posts). Clicking a user row opens their profile sheet; clicking a post row opens the thread. Each user row also has a "+ column" button to pin them as an author-feed column. The "Add as search column" footer button is still there if you want to materialise the current query as a permanent column — the old behaviour is now opt-in rather than the only option.
+
 ## 1.2.2
 
 ### Patch Changes
