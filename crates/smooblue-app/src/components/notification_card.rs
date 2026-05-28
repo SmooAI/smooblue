@@ -266,8 +266,25 @@ fn SubjectQuote(post: PostView, reason: String) -> Element {
             }
         };
     }
+    // For -via-repost reasons the subject isn't the user's OWN
+    // post — it's a post they reposted that someone else then
+    // interacted with. Show the original author's handle so the
+    // user knows whose post they're looking at + a small "from
+    // your repost" caption to explain the relationship.
+    let is_via_repost = matches!(reason.as_str(), "like-via-repost" | "repost-via-repost");
+    let original_handle = if is_via_repost {
+        Some(post.author.handle.clone())
+    } else {
+        None
+    };
     rsx! {
         div { class: "notif__quote notif__quote--own",
+            if let Some(handle) = original_handle {
+                div { class: "notif__quote-caption",
+                    "From your repost of "
+                    span { class: "notif__quote-handle", "@{handle}" }
+                }
+            }
             if !text.is_empty() {
                 p { class: "notif__quote-text", "{text}" }
             }

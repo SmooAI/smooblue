@@ -758,7 +758,13 @@ fn collect_subject_uris(items: &[Notification]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for n in items {
         let want = match n.reason.as_str() {
-            "like" | "repost" | "quote" => n.reason_subject.clone(),
+            // Engagement-on-something cases: the reason_subject is
+            // the post the user wants to see (their own post that
+            // got engagement, or — for the -via-repost variants —
+            // the post they reposted that someone else then liked
+            // or re-reposted).
+            "like" | "like-via-repost" | "repost" | "repost-via-repost" | "quote"
+            | "subscribed-post" => n.reason_subject.clone(),
             "reply" | "mention" => Some(n.uri.clone()),
             _ => None,
         };
@@ -779,7 +785,8 @@ fn subject_for<'a>(
     subjects: &'a HashMap<String, PostView>,
 ) -> Option<&'a PostView> {
     let key = match n.reason.as_str() {
-        "like" | "repost" | "quote" => n.reason_subject.as_deref()?,
+        "like" | "like-via-repost" | "repost" | "repost-via-repost" | "quote"
+        | "subscribed-post" => n.reason_subject.as_deref()?,
         "reply" | "mention" => &n.uri,
         _ => return None,
     };
