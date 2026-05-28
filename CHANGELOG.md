@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2
+
+### Patch Changes
+
+- [`22ca936`](https://github.com/SmooAI/smooblue/commit/22ca93672d8d505042ab0d6f6b02ae8de8e0c1ab) Thanks [@brentrager](https://github.com/brentrager)! - Fix the home / feed column scroll-flash. Earlier we added `content-visibility: auto` on `.post` and `.notif` to skip rendering of off-screen cards — great for the deep-thread scroll case it was added for, but on fast-scrolling feed columns it meant each card entering the viewport flashed blank briefly while WebKit's async content-visibility paint caught up. Dropped `content-visibility: auto` (and the associated `contain-intrinsic-size`) and kept the cheap `contain: layout style paint` per-card isolation. The original deep-thread flashing issue was actually image-decode reflows, which we already fix separately with per-image `aspectRatio` on embeds + the 16:9 CSS fallback — so we don't need content-visibility to solve it.
+
+- [`2fbb0f5`](https://github.com/SmooAI/smooblue/commit/2fbb0f58e86988f73a4328d71c034141e6cdcbe3) Thanks [@brentrager](https://github.com/brentrager)! - Expand the security doc with a "Post-authentication: what protects your content in transit and at rest" section that walks through the three layers separately (TLS = transport, DPoP = per-request authenticity, AT Protocol = the honest "posts are public by design" content model). Adds explicit notes on DM support (intentionally none today; Bluesky hasn't shipped E2EE for chat yet), draft persistence on disk, and what Smooblue does NOT do with your content (no analytics, no third-party forwarding, no crash uploads). TL;DR table updated with rows for per-request authenticity, public-post content, and DMs so the reader gets the shape before drilling in.
+
+- [`bab88b1`](https://github.com/SmooAI/smooblue/commit/bab88b18573aa069f8ab7e248d625d5a2e406294) Thanks [@brentrager](https://github.com/brentrager)! - Add a comprehensive security writeup at `docs/Security/Security.md` — auth model (PAR + PKCE + DPoP, why this is stronger than app passwords), transport (rustls TLS, no insecure fallbacks), the complete data egress table, URL hardening, what browser security extensions buy you vs don't, the process / sandboxing model, and an honest "what's NOT done" section (adhoc signing, no App Sandbox, plaintext session file, no SRI on auto-updater). Linked from the README and from Settings → About so users can find it in-app.
+
 ## 1.2.1
 
 ### Patch Changes

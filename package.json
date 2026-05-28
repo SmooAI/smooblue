@@ -1,6 +1,6 @@
 {
     "name": "smooblue",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "private": true,
     "description": "Native multi-column Bluesky desktop client. Rust + Dioxus.",
     "repository": "https://github.com/SmooAI/smooblue",
