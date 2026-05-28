@@ -295,21 +295,21 @@ a {
     flex-wrap: wrap;
     gap: 10px;
     transition: background 100ms;
-    /* Long threads / busy feeds: each card is its own paint +
-     * layout island. WebKit skips rendering off-screen cards
-     * entirely (content-visibility: auto) and never invalidates
-     * the rest of the column when one card changes (contain: …).
-     * Big win for thread sheets with 100+ posts; cheap default
-     * for short feeds.
+    /* Each card is its own paint + layout island. WebKit never
+     * re-invalidates the rest of the column when one card
+     * changes (contain: layout style paint). Cheap, no visible
+     * skeleton flash.
      *
-     * `auto` keyword on contain-intrinsic-size means: remember
-     * the last-rendered size of each card and use THAT when the
-     * card scrolls back out, instead of falling back to the
-     * fixed 200px estimate every time. Without `auto` we got
-     * a measurable scroll-back jank (cards relayouting from
-     * 200px → real size on every viewport re-entry). */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 200px;
+     * NOTE: we used to set `content-visibility: auto` here too
+     * (so off-screen cards skipped rendering entirely) but on
+     * fast-scrolling feed columns that produced a brief blank-
+     * card flash as each card entered the viewport — WebKit's
+     * content-visibility paint is async, and the user-visible
+     * gap is jarring even when it's <100ms. The original
+     * "big thread flashing" issue was actually image-decode
+     * reflows (now fixed with per-image aspectRatio + the 16:9
+     * CSS fallback on single-image embeds), so we don't need
+     * content-visibility to solve it. */
     contain: layout style paint;
 }
 
@@ -906,17 +906,10 @@ a {
     border-bottom: 1px solid var(--border);
     transition: background 100ms;
     cursor: pointer;
-    /* Same off-screen-skip / paint-isolation trick as .post —
-     * notification columns can grow long. `auto` keyword on
-     * contain-intrinsic-size tells the browser to remember the
-     * *actual* rendered size of each card across scroll passes,
-     * so cards that scroll back into view don't re-measure from
-     * the stale fixed estimate. The fixed fallback (240px) only
-     * applies to first paint, before the browser has a real
-     * measurement — and it's bigger than the old 180px because
-     * notif cards with subject quotes routinely exceed 300px. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 240px;
+    /* Paint + layout isolation per card so changes don't cascade
+     * up the column. See .post for the long form of why we
+     * dropped `content-visibility: auto` here too (same
+     * blank-card-flash problem on fast scroll). */
     contain: layout style paint;
 }
 
