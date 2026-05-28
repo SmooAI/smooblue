@@ -14,6 +14,9 @@ If you spot something wrong or want to coordinate disclosure on a vulnerability,
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | Authentication             | ATproto OAuth (PAR + PKCE + DPoP). Never sees your password. Strictly stronger than app passwords.                              |
 | Transport                  | TLS via `rustls` (no OpenSSL). Cert verification is on by default; no insecure fallbacks.                                       |
+| Per-request authenticity   | DPoP-signed JWS over each XRPC call — captured requests can't be replayed without the local ES256 private key.                  |
+| Public post content        | Cleartext at the PDS / Relay / AppView **by AT Protocol design**. Not a client choice; we're faithful to the protocol.          |
+| DMs                        | Not supported in Smooblue today. Bluesky's `chat.bsky.*` is TLS-in-transit but not yet E2E-encrypted upstream.                  |
 | Token storage              | Local file at `0600` in your user config dir. DPoP key never leaves disk.                                                       |
 | Data egress                | Your PDS + AppView only. Zero third-party telemetry. One opt-in to a Smoo AI CRM, off by default.                               |
 | URL/scheme hardening       | All "open in browser" calls go through a scheme allowlist (`http`/`https` only). Documented as [ADR-002](../Decisions/ADR-002-Safe-Open-Allowlist.md). |
@@ -61,6 +64,31 @@ This means:
 - **No proxy auto-config.** Smooblue doesn't read `HTTP_PROXY` / system proxies. If you need to route through a corporate proxy, file an issue — today it's unsupported intentionally (avoids accidentally trusting a corporate MITM CA).
 
 **Comparison vs. a browser:** browsers add HSTS preload lists, certificate transparency checks via SCTs, OCSP stapling, and per-tab cookie isolation. We have none of those. Realistically the practical attack surface for what Smooblue does (talks to bsky.network and your PDS, both well-known endpoints) is the same — but a browser's defense-in-depth is broader if you're concerned about novel TLS attacks.
+
+---
+
+## Post-authentication: what protects your content in transit and at rest
+
+A reasonable question is: OAuth handles *authentication* and *authorization* — proving who you are and what scopes you have. So what's actually protecting the post / reply / packet *content* once you're past the sign-in?
+
+Three layers, each doing a different job:
+
+1. **TLS** (covered above) gives you transport confidentiality + integrity. Every byte of every XRPC request and response is encrypted with TLS 1.2+/1.3 between Smooblue and your PDS, and between your PDS and the AppView. A passive network attacker on the wire sees a TLS handshake and then opaque ciphertext.
+2. **DPoP-bound requests** give you per-request authenticity. Every XRPC call signs a fresh DPoP proof — a JWS over the HTTP method, full URL, server-issued nonce, and a hash of the access token. Even if an attacker captures one of your requests (e.g. via a leaked log, a memory dump, or a stolen access token), they can't replay it or forge a new one without also stealing the ES256 DPoP private key that lives only in your local session file. Smooblue regenerates the DPoP keypair on every fresh sign-in.
+3. **AT Protocol content model** is the honest layer to be transparent about. Bluesky posts (replies, quotes, likes, reposts, profile fields) are **public by protocol design**. They're stored cleartext on your PDS, propagated through the Relay (firehose), and replicated to every AppView and every downstream archival / search / analytics consumer that subscribes to the firehose. No client can encrypt public-post content end-to-end, because it would no longer be public — that's a protocol property, not a client choice. Smooblue is faithful to the protocol here; we don't add and don't withhold anything.
+
+**Practical implications:**
+
+- **For public posts:** transport is encrypted (TLS) and request authenticity is guaranteed (DPoP), but the content itself is intentionally world-readable once it lands at the PDS / Relay. Treat anything you post on Bluesky like anything you post on a public timeline anywhere — it's a public record.
+- **For DMs:** the `chat.bsky.*` lexicon is a separate channel, hosted today by Bluesky on a different service from public posts. **Bluesky has NOT yet shipped end-to-end encryption for DMs** — they're TLS-in-transit but readable by Bluesky's chat infrastructure. Smooblue **does not currently support DMs at all** (intentional follow-up — adding DM UI is a meaningful product surface, not a quick add, and we'd want to wait for E2EE if/when it ships). So this is a moot point for Smooblue users today.
+- **For drafts you haven't posted:** the compose draft is persisted to a local file (`~/Library/Application Support/ai.Smoo.smooblue/draft.txt`, mode 0600) so your in-progress text survives a crash / restart. Same on-disk threat model as the session file — `0600` perms, no encryption at rest beyond FileVault.
+
+**What Smooblue specifically does NOT do with your content:**
+
+- No analytics on what you post or read. No "5% of users clicked X" pixel; there is no analytics stack.
+- No content forwarded to any third party. The only outbound destinations are the endpoints in the egress table below.
+- No request bodies cached on disk by Smooblue beyond what the OS HTTP cache decides to do (which `rustls`/`reqwest` does not enable by default for our config).
+- No error reporting / crash uploader. A panic logs to your local terminal / the macOS Console; nothing is sent off-machine.
 
 ---
 
