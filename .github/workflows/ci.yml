@@ -6,6 +6,14 @@ on:
     pull_request:
         branches: [main]
     workflow_call:
+    # workflow_dispatch is the escape hatch for the changesets
+    # auto-release flow — changesets/action's GITHUB_TOKEN-authored
+    # PR doesn't trip ci.yml's pull_request: trigger (GitHub's
+    # anti-loop guard suppresses workflow chains from GITHUB_TOKEN),
+    # so changesets.yml `gh workflow run`s us against the PR ref to
+    # land the required status checks on the PR head. See
+    # changesets.yml's "Dispatch CI for Release PR" step.
+    workflow_dispatch:
 
 env:
     CARGO_TERM_COLOR: always

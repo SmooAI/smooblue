@@ -31,6 +31,9 @@ on:
 permissions:
     contents: write
     pull-requests: write
+    # Needed for `gh workflow run` to dispatch ci.yml against the
+    # Release PR branch. See the "Dispatch CI" step below for why.
+    actions: write
 
 # Only one Release PR in flight at a time. If two pushes to main
 # race (a Release PR merge + an unrelated feature merge milliseconds
@@ -115,3 +118,32 @@ jobs:
                   PR="${{ steps.changesets.outputs.pullRequestNumber }}"
                   echo "▸ enabling auto-merge on Release PR #$PR"
                   gh pr merge "$PR" --squash --auto --repo "$GITHUB_REPOSITORY"
+
+            # Dispatch ci.yml against the Release PR branch.
+            #
+            # Why this is needed: changesets/action pushes the
+            # changeset-release/main branch + opens the PR using the
+            # default GITHUB_TOKEN. GitHub deliberately suppresses
+            # workflow triggers for events authored by GITHUB_TOKEN
+            # (anti-loop guard), so ci.yml's `pull_request:` and
+            # `push:` hooks never fire against the PR — branch
+            # protection then waits forever for status checks that
+            # will never report, and the auto-merge above stalls.
+            #
+            # `gh workflow run` IS allowed with GITHUB_TOKEN
+            # (workflow_dispatch is the explicit escape hatch GitHub
+            # designed for exactly this case). The dispatched run
+            # checks out changeset-release/main, runs `cargo test
+            # (ubuntu-latest)` + `(macos-latest)`, and reports check
+            # runs against that ref's HEAD commit — which IS the PR
+            # head — satisfying branch protection.
+            - name: Dispatch CI for Release PR
+              if: steps.changesets.outputs.hasChangesets == 'true' && steps.changesets.outputs.pullRequestNumber != ''
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  echo "▸ dispatching ci.yml against changeset-release/main"
+                  gh workflow run ci.yml \
+                      --ref changeset-release/main \
+                      --repo "$GITHUB_REPOSITORY"
+                  echo "  (status checks will land on PR head + auto-merge will fire when they pass)"
