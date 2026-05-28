@@ -241,8 +241,12 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add "$CASK"
-                  git commit -m "smooblue ${VERSION}
-
-Automated bump from SmooAI/smooblue release ${GITHUB_REF_NAME}."
+                  # Two -m flags so git stitches them as subject + body
+                  # (separated by a blank line). Cleaner in YAML than
+                  # a literal multi-line string because we don't have
+                  # to fight block-scalar indentation rules.
+                  git commit \
+                      -m "smooblue ${VERSION}" \
+                      -m "Automated bump from SmooAI/smooblue release ${GITHUB_REF_NAME}."
                   git push origin main
                   echo "✓ tap bumped to ${VERSION}"
