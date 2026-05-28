@@ -40,11 +40,12 @@ pnpm changeset:status    # see what's queued for the next release
 That's the whole developer-side ritual. Releases drive themselves:
 
 1. Every PR that ships something user-visible drops a `.changeset/*.md` describing what changed and the bump severity (patch/minor/major).
-2. When PRs merge to `main`, `.github/workflows/changesets.yml` runs — if any pending changesets exist, it opens (or updates) a **"Release" PR** that previews the version bumps + the CHANGELOG diff.
-3. **Merging the "Release" PR cuts the release.** The changesets workflow re-runs, sees no pending changesets, and `scripts/ci-tag-and-push.sh` tags `vX.Y.Z` + pushes the tag (via the `SMOOBLUE_RELEASE_DEPLOY_KEY` deploy key so the tag push retriggers `release.yml`).
-4. `release.yml` builds + uploads .app / .deb / tarball, then auto-bumps the Homebrew tap.
+2. When PRs merge to `main`, `.github/workflows/changesets.yml` runs — if any pending changesets exist, it opens (or updates) a **"Release" PR** that previews the version bumps + the CHANGELOG diff, then flips it to **auto-merge**.
+3. Required branch-protection checks (`cargo test (ubuntu-latest)` + `(macos-latest)`) run against the Release PR. As soon as both pass, GitHub squash-merges it.
+4. That merge re-runs `changesets.yml`. No pending changesets now → `scripts/ci-tag-and-push.sh` tags `vX.Y.Z` + pushes the tag (via the `SMOOBLUE_RELEASE_DEPLOY_KEY` deploy key so the tag push retriggers `release.yml`).
+5. `release.yml` builds + uploads .app / .deb / tarball, then auto-bumps the Homebrew tap.
 
-So the flow is: ship features → bot opens Release PR → merge it → released. Zero manual commands per release.
+So the flow is: ship features → bot opens Release PR → checks pass → PR auto-merges → tag pushed → released. **Zero manual clicks per release.**
 
 **Manual hotfix escape hatch:** `scripts/release.sh` still exists if you need to cut a one-off release without going through the PR (e.g., the changesets workflow is broken). Don't reach for it in normal use.
 

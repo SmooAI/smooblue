@@ -74,6 +74,7 @@ jobs:
               uses: dtolnay/rust-toolchain@stable
 
             - name: Run changesets
+              id: changesets
               uses: changesets/action@v1
               with:
                   # When pending changesets exist: open/update the
@@ -91,3 +92,26 @@ jobs:
                   # Used by ci-tag-and-push.sh — see that script for
                   # the why-not-just-GITHUB_TOKEN explanation.
                   SMOOBLUE_RELEASE_DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
+
+            # Flip the Release PR to auto-merge so the whole pipeline
+            # is hands-off: PR opens → required cargo test checks
+            # run → checks pass → GitHub squash-merges it → next push
+            # to main retriggers this workflow → publish step tags
+            # vX.Y.Z → release.yml ships .app + .deb + tarball +
+            # bumps the brew tap.
+            #
+            # --auto waits for the required status checks (the
+            # `cargo test (ubuntu-latest)` + `(macos-latest)` jobs in
+            # branch protection). --squash matches linear-history
+            # rules (rebase merging would be rejected).
+            #
+            # Skipped on the publish run: `hasChangesets` is false
+            # there + pullRequestNumber is empty.
+            - name: Auto-merge Release PR
+              if: steps.changesets.outputs.hasChangesets == 'true' && steps.changesets.outputs.pullRequestNumber != ''
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  PR="${{ steps.changesets.outputs.pullRequestNumber }}"
+                  echo "▸ enabling auto-merge on Release PR #$PR"
+                  gh pr merge "$PR" --squash --auto --repo "$GITHUB_REPOSITORY"
