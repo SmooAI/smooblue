@@ -90,7 +90,12 @@ tracing = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 
 # Native file picker — used by the compose sheet for the "+ Image" action.
-rfd = "0.14"
+# rfd defaults to `xdg-portal` + `async-std` on Linux. We're a tokio app —
+# leaving both runtimes enabled trips ashpd's "can't enable both async-std
+# & tokio features at once" compile-error on the Linux release build.
+# Pin to the tokio backend explicitly. macOS uses the native NSOpenPanel
+# path so these features are no-ops there.
+rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
 
 # Apple Vision OCR (macOS only). Used by the compose sheet to extract
 # literal text from screenshots / memes and seed alt-text alongside
