@@ -167,6 +167,14 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                                 href: "#",
                                 onclick: move |e: MouseEvent| {
                                     e.stop_propagation();
+                                    let _ = crate::safe_open::open_in_browser("https://github.com/SmooAI/smooblue/blob/main/docs/Security/Security.md");
+                                },
+                                "Security model →"
+                            }
+                            a { class: "settings__about-link",
+                                href: "#",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
                                     let _ = crate::safe_open::open_in_browser("https://bsky.app/profile/brentragertech.bsky.social");
                                 },
                                 "@brentragertech on Bluesky →"

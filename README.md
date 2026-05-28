@@ -187,6 +187,12 @@ cargo run --release -p smooblue-app
 
 Wry supports Windows via WebView2, so the core should build, but nobody's tried. The `safe_open` shell-out, the macOS activation hook, and the bundle script would all need a Windows arm.
 
+## Security
+
+For the full breakdown — auth model, transport, data egress, what's NOT done, and how to verify any of this yourself — see [docs/Security/Security.md](docs/Security/Security.md). The quick version is in the next section.
+
+To report a vulnerability: email brent@smoo.ai or use [GitHub's private security advisories](https://github.com/SmooAI/smooblue/security/advisories).
+
 ## Privacy — what Smooblue sends where
 
 | Data                      | Sent to                                  | When                                                                 |

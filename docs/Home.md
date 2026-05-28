@@ -26,6 +26,7 @@ cssclasses:
 | [[Architecture/Architecture-Overview]]   | Crate breakdown, deck model, OAuth + DPoP, persistence, render pipeline  |
 | [[Engineering/Engineering-Guide]]        | Daily workflow, commit conventions, testing, release-plz, demo mode      |
 | [[Operations/Operations-Overview]]       | Bundle + install + auto-updater + log locations + branch protection      |
+| [[Security/Security]]                    | Auth + transport + egress + sandboxing posture; what's NOT done           |
 | [[Decisions/ADR-Index]]                  | Architecture Decision Records (one-way doors documented here)            |
 | [[Projects/_Projects-Index]]             | Status snapshots from `/save-status` (in-flight context for next agent)  |
 
