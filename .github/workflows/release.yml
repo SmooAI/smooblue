@@ -184,13 +184,23 @@ jobs:
     # Runs after both bundle jobs finish so the macOS asset is
     # guaranteed to exist when we sha256 it.
     #
-    # Requires a HOMEBREW_TAP_TOKEN secret on this repo with
-    # `contents:write` access to SmooAI/homebrew-tools. The default
-    # GITHUB_TOKEN only authenticates against the repo it came
-    # from, so cross-repo pushes need a personal access token (fine
-    # to be a fine-grained PAT scoped to the tap repo + contents
-    # write). Without the secret, this job no-ops with a warning
-    # rather than failing the release.
+    # Auth: an SSH deploy key on SmooAI/homebrew-tools with
+    # write access (the public half is registered there; the
+    # private half is stored as HOMEBREW_TAP_DEPLOY_KEY on this
+    # repo). Deploy keys are scoped to ONE repo + can only do
+    # git operations on it — strictly narrower blast radius
+    # than a cross-repo PAT, and there's nothing else of value
+    # in the tap repo even if the key leaks.
+    #
+    # To rotate: ssh-keygen a new ed25519 keypair, register the
+    # .pub via `gh repo deploy-key add … --allow-write` on
+    # SmooAI/homebrew-tools, push the private half to this repo
+    # via `gh secret set HOMEBREW_TAP_DEPLOY_KEY -R SmooAI/smooblue
+    # < newkey`, then remove the old deploy-key id with
+    # `gh repo deploy-key delete <id>`.
+    #
+    # Without the secret this job no-ops with a warning rather
+    # than failing the release.
     update-homebrew-tap:
         name: Update Homebrew tap
         runs-on: ubuntu-latest
@@ -199,10 +209,10 @@ jobs:
         steps:
             - name: Bump tap to ${{ github.ref_name }}
               env:
-                  TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                  TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
               run: |
-                  if [[ -z "${TAP_TOKEN:-}" ]]; then
-                      echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping tap update. brew users will pick up this release once the secret is configured + a future release is tagged."
+                  if [[ -z "${TAP_DEPLOY_KEY:-}" ]]; then
+                      echo "::warning::HOMEBREW_TAP_DEPLOY_KEY not set — skipping tap update. brew users will pick up this release once the secret is configured + a future release is tagged."
                       exit 0
                   fi
                   VERSION="${GITHUB_REF_NAME#v}"
@@ -214,8 +224,19 @@ jobs:
                   SHA256=$(sha256sum "/tmp/$ASSET" | cut -d' ' -f1)
                   echo "  sha256 = $SHA256"
 
+                  # Set up SSH with the deploy key. -i picks the key
+                  # explicitly so the agent doesn't have to touch
+                  # ~/.ssh; -o StrictHostKeyChecking=accept-new is
+                  # fine because we're connecting to github.com.
+                  echo "▸ setting up deploy key…"
+                  mkdir -p ~/.ssh
+                  printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_deploy
+                  chmod 600 ~/.ssh/tap_deploy
+                  ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+
                   echo "▸ cloning SmooAI/homebrew-tools…"
-                  git clone "https://x-access-token:${TAP_TOKEN}@github.com/SmooAI/homebrew-tools.git" /tmp/tap
+                  GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_deploy -o IdentitiesOnly=yes" \
+                      git clone git@github.com:SmooAI/homebrew-tools.git /tmp/tap
                   cd /tmp/tap
 
                   CASK="Casks/smooblue.rb"
@@ -248,5 +269,6 @@ jobs:
                   git commit \
                       -m "smooblue ${VERSION}" \
                       -m "Automated bump from SmooAI/smooblue release ${GITHUB_REF_NAME}."
-                  git push origin main
+                  GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_deploy -o IdentitiesOnly=yes" \
+                      git push origin main
                   echo "✓ tap bumped to ${VERSION}"
