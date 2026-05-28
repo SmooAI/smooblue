@@ -119,31 +119,75 @@ jobs:
                   echo "▸ enabling auto-merge on Release PR #$PR"
                   gh pr merge "$PR" --squash --auto --repo "$GITHUB_REPOSITORY"
 
-            # Dispatch ci.yml against the Release PR branch.
+            # Wake CI on the Release PR by pushing an empty commit
+            # via the SSH deploy key.
             #
-            # Why this is needed: changesets/action pushes the
-            # changeset-release/main branch + opens the PR using the
-            # default GITHUB_TOKEN. GitHub deliberately suppresses
+            # Why: changesets/action pushes the branch + opens the
+            # PR using GITHUB_TOKEN. GitHub deliberately suppresses
             # workflow triggers for events authored by GITHUB_TOKEN
-            # (anti-loop guard), so ci.yml's `pull_request:` and
-            # `push:` hooks never fire against the PR — branch
-            # protection then waits forever for status checks that
-            # will never report, and the auto-merge above stalls.
+            # (anti-loop guard) — so ci.yml's pull_request: hook
+            # never fires and the required cargo test status checks
+            # never report on the PR head. Branch protection then
+            # waits forever and auto-merge stalls.
             #
-            # `gh workflow run` IS allowed with GITHUB_TOKEN
-            # (workflow_dispatch is the explicit escape hatch GitHub
-            # designed for exactly this case). The dispatched run
-            # checks out changeset-release/main, runs `cargo test
-            # (ubuntu-latest)` + `(macos-latest)`, and reports check
-            # runs against that ref's HEAD commit — which IS the PR
-            # head — satisfying branch protection.
-            - name: Dispatch CI for Release PR
-              if: steps.changesets.outputs.hasChangesets == 'true' && steps.changesets.outputs.pullRequestNumber != ''
+            # workflow_dispatch IS allowed with GITHUB_TOKEN — but
+            # the resulting check runs don't get rolled up into the
+            # PR's statusCheckRollup that auto-merge consults, so
+            # that's a dead end despite reporting in the API.
+            #
+            # The reliable workaround is to make the branch's HEAD
+            # commit one that GitHub considers "user-pushed".
+            # Pushing via an SSH deploy key (the SMOOBLUE_RELEASE_DEPLOY_KEY
+            # secret, same one used by release.yml's tag-pusher)
+            # qualifies — deploy keys are independent credentials,
+            # not the bot's token. The empty commit gets squashed
+            # away on PR merge so it leaves no trace.
+            #
+            # Looks up the PR via gh rather than relying on the
+            # action's output, because the action only sets
+            # pullRequestNumber when it CREATES or UPDATES the PR
+            # this run — and a no-op run (e.g., this workflow file
+            # was just edited, no new changesets) still needs to
+            # wake CI on the existing PR.
+            #
+            # Idempotent: skips if HEAD is already a "Wake CI"
+            # commit, so successive runs don't stack empty commits.
+            - name: Wake CI for Release PR
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
               run: |
-                  echo "▸ dispatching ci.yml against changeset-release/main"
-                  gh workflow run ci.yml \
-                      --ref changeset-release/main \
-                      --repo "$GITHUB_REPOSITORY"
-                  echo "  (status checks will land on PR head + auto-merge will fire when they pass)"
+                  if [[ -z "${DEPLOY_KEY:-}" ]]; then
+                      echo "::warning::SMOOBLUE_RELEASE_DEPLOY_KEY not set — can't wake CI on Release PR"
+                      exit 0
+                  fi
+                  PR=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+                      --head changeset-release/main \
+                      --state open \
+                      --json number --jq '.[0].number')
+                  if [[ -z "$PR" || "$PR" == "null" ]]; then
+                      echo "▸ no open Release PR — nothing to wake"
+                      exit 0
+                  fi
+                  echo "▸ waking CI on Release PR #$PR"
+
+                  mkdir -p ~/.ssh
+                  printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/dk
+                  chmod 600 ~/.ssh/dk
+                  ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+
+                  git fetch origin changeset-release/main
+                  git checkout changeset-release/main
+
+                  if git log -1 --pretty=%s | grep -q "^Wake CI$"; then
+                      echo "  (HEAD is already a Wake CI commit — skipping)"
+                      exit 0
+                  fi
+
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git commit --allow-empty -m "Wake CI"
+
+                  GIT_SSH_COMMAND="ssh -i ~/.ssh/dk -o IdentitiesOnly=yes" \
+                      git push git@github.com:SmooAI/smooblue.git changeset-release/main
+                  echo "✓ pushed empty wake commit — ci.yml's pull_request hook should fire now"
