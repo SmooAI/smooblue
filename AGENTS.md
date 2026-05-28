@@ -30,14 +30,23 @@ Don't use TodoWrite/ad-hoc markdown lists for multi-turn task tracking — use p
 
 Plain-English commit subjects. **No conventional-commit prefixes** (`feat:` / `fix:` / `chore:` / etc.) — versioning is decoupled from commit messages and runs through changesets instead.
 
-## Versioning — changesets
+## Versioning — changesets (fully automated)
 
 ```bash
 pnpm changeset           # drop a changeset alongside any user-visible change
 pnpm changeset:status    # see what's queued for the next release
-pnpm run version         # consume changesets → bump Cargo.toml + write CHANGELOG.md
-pnpm run release         # tag vX.Y.Z + push (CI builds + uploads the .app)
 ```
+
+That's the whole developer-side ritual. Releases drive themselves:
+
+1. Every PR that ships something user-visible drops a `.changeset/*.md` describing what changed and the bump severity (patch/minor/major).
+2. When PRs merge to `main`, `.github/workflows/changesets.yml` runs — if any pending changesets exist, it opens (or updates) a **"Release" PR** that previews the version bumps + the CHANGELOG diff.
+3. **Merging the "Release" PR cuts the release.** The changesets workflow re-runs, sees no pending changesets, and `scripts/ci-tag-and-push.sh` tags `vX.Y.Z` + pushes the tag (via the `SMOOBLUE_RELEASE_DEPLOY_KEY` deploy key so the tag push retriggers `release.yml`).
+4. `release.yml` builds + uploads .app / .deb / tarball, then auto-bumps the Homebrew tap.
+
+So the flow is: ship features → bot opens Release PR → merge it → released. Zero manual commands per release.
+
+**Manual hotfix escape hatch:** `scripts/release.sh` still exists if you need to cut a one-off release without going through the PR (e.g., the changesets workflow is broken). Don't reach for it in normal use.
 
 Full playbook in [`.changeset/README.md`](.changeset/README.md).
 
@@ -72,20 +81,7 @@ Full playbook in [`.changeset/README.md`](.changeset/README.md).
 
 If a CI check fails after push, fix it in a follow-up commit. Don't leave a red build for the next session.
 
-**Cutting a release** (after a chunk of changesets has accumulated):
-
-```bash
-pnpm run release    # bumps versions, commits, pushes, tags, pushes tag
-```
-
-That's the whole ritual. The script:
-1. Refuses to start on a dirty tree (so the Release commit only contains the version bump)
-2. `git pull --rebase` so we don't push a Release commit on top of stale main
-3. Consumes pending changesets → bumps `package.json` + `Cargo.toml` + writes CHANGELOG.md
-4. Commits + pushes the bump
-5. Tags + pushes `vX.Y.Z`
-
-CI takes it from there — builds .app + .deb + tarball, attaches them to the GitHub release, and auto-bumps the Homebrew tap. `GITHUB_TOKEN` is auto-derived from `gh auth token` if not exported; needed by the `@changesets/changelog-github` plugin to resolve PR titles. Idempotent — re-runs with no pending changesets or an existing tag no-op cleanly.
+**Cutting a release** is no longer a manual step — releases ship by merging the open "Release" PR (see the "Versioning — changesets" section above). The `scripts/release.sh` script still exists as a manual escape hatch but the auto flow is the default.
 
 ## Before doing anything load-bearing
 

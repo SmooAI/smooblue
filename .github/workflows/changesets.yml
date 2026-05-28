@@ -1,0 +1,93 @@
+name: Changesets
+
+# Auto-release driver.
+#
+# How this fits with release.yml:
+# - release.yml is tag-driven: when a `vX.Y.Z` tag is pushed it
+#   builds .app + .deb + tarball and updates the brew tap.
+# - changesets.yml is push-to-main driven: it watches for pending
+#   `.changeset/*.md` files and manages the version bump via PR.
+#
+# Flow per release cycle:
+#   1. Devs ship features. Each PR drops a .changeset/*.md.
+#   2. PRs merge to main. This workflow runs.
+#   3. If any pending changesets exist, the action OPENS or UPDATES
+#      a "Release" PR that previews the version bumps + CHANGELOG.
+#   4. When the maintainer merges that Release PR, this workflow
+#      runs again on the new main commit.
+#   5. No pending changesets now → the action calls `publish`
+#      (scripts/ci-tag-and-push.sh), which tags + pushes vX.Y.Z.
+#   6. That tag push wakes release.yml. Builds + uploads + bumps tap.
+#
+# Why two workflows: tag triggers play nicer with deploy-key auth
+# than a single chained workflow, and the separation lets us cut
+# manual hotfix releases (just `git tag` + push) without going
+# through changesets.
+
+on:
+    push:
+        branches: [main]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+# Only one Release PR in flight at a time. If two pushes to main
+# race (a Release PR merge + an unrelated feature merge milliseconds
+# apart), the later run waits for the earlier to finish so we don't
+# end up with two concurrent Version PRs fighting over the same
+# .changeset/*.md set.
+concurrency:
+    group: changesets-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    release:
+        name: Open Release PR or tag
+        runs-on: ubuntu-latest
+        if: github.repository == 'SmooAI/smooblue'
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  # Need full history so changesets/action can compute
+                  # the right diff for the Release PR.
+                  fetch-depth: 0
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: pnpm
+
+            - name: Install deps
+              run: pnpm install --frozen-lockfile
+
+            # `pnpm run version` (which the changesets action invokes
+            # to populate the Release PR) calls scripts/sync-cargo-version.mjs,
+            # which runs `cargo update --workspace` to rewrite Cargo.lock
+            # after the workspace version bump. Need cargo available.
+            - name: Setup Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Run changesets
+              uses: changesets/action@v1
+              with:
+                  # When pending changesets exist: open/update the
+                  # "Release" PR. Body = the rendered CHANGELOG diff.
+                  version: pnpm run version
+                  commit: "Release"
+                  title: "Release"
+                  # When no pending changesets exist (i.e. the Release
+                  # PR was just merged): run this to push the vX.Y.Z
+                  # tag. Tag push wakes release.yml which builds +
+                  # uploads + bumps the brew tap.
+                  publish: scripts/ci-tag-and-push.sh
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  # Used by ci-tag-and-push.sh — see that script for
+                  # the why-not-just-GITHUB_TOKEN explanation.
+                  SMOOBLUE_RELEASE_DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
