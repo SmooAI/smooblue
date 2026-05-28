@@ -27,6 +27,17 @@ name: Changesets
 on:
     push:
         branches: [main]
+    # The Release PR auto-merges as a github-actions[bot]-authored
+    # squash commit on main. GitHub's anti-loop guard suppresses
+    # workflow triggers from GITHUB_TOKEN-authored events, so the
+    # push:main trigger above doesn't fire — meaning the publish
+    # step never runs. pull_request_target IS allowed to fire on
+    # the merge event (it runs in the base-repo context with
+    # secrets), so we use it specifically as the publish trigger
+    # for Release PR merges. See the `publish` job below.
+    pull_request_target:
+        types: [closed]
+        branches: [main]
 
 permissions:
     contents: write
@@ -48,7 +59,11 @@ jobs:
     release:
         name: Open Release PR or tag
         runs-on: ubuntu-latest
-        if: github.repository == 'SmooAI/smooblue'
+        # Only runs on push:main. The pull_request_target.closed
+        # event is handled by the `publish` job below — wires
+        # different on purpose so the `changesets/action` call
+        # only fires in its intended context.
+        if: github.event_name == 'push' && github.repository == 'SmooAI/smooblue'
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -191,3 +206,38 @@ jobs:
                   GIT_SSH_COMMAND="ssh -i ~/.ssh/dk -o IdentitiesOnly=yes" \
                       git push git@github.com:SmooAI/smooblue.git changeset-release/main
                   echo "✓ pushed empty wake commit — ci.yml's pull_request hook should fire now"
+
+    # Fires when the Release PR auto-merges into main. Tags the
+    # resulting commit + pushes the tag via the deploy key (which
+    # wakes release.yml — the same anti-loop guard that breaks
+    # push:main triggers from GITHUB_TOKEN also breaks tag pushes
+    # from it, hence the deploy key here).
+    #
+    # Bypassing the changesets/action publish path here because the
+    # action's publish mode keys off "no pending changesets on push
+    # to main" — and that push never fires (the auto-merge commit
+    # is github-actions[bot]-authored). pull_request_target is the
+    # event GitHub allows to fire on those merges, so we use it.
+    publish:
+        name: Tag + publish merged Release PR
+        runs-on: ubuntu-latest
+        if: |
+            github.event_name == 'pull_request_target'
+            && github.event.action == 'closed'
+            && github.event.pull_request.merged == true
+            && github.event.pull_request.head.ref == 'changeset-release/main'
+            && github.repository == 'SmooAI/smooblue'
+        steps:
+            - name: Checkout main at merge commit
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - name: Tag + push
+              env:
+                  SMOOBLUE_RELEASE_DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
+              run: scripts/ci-tag-and-push.sh
