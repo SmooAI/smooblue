@@ -54,3 +54,34 @@ objc2-vision = { workspace = true }
 wiremock = { workspace = true }
 tokio = { workspace = true }
 tempfile = { workspace = true }
+
+# ─────────────────────────────────────────────────────────────────
+# cargo-deb metadata — drives `cargo deb` to produce a .deb that
+# declares webkit2gtk / gtk3 / appindicator / librsvg as proper
+# apt dependencies. Users get a one-command install:
+#   sudo apt install ./smooblue_X.Y.Z_amd64.deb
+# and apt pulls in the runtime libs automatically. Used by the
+# Linux release job (.github/workflows/release.yml).
+# ─────────────────────────────────────────────────────────────────
+[package.metadata.deb]
+name = "smooblue"
+maintainer = "Smoo AI <eng@smoo.ai>"
+copyright = "2026, Smoo AI"
+license-file = ["../../LICENSE", "0"]
+extended-description = """\
+A native, multi-column Bluesky desktop client. Written in Rust + Dioxus,
+backed by Bluesky's official OAuth flow (PAR + PKCE + DPoP-bound tokens).
+Multi-column TweetDeck-style deck with Home, Notifications, Discover,
+saved feeds, lists, search, profiles, and suggested follows."""
+depends = "$auto, libwebkit2gtk-4.1-0, libgtk-3-0, libayatana-appindicator3-1, librsvg2-2"
+section = "net"
+priority = "optional"
+# The binary is built as `smooblue-app` (matches the crate's
+# [[bin]] name) but installed as `smooblue` to match what the
+# install.sh + .desktop file expect.
+assets = [
+    ["../../target/release/smooblue-app", "usr/bin/smooblue", "755"],
+    ["../../assets/icons/icon-256.png", "usr/share/icons/hicolor/256x256/apps/smooblue.png", "644"],
+    ["../../packaging/smooblue.desktop", "usr/share/applications/smooblue.desktop", "644"],
+    ["../../README.md", "usr/share/doc/smooblue/README.md", "644"],
+]

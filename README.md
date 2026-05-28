@@ -31,21 +31,34 @@ A native, multi-column [Bluesky](https://bsky.app) desktop client for macOS and 
 
 ---
 
-## Install (one-liner)
+## Install
 
-**macOS (Apple Silicon)** — installs to `/Applications`, opens it:
+### macOS — Homebrew (recommended)
+
+```bash
+brew tap SmooAI/tools
+brew install --cask smooblue
+```
+
+Apple Silicon only today. `brew upgrade --cask smooblue` updates on every release.
+
+### Linux — .deb (Debian / Ubuntu)
+
+Grab the `.deb` from the [latest release](https://github.com/SmooAI/smooblue/releases/latest) and:
+
+```bash
+sudo apt install ./Smooblue_*.deb
+```
+
+apt pulls in `libwebkit2gtk-4.1` / `libgtk-3` / `libayatana-appindicator3` / `librsvg2` for you. `Smooblue` shows up in the launcher / activities overview. `sudo apt upgrade smooblue` after future releases (once you've installed once with the file).
+
+### macOS or Linux — curl one-liner
+
+Auto-detects platform; macOS gets the `.app`, Linux gets the tarball-extracted binary. Doesn't go through brew/apt, so updates are manual (re-run the same command):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
 ```
-
-**Linux (x86_64)** — same one-liner, auto-detects platform, drops the binary in `~/.local/bin` + a launcher entry:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/SmooAI/smooblue/main/install.sh | bash
-```
-
-(Linux needs `libwebkit2gtk-4.1 libgtk-3 libayatana-appindicator3 librsvg2` — the installer prints the apt command. See [Install](#install) for build-from-source + Windows status.)
 
 ## What it is
 

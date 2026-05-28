@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Smooblue
+GenericName=Bluesky Client
+Comment=Native multi-column Bluesky desktop client
+Exec=smooblue
+Icon=smooblue
+Categories=Network;InstantMessaging;
+Terminal=false
+StartupNotify=true
+Keywords=bluesky;atproto;social;
