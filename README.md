@@ -42,6 +42,8 @@ brew install --cask smooblue
 
 Apple Silicon only today. `brew upgrade --cask smooblue` updates on every release.
 
+> **Gatekeeper note:** Smooblue is adhoc-signed, not Apple Developer ID notarized — see [Security model](docs/Security/Security.md). The cask's `postflight` strips the macOS quarantine attribute on install so the .app launches without the "Apple could not verify…" dialog. If you're on a Smooblue version installed before that landed (≤ v1.3.0), or if you grabbed the .zip directly from a release, run once: `xattr -cr /Applications/Smooblue.app`. We're [tracking real Developer ID signing](https://github.com/SmooAI/smooblue/issues?q=is%3Aissue+notarize) as the eventual fix.
+
 ### Linux — .deb (Debian / Ubuntu)
 
 Grab the `.deb` from the [latest release](https://github.com/SmooAI/smooblue/releases/latest) and:
