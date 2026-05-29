@@ -45,18 +45,15 @@ jobs:
                   cd dist
                   ditto -c -k --sequesterRsrc --keepParent Smooblue.app Smooblue-macos-arm64.zip
 
-            - name: Extract changelog for this release
+            # Wrap the per-version CHANGELOG section with install /
+            # upgrade / downloads sections so the release page itself
+            # is a self-serve install guide. Same script can be run
+            # locally to retroactively re-render an existing release.
+            - name: Build release notes
               id: changelog
               run: |
-                  TAG="${GITHUB_REF_NAME#v}"
-                  awk -v ver="$TAG" '
-                      $0 ~ "^## " ver { found=1; next }
-                      found && /^## [0-9]+\./ { exit }
-                      found { print }
-                  ' CHANGELOG.md > /tmp/release-notes.md
-                  if [[ ! -s /tmp/release-notes.md ]]; then
-                      echo "Release $GITHUB_REF_NAME — see CHANGELOG.md for details." > /tmp/release-notes.md
-                  fi
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  ./scripts/build-release-notes.sh "$VERSION" CHANGELOG.md > /tmp/release-notes.md
                   echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
 
             - name: Create / update GitHub release + upload .app
