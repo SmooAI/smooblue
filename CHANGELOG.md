@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+### Patch Changes
+
+- [`ff5c11d`](https://github.com/SmooAI/smooblue/commit/ff5c11dbf5aa2a41db57f6ecec3aa7bc8c3136b4) Thanks [@brentrager](https://github.com/brentrager)! - No-op patch bump to smoke-test the PAT-driven auto-tag flow (pearl th-5b49e0). The previous publish path relied on `pull_request_target:closed` firing from a GITHUB_TOKEN-authored auto-merge — which GitHub's anti-loop guard silently suppressed. Auto-merge now runs under a fine-grained PAT (`RELEASE_PAT`) so the merge commit is attributed to a real user and the downstream event fires normally. If this changeset rides through to v1.4.1 hands-off (Release PR opens → CI passes → auto-merge → publish job fires → v1.4.1 tag → release.yml builds + ships .app/.deb/.tar.gz + brew tap bumps), the fix is verified.
+
 ## 1.4.0
 
 ### Minor Changes
