@@ -69,7 +69,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 jsonwebtoken = "9"
 
 # Persistence
-keyring = "3"
+keyring = "4"
 directories = "5"
 
 # Synchronization — parking_lot's Mutex skips std's poison concept,
