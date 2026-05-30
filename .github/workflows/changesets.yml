@@ -27,17 +27,18 @@ name: Changesets
 on:
     push:
         branches: [main]
-    # NOTE: we used to also have `pull_request_target: types: [closed]`
-    # here to fire a separate `publish` job when the Release PR merged.
-    # Removed (th-5b49e0): GitHub's anti-loop guard suppresses ALL
-    # events from GITHUB_TOKEN-authored actions — including
-    # pull_request_target.closed — not just push events. Empirically,
-    # 0 pull_request_target runs ever fired after Release PR merges
-    # (v1.3.1, v1.3.2, v1.4.0 all required manual tagging). The only
-    # exempt triggers are workflow_dispatch + repository_dispatch.
-    # Fix: poll for the auto-merge to complete inline, in the same
-    # job that enabled it, then tag directly. See "Wait for merge +
-    # tag" step below.
+    # Fires when the Release PR auto-merges. Needs the auto-merge to
+    # be PAT-authored, NOT GITHUB_TOKEN-authored — GitHub's anti-loop
+    # guard suppresses every downstream event (push:main AND
+    # pull_request_target:closed) from GITHUB_TOKEN-authored actions.
+    # See the `Auto-merge Release PR` step's GH_TOKEN env: it pulls
+    # from `RELEASE_PAT`, a fine-grained user PAT with Contents +
+    # Pull-requests Read/Write scoped to this repo. PAT-authored
+    # merges fire events normally, which wakes the `publish` job
+    # below. th-5b49e0 has the full investigation.
+    pull_request_target:
+        types: [closed]
+        branches: [main]
 
 permissions:
     contents: write
@@ -57,9 +58,11 @@ concurrency:
 
 jobs:
     release:
-        name: Open Release PR + auto-merge + tag
+        name: Open Release PR + auto-merge
         runs-on: ubuntu-latest
-        if: github.repository == 'SmooAI/smooblue'
+        # Only runs on push:main. The pull_request_target.closed
+        # event is handled by the `publish` job below.
+        if: github.event_name == 'push' && github.repository == 'SmooAI/smooblue'
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -121,13 +124,26 @@ jobs:
             #
             # Skipped on the publish run: `hasChangesets` is false
             # there + pullRequestNumber is empty.
+            # CRITICAL: GH_TOKEN MUST be RELEASE_PAT, not GITHUB_TOKEN.
+            # `gh pr merge --auto` records the enabling actor; when CI
+            # later passes and GitHub squashes the PR, the merge commit
+            # is attributed to that actor. GITHUB_TOKEN-attributed
+            # merges have their downstream events suppressed by the
+            # anti-loop guard — meaning the `publish` job below never
+            # fires and the release never tags. PAT-attributed merges
+            # are treated as real-user pushes and fire events normally.
+            # See th-5b49e0 for the full investigation.
             - name: Auto-merge Release PR
               if: steps.changesets.outputs.hasChangesets == 'true' && steps.changesets.outputs.pullRequestNumber != ''
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GH_TOKEN: ${{ secrets.RELEASE_PAT }}
               run: |
+                  if [[ -z "${GH_TOKEN:-}" ]]; then
+                      echo "::error::RELEASE_PAT secret missing — auto-merge would fall back to GITHUB_TOKEN and silently break the publish chain"
+                      exit 1
+                  fi
                   PR="${{ steps.changesets.outputs.pullRequestNumber }}"
-                  echo "▸ enabling auto-merge on Release PR #$PR"
+                  echo "▸ enabling auto-merge on Release PR #$PR (PAT-authored)"
                   gh pr merge "$PR" --squash --auto --repo "$GITHUB_REPOSITORY"
 
             # Wake CI on the Release PR by pushing an empty commit
@@ -203,74 +219,36 @@ jobs:
                       git push git@github.com:SmooAI/smooblue.git changeset-release/main
                   echo "✓ pushed empty wake commit — ci.yml's pull_request hook should fire now"
 
-            # Block this job until the Release PR actually merges, then
-            # tag the merge commit ourselves. Why inline instead of a
-            # separate workflow listening on PR-merge: GitHub's
-            # anti-loop guard (see the `on:` comment) suppresses every
-            # event authored by GITHUB_TOKEN — push:main AND
-            # pull_request_target:closed both — so a follow-up workflow
-            # would never fire. The only way to reliably tag is to
-            # stay in the same job that enabled auto-merge.
-            #
-            # Polls every 30s for up to 45 min. Real-world Release PRs
-            # merge in 8-15 min (cargo test ubuntu + macos in parallel,
-            # then GH squashes). The 45 min cap is the "CI failed and
-            # the PR is stuck" timeout — at that point the job errors,
-            # the Release PR stays open for manual triage, and the
-            # next push to main re-runs this whole flow.
-            #
-            # Looks up the PR via gh (not the action output) so a
-            # no-op changesets run (e.g. this workflow file was edited
-            # but no changeset added) still polls + tags an
-            # already-mergeable PR from a prior run.
-            #
-            # ci-tag-and-push.sh reads package.json's version, creates
-            # vX.Y.Z, and pushes via SMOOBLUE_RELEASE_DEPLOY_KEY so
-            # the tag push wakes release.yml (tag pushes are also
-            # anti-loop-suppressed when from GITHUB_TOKEN).
-            - name: Wait for Release PR to merge + tag
-              if: steps.changesets.outputs.hasChangesets == 'true'
+    # Fires when the Release PR auto-merges into main. Tags the
+    # resulting commit + pushes the tag via the deploy key.
+    #
+    # Works because the auto-merge in the release job above is
+    # PAT-authored (RELEASE_PAT), not GITHUB_TOKEN-authored — so the
+    # downstream pull_request_target:closed event isn't suppressed by
+    # the anti-loop guard. The tag push itself uses the deploy key
+    # (ci-tag-and-push.sh) because tag pushes from GITHUB_TOKEN
+    # ARE still suppressed, and we need release.yml to wake on the
+    # new vX.Y.Z tag.
+    publish:
+        name: Tag + publish merged Release PR
+        runs-on: ubuntu-latest
+        if: |
+            github.event_name == 'pull_request_target'
+            && github.event.action == 'closed'
+            && github.event.pull_request.merged == true
+            && github.event.pull_request.head.ref == 'changeset-release/main'
+            && github.repository == 'SmooAI/smooblue'
+        steps:
+            - name: Checkout main at merge commit
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.pull_request.merge_commit_sha }}
+                  fetch-depth: 0
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+            - name: Tag + push
               env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   SMOOBLUE_RELEASE_DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
-              run: |
-                  PR=$(gh pr list --repo "$GITHUB_REPOSITORY" \
-                      --head changeset-release/main \
-                      --state all \
-                      --json number,mergedAt --jq '.[0].number')
-                  if [[ -z "$PR" || "$PR" == "null" ]]; then
-                      echo "▸ no Release PR found — nothing to wait on"
-                      exit 0
-                  fi
-                  echo "▸ polling Release PR #$PR for merge (up to 45 min)…"
-                  DEADLINE=$(( $(date +%s) + 45*60 ))
-                  MERGE_SHA=""
-                  while [[ $(date +%s) -lt $DEADLINE ]]; do
-                      DATA=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
-                          --json mergedAt,mergeCommit,state --jq \
-                          '"\(.state) \(.mergedAt // "") \(.mergeCommit.oid // "")"')
-                      STATE=$(echo "$DATA" | cut -d' ' -f1)
-                      MERGED_AT=$(echo "$DATA" | cut -d' ' -f2)
-                      SHA=$(echo "$DATA" | cut -d' ' -f3)
-                      if [[ "$STATE" == "MERGED" && -n "$SHA" ]]; then
-                          MERGE_SHA="$SHA"
-                          echo "✓ PR #$PR merged at $MERGED_AT (sha $SHA)"
-                          break
-                      fi
-                      if [[ "$STATE" == "CLOSED" ]]; then
-                          echo "::warning::PR #$PR closed without merging — nothing to tag"
-                          exit 0
-                      fi
-                      sleep 30
-                  done
-                  if [[ -z "$MERGE_SHA" ]]; then
-                      echo "::error::Timed out waiting for PR #$PR to merge after 45 min"
-                      exit 1
-                  fi
-
-                  echo "▸ checking out merge commit $MERGE_SHA"
-                  git fetch origin main
-                  git checkout "$MERGE_SHA"
-
-                  echo "▸ tagging + pushing via deploy key"
-                  ./scripts/ci-tag-and-push.sh
+              run: scripts/ci-tag-and-push.sh
