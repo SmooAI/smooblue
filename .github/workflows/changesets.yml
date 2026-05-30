@@ -27,18 +27,16 @@ name: Changesets
 on:
     push:
         branches: [main]
-    # Fires when the Release PR auto-merges. Needs the auto-merge to
-    # be PAT-authored, NOT GITHUB_TOKEN-authored — GitHub's anti-loop
-    # guard suppresses every downstream event (push:main AND
-    # pull_request_target:closed) from GITHUB_TOKEN-authored actions.
-    # See the `Auto-merge Release PR` step's GH_TOKEN env: it pulls
-    # from `RELEASE_PAT`, a fine-grained user PAT with Contents +
-    # Pull-requests Read/Write scoped to this repo. PAT-authored
-    # merges fire events normally, which wakes the `publish` job
-    # below. th-5b49e0 has the full investigation.
-    pull_request_target:
-        types: [closed]
-        branches: [main]
+    # Note on the absence of a pull_request_target:closed trigger:
+    # we don't need one. The Release-PR auto-merge is PAT-authored
+    # (see the `Auto-merge Release PR` step — uses RELEASE_PAT, not
+    # GITHUB_TOKEN), so the resulting squash commit lands on main as
+    # a normal user-attributed push. That push fires THIS workflow's
+    # push:main trigger, which calls changesets/action again, which
+    # detects no pending changesets and invokes `publish` natively
+    # (scripts/ci-tag-and-push.sh) — tagging vX.Y.Z and waking
+    # release.yml. End-to-end auto-tag with no extra publish job.
+    # th-5b49e0 has the investigation that led here.
 
 permissions:
     contents: write
@@ -58,11 +56,9 @@ concurrency:
 
 jobs:
     release:
-        name: Open Release PR + auto-merge
+        name: Open Release PR + auto-merge (or tag, if just merged)
         runs-on: ubuntu-latest
-        # Only runs on push:main. The pull_request_target.closed
-        # event is handled by the `publish` job below.
-        if: github.event_name == 'push' && github.repository == 'SmooAI/smooblue'
+        if: github.repository == 'SmooAI/smooblue'
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -218,37 +214,3 @@ jobs:
                   GIT_SSH_COMMAND="ssh -i ~/.ssh/dk -o IdentitiesOnly=yes" \
                       git push git@github.com:SmooAI/smooblue.git changeset-release/main
                   echo "✓ pushed empty wake commit — ci.yml's pull_request hook should fire now"
-
-    # Fires when the Release PR auto-merges into main. Tags the
-    # resulting commit + pushes the tag via the deploy key.
-    #
-    # Works because the auto-merge in the release job above is
-    # PAT-authored (RELEASE_PAT), not GITHUB_TOKEN-authored — so the
-    # downstream pull_request_target:closed event isn't suppressed by
-    # the anti-loop guard. The tag push itself uses the deploy key
-    # (ci-tag-and-push.sh) because tag pushes from GITHUB_TOKEN
-    # ARE still suppressed, and we need release.yml to wake on the
-    # new vX.Y.Z tag.
-    publish:
-        name: Tag + publish merged Release PR
-        runs-on: ubuntu-latest
-        if: |
-            github.event_name == 'pull_request_target'
-            && github.event.action == 'closed'
-            && github.event.pull_request.merged == true
-            && github.event.pull_request.head.ref == 'changeset-release/main'
-            && github.repository == 'SmooAI/smooblue'
-        steps:
-            - name: Checkout main at merge commit
-              uses: actions/checkout@v4
-              with:
-                  ref: ${{ github.event.pull_request.merge_commit_sha }}
-                  fetch-depth: 0
-            - name: Setup Node
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 22
-            - name: Tag + push
-              env:
-                  SMOOBLUE_RELEASE_DEPLOY_KEY: ${{ secrets.SMOOBLUE_RELEASE_DEPLOY_KEY }}
-              run: scripts/ci-tag-and-push.sh
