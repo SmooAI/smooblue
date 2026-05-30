@@ -84,6 +84,7 @@ Built fast, single-binary, ~11 MB native app — feels closer to a Finder window
 - Self-threading (chain replies on submit)
 - Image attachments (up to 4) with auto-generated alt-text (Apple Vision OCR + LLM scene description)
 - **Drag-and-drop** images or video onto the compose sheet
+- **⌘V paste** image from clipboard (handy for the macOS screenshot floater — Wry's drag handler can't resolve its NSFilePromise, so paste is the path that just works)
 - Video attachments (mp4 / mov / webm)
 - Rich-text facets — @mentions, #hashtags, http links auto-detected + resolved
 - ⌘↵ to submit

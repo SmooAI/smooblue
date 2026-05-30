@@ -97,6 +97,13 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # path so these features are no-ops there.
 rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
 
+# Cross-platform clipboard read — used by the compose sheet to paste
+# images from the system clipboard (⌘V). Bypasses Wry's DragDrop
+# limitation around NSFilePromise items (macOS screenshot floater),
+# and gives "paste a screenshot" UX everywhere. `image-data` returns
+# raw RGBA8 which we then PNG-encode via the existing `image` crate.
+arboard = { version = "3", features = ["image-data"] }
+
 # Apple Vision OCR (macOS only). Used by the compose sheet to extract
 # literal text from screenshots / memes and seed alt-text alongside
 # the LLM scene description.

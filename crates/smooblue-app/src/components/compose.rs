@@ -651,8 +651,21 @@ pub fn ComposeSheet() -> Element {
                         }
                     },
                     onkeydown: move |e| {
-                        if e.key() == Key::Enter && (e.modifiers().meta() || e.modifiers().ctrl()) {
+                        let cmd = e.modifiers().meta() || e.modifiers().ctrl();
+                        if cmd && e.key() == Key::Enter {
                             do_submit_kbd();
+                            return;
+                        }
+                        // ⌘V / Ctrl+V: try to attach a clipboard image
+                        // before the textarea's native paste handler runs.
+                        // We don't prevent_default — if the clipboard has
+                        // text, the textarea's native paste still fires.
+                        // The image-attach path is no-op when the
+                        // clipboard has no image (e.g. plain-text paste).
+                        // Solves macOS's screenshot-floater drag, which
+                        // hands Wry an unresolvable NSFilePromise.
+                        if cmd && e.key().to_string() == "v" {
+                            spawn_paste_clipboard_image(attachments);
                         }
                     },
                 }
@@ -971,6 +984,49 @@ async fn inject_synthetic_attachment(attachments: &mut Signal<Vec<AttachedImage>
     let id = att.id;
     attachments.write().push(att);
     process_attachment(*attachments, id, path, llm).await;
+}
+
+/// Spawn the clipboard-paste image attach. Reads the clipboard on a
+/// blocking thread, PNG-encodes the raw RGBA, drops it in `$TMPDIR`,
+/// then funnels through the same `process_attachment` pipeline drag-drop
+/// and the file picker use. Silent no-op when the clipboard holds no
+/// image — the textarea's native paste handler still runs for text.
+fn spawn_paste_clipboard_image(mut attachments: Signal<Vec<AttachedImage>>) {
+    spawn(async move {
+        let already = attachments.read().len();
+        if MAX_IMAGES.saturating_sub(already) == 0 {
+            return;
+        }
+        let path = match tokio::task::spawn_blocking(read_clipboard_image_to_temp).await {
+            Ok(Ok(p)) => p,
+            _ => return,
+        };
+        let llm: Option<Arc<dyn AltTextProvider>> =
+            SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+        let att = AttachedImage::new(path.clone());
+        let id = att.id;
+        attachments.write().push(att);
+        process_attachment(attachments, id, path, llm).await;
+    });
+}
+
+/// Blocking: pull the clipboard image (RGBA8 + dimensions), PNG-encode
+/// it, write to a uniquely-named file under the OS temp dir, and return
+/// the path. Errors propagate as anyhow so the caller can simply discard
+/// any failure (no-clipboard-image being the common case).
+fn read_clipboard_image_to_temp() -> anyhow::Result<PathBuf> {
+    let mut cb = arboard::Clipboard::new()?;
+    let img = cb.get_image()?;
+    let rgba =
+        image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
+            .ok_or_else(|| anyhow::anyhow!("clipboard image dims/bytes mismatch"))?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("smooblue-paste-{nanos}.png"));
+    rgba.save_with_format(&path, image::ImageFormat::Png)?;
+    Ok(path)
 }
 
 /// Single shared pipeline for a freshly-added attachment: prep image,
