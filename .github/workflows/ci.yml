@@ -59,6 +59,76 @@ jobs:
             - name: cargo test
               run: cargo test --workspace --no-fail-fast
 
+    # Build the macOS .app and verify it survives the first 10 seconds
+    # after launch. Catches the entire class of "compiles + tests pass
+    # but crashes on first render" bugs that pure-unit tests miss —
+    # AppKit FFI panics, missing dylibs at runtime, bad codesign,
+    # Dioxus context-provider ordering, etc. v1.5.0 shipped a Rust
+    # panic that aborted before the first frame; this job would have
+    # caught it at PR time. See pearl th-78d25c.
+    #
+    # GitHub's macos-latest runners have a full Aqua session — apps
+    # can create NSWindows even without a logged-in user. The app
+    # never becomes visible to anyone, we just check the process
+    # is still alive after the first-render window has elapsed.
+    smoke-launch:
+        name: Smoke — bundle + launch .app
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+              with:
+                  # Distinct key from the cargo test job — release vs
+                  # dev profile would otherwise thrash the cache.
+                  shared-key: smoke-launch-release
+
+            - name: Bundle Smooblue.app
+              run: ./scripts/bundle-macos.sh
+
+            - name: Launch and verify alive after 10s
+              run: |
+                  set +e
+                  BIN="dist/Smooblue.app/Contents/MacOS/Smooblue"
+                  if [[ ! -x "$BIN" ]]; then
+                      echo "::error::bundle didn't produce $BIN"
+                      exit 1
+                  fi
+
+                  # Launch detached; capture stdout+stderr for diag.
+                  # SMOOBLUE_DEMO=1 → no network, deterministic first render.
+                  SMOOBLUE_DEMO=1 RUST_BACKTRACE=full \
+                      "$BIN" > /tmp/smooblue.out 2>&1 &
+                  PID=$!
+                  echo "▸ launched PID $PID"
+
+                  # 10s is enough for the first render on a clean runner
+                  # (typical: 2-4s). v1.5.0 aborted in <1s, so any pre-
+                  # first-frame Rust panic / AppKit exception is caught.
+                  sleep 10
+
+                  if ! kill -0 "$PID" 2>/dev/null; then
+                      echo "::error::Smooblue exited within 10s of launch"
+                      echo "--- combined output ---"
+                      cat /tmp/smooblue.out || true
+                      exit 1
+                  fi
+
+                  echo "✓ Smooblue still alive after 10s — launch succeeded"
+
+                  # Clean up. SIGTERM first, then SIGKILL after a beat
+                  # in case the app installs a handler that takes a
+                  # moment to drain.
+                  kill -TERM "$PID" 2>/dev/null || true
+                  sleep 2
+                  kill -KILL "$PID" 2>/dev/null || true
+
+                  exit 0
+
     # Real Bluesky integration tests — runs nightly, not on every PR, so
     # api.bsky.app rate-limits don't gate development.
     real-bluesky:
