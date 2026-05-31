@@ -107,7 +107,7 @@ arboard = { version = "3", features = ["image-data"] }
 # Apple Vision OCR (macOS only). Used by the compose sheet to extract
 # literal text from screenshots / memes and seed alt-text alongside
 # the LLM scene description.
-objc2 = "0.6"
+objc2 = { version = "0.6", features = ["exception"] }
 objc2-foundation = "0.3"
 objc2-vision = { version = "0.3", features = [
     "VNRequest",

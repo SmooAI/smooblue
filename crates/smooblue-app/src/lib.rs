@@ -100,17 +100,41 @@ pub fn App() -> Element {
     // Bootstrap global state on first render.
     state::use_bootstrap();
 
-    // HOTFIX v1.5.1: file_promise install is wired but DISABLED — v1.5.0
-    // crashed on launch with __rust_foreign_exception → abort(). The
-    // AppKit overlay code in file_promise::install_on_main_window throws
-    // an ObjC exception that propagates through Dioxus' render path
-    // and the Rust runtime aborts. Module stays compiled so the fix
-    // can re-enable from here without a wider revert. Pearl: th-78d25c.
-    //
-    // Always-present context provider so compose.rs's use_context call
-    // doesn't panic — the queue just never gets populated.
-    let _pending_drops = use_context_provider(|| {
+    // v1.5.2: re-enabling the macOS NSFilePromise drop overlay (pearl
+    // th-78d25c). The v1.5.0 crash was a self-inflicted msg_send! with
+    // a snake_case "selector" (e.g. `set_autoresizing_mask:`) that
+    // doesn't exist in Cocoa — ObjC threw NSInvalidArgumentException,
+    // which propagated as a foreign exception and aborted the process.
+    // Fix in file_promise.rs: use the typed objc2-app-kit methods
+    // directly, plus defense-in-depth wrappers (catch_unwind +
+    // exception::catch + autoreleasepool) so any future bug degrades
+    // to a logged-but-running app instead of an aborted one.
+    // CI smoke-launch (.github/workflows/ci.yml) verifies launch
+    // survives the first 10s on every push, so a repeat of the v1.5.0
+    // incident can't land on main.
+    use_hook(file_promise::install_on_main_window);
+
+    // Queue of resolved file-promise drops waiting to be picked up by
+    // compose. ComposeSheet drains this on every render; if the sheet
+    // isn't open when a path arrives, the path stays queued AND we
+    // flip compose open so the user sees their dropped image.
+    let pending_drops = use_context_provider(|| {
         Signal::new(std::collections::VecDeque::<std::path::PathBuf>::new())
+    });
+
+    // Drain the file-promise receiver into the queue. Spawned once at
+    // App-mount; lives for the app's lifetime. take_receiver returns
+    // None if the install didn't initialize the channel (no-op on
+    // non-macOS, or if the overlay install bailed early).
+    use_hook(move || {
+        if let Some(mut rx) = file_promise::take_receiver() {
+            let mut pending_drops = pending_drops;
+            spawn(async move {
+                while let Some(path) = rx.recv().await {
+                    pending_drops.write().push_back(path);
+                }
+            });
+        }
     });
 
     let session = use_context::<Signal<Option<smooblue_oauth::Session>>>();

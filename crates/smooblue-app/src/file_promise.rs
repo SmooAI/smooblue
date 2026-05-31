@@ -18,7 +18,34 @@
 //! compose sheet, which feeds it into the same image-attachment
 //! pipeline as drag-drop and the file picker.
 //!
-//! Non-macOS builds: stubs that return `None` / no-op.
+//! ## Defense in depth (v1.5.2 lesson)
+//!
+//! v1.5.0 shipped this with hand-rolled `msg_send!` wrappers that used
+//! Rust snake_case as the selector (e.g. `set_autoresizing_mask:`
+//! instead of the real Cocoa selector `setAutoresizingMask:`). ObjC
+//! threw `NSInvalidArgumentException: unrecognized selector sent to
+//! instance` — which propagates through the Rust FFI boundary as a
+//! foreign exception and aborts the process. The whole app crashed
+//! at launch before the first frame.
+//!
+//! Three layers of guard now:
+//! 1. `std::panic::catch_unwind` swallows Rust panics from inside
+//!    `install_on_main_window` so an unexpected `.expect()` doesn't
+//!    take the app down.
+//! 2. `objc2::exception::catch` swallows ObjC exceptions and converts
+//!    them to a logged error rather than a foreign-exception abort.
+//! 3. `objc2::rc::autoreleasepool` provides a pool for the install
+//!    work — Cocoa code on the main thread normally has one from the
+//!    run loop, but at component-render time we may be running before
+//!    the run loop's pool is established, leaving autoreleased objects
+//!    with nowhere to drain.
+//!
+//! Also: every step `eprintln!`s its progress to stderr. The CI
+//! smoke-launch job captures stderr, so if the install ever fails
+//! again the log shows exactly which line. `tracing::warn!` etc.
+//! would be silent — Smooblue doesn't install a tracing subscriber.
+//!
+//! Non-macOS builds: stubs that no-op.
 
 #[cfg(target_os = "macos")]
 pub use macos::{install_on_main_window, take_receiver};
@@ -33,30 +60,28 @@ pub fn take_receiver() -> Option<tokio::sync::mpsc::UnboundedReceiver<std::path:
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::panic::AssertUnwindSafe;
     use std::path::PathBuf;
+    use std::ptr::NonNull;
     use std::sync::OnceLock;
 
     use block2::RcBlock;
-    use objc2::rc::Retained;
+    use objc2::rc::{autoreleasepool, Retained};
     use objc2::runtime::{AnyObject, Bool, ProtocolObject};
     use objc2::{define_class, msg_send, ClassType, MainThreadOnly};
     use objc2_app_kit::{
-        NSApplication, NSDragOperation, NSDraggingInfo, NSFilePromiseReceiver, NSView,
+        NSApplication, NSAutoresizingMaskOptions, NSDragOperation, NSDraggingInfo,
+        NSFilePromiseReceiver, NSView, NSWindowOrderingMode,
     };
     use objc2_foundation::{
-        ns_string, MainThreadMarker, NSArray, NSDictionary, NSError, NSOperationQueue, NSRect,
-        NSString, NSURL,
+        ns_string, MainThreadMarker, NSArray, NSDictionary, NSError, NSOperationQueue, NSPoint,
+        NSRect, NSString, NSURL,
     };
     use parking_lot::Mutex;
-    use std::ptr::NonNull;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-    use tracing::{debug, error, info, warn};
 
     /// Channel between the AppKit overlay callback (main thread, ObjC
-    /// runtime) and the Dioxus listener in `compose.rs` (tokio task).
-    /// `OnceLock` so the sender survives multiple install attempts;
-    /// `Mutex<Option<…>>` for the receiver because only one consumer
-    /// drains it (compose.rs takes it once at first mount).
+    /// runtime) and the Dioxus listener (tokio task).
     static SENDER: OnceLock<UnboundedSender<PathBuf>> = OnceLock::new();
     static RECEIVER: Mutex<Option<UnboundedReceiver<PathBuf>>> = Mutex::new(None);
 
@@ -65,104 +90,138 @@ mod macos {
     static INSTALLED: OnceLock<()> = OnceLock::new();
 
     /// Install the file-promise drop overlay on the main NSWindow's
-    /// content view. Must be called on the main thread (it's an
-    /// `NSView` operation). Idempotent — subsequent calls are no-ops.
-    ///
-    /// Call site: `App` component's `use_hook` (runs once, on the main
-    /// thread because Dioxus desktop's render thread IS the AppKit
-    /// main thread on macOS).
+    /// content view. Always safe to call — wraps all real work in
+    /// panic + ObjC-exception guards so a buggy installation degrades
+    /// to a logged error rather than an aborted process.
     pub fn install_on_main_window() {
-        if INSTALLED.set(()).is_err() {
-            return;
-        }
-
-        // Initialize the channel before installing the view, so any
-        // racing drop event has a sender to write to.
-        let (tx, rx) = unbounded_channel();
-        let _ = SENDER.set(tx);
-        *RECEIVER.lock() = Some(rx);
-
-        // SAFETY: All AppKit calls below are made on the main thread
-        // (MainThreadMarker::new() returns Some only there) and only
-        // touch documented APIs on freshly-constructed or properly
-        // retained value types.
-        let Some(mtm) = MainThreadMarker::new() else {
-            warn!(
-                "file_promise::install_on_main_window called off the main thread — skipping. \
-                 This shouldn't happen — Dioxus' App use_hook runs on the AppKit main thread."
-            );
-            return;
-        };
-
-        unsafe {
-            let app = NSApplication::sharedApplication(mtm);
-            let windows = app.windows();
-            let Some(window) = windows.iter().next() else {
-                warn!("file_promise: no NSWindow available yet at install time — skipping");
-                return;
-            };
-            let Some(content_view) = window.contentView() else {
-                warn!("file_promise: NSWindow has no contentView — skipping");
-                return;
-            };
-
-            // Build the overlay — an NSView covering the content view's
-            // frame, with autoresizing so it tracks window resizes.
-            let bounds = content_view.bounds();
-            let overlay: Retained<PromiseDropView> = PromiseDropView::new(mtm, bounds);
-
-            // 0b110 = NSViewWidthSizable | NSViewHeightSizable. Without
-            // these the overlay stays at install-time size and the
-            // bottom-right of the window stops accepting promise drops
-            // after a resize.
-            overlay.set_autoresizing_mask(
-                objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable
-                    | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable,
-            );
-
-            // Register for promise drag types ONLY. Finder drops carry
-            // public.file-url which we DON'T register for, so they hit
-            // the WKWebView underneath via macOS's normal drag
-            // destination resolution (drag types must match for a
-            // view's draggingEntered: to fire at all).
-            //
-            // The promise UTI is com.apple.NSFilePromiseProvider on
-            // modern macOS; older releases used NSFilesPromisePboardType
-            // (the .pbxFileWrapper-style type). Register both to be
-            // forgiving across OS versions.
-            let promise_types = NSArray::from_slice(&[
-                ns_string!("com.apple.NSFilePromiseProvider"),
-                // Legacy alias — still emitted by some apps' DnD code.
-                ns_string!("com.apple.pasteboard.promised-file-url"),
-            ]);
-            overlay.register_for_dragged_types(&promise_types);
-
-            // Add as the topmost subview so it gets drag-target priority
-            // over the WKWebView for matching types. Frame-on-top trick:
-            // pass nil for relativeTo + NSWindowAbove.
-            // addSubview:positioned:relativeTo: is the right method here.
-            // 1 = NSWindowAbove
-            let nil_view: *mut NSView = std::ptr::null_mut();
-            let _: () = msg_send![
-                &*content_view,
-                addSubview: &*overlay,
-                positioned: 1i64,
-                relativeTo: nil_view,
-            ];
-
-            info!(
-                "file_promise: overlay installed on window contentView \
-                 ({}x{}); listening for NSFilePromiseProvider drops",
-                bounds.size.width, bounds.size.height
-            );
+        let outcome = std::panic::catch_unwind(AssertUnwindSafe(install_inner));
+        if let Err(panic) = outcome {
+            // Best-effort string from the panic payload — works for
+            // both `&str` and `String` panics, which covers most of
+            // the Rust std uses of panic!.
+            let msg = panic_payload_message(&panic);
+            eprintln!("[file_promise] install panicked: {msg}");
         }
     }
 
     /// Take the receiver for incoming promised paths. Called once at
-    /// compose-sheet first-mount; the listener task then runs forever
-    /// pushing paths into the attachments pipeline.
+    /// App's first render; the listener task then pushes paths into
+    /// the attachments-pipeline queue.
     pub fn take_receiver() -> Option<UnboundedReceiver<PathBuf>> {
         RECEIVER.lock().take()
+    }
+
+    fn install_inner() {
+        if INSTALLED.set(()).is_err() {
+            return;
+        }
+        eprintln!("[file_promise] install starting");
+
+        let (tx, rx) = unbounded_channel();
+        let _ = SENDER.set(tx);
+        *RECEIVER.lock() = Some(rx);
+        eprintln!("[file_promise] channel ready");
+
+        let Some(mtm) = MainThreadMarker::new() else {
+            eprintln!("[file_promise] not on main thread — skipping overlay install");
+            return;
+        };
+        eprintln!("[file_promise] on main thread, attaching overlay");
+
+        // Drain autoreleased AppKit allocations + catch ObjC exceptions
+        // so we never abort the process. autoreleasepool first because
+        // it has the wider lifetime; exception::catch inside it.
+        autoreleasepool(|_| {
+            // SAFETY: `install_appkit` is `unsafe` because it dispatches
+            // ObjC messages; correctness is the function's
+            // responsibility, not ours here. exception::catch is also
+            // `unsafe` because the closure can raise ObjC exceptions
+            // (that's the whole point — it's the catch site).
+            let result =
+                unsafe { objc2::exception::catch(AssertUnwindSafe(|| install_appkit(mtm))) };
+            match result {
+                Ok(()) => eprintln!("[file_promise] overlay install complete"),
+                Err(exc) => {
+                    // Exception's Debug impl renders class + reason
+                    // which is the most useful thing for a stderr log.
+                    let desc = match exc {
+                        Some(e) => format!("{e:?}"),
+                        None => "<no exception object>".to_string(),
+                    };
+                    eprintln!("[file_promise] ObjC exception during install: {desc}");
+                }
+            }
+        });
+    }
+
+    /// Concrete AppKit setup. Separated so the `unsafe` block is small
+    /// and the `exception::catch` site is clean. Marked `unsafe fn`
+    /// because every objc dispatch is unsafe.
+    unsafe fn install_appkit(mtm: MainThreadMarker) {
+        eprintln!("[file_promise] sharedApplication");
+        let app = NSApplication::sharedApplication(mtm);
+
+        eprintln!("[file_promise] querying windows");
+        let windows = app.windows();
+        let window_count = windows.len();
+        eprintln!("[file_promise] window count: {window_count}");
+
+        let Some(window) = windows.iter().next() else {
+            eprintln!("[file_promise] no NSWindow at install time — skipping");
+            return;
+        };
+
+        eprintln!("[file_promise] getting contentView");
+        let Some(content_view) = window.contentView() else {
+            eprintln!("[file_promise] NSWindow has no contentView — skipping");
+            return;
+        };
+
+        let bounds = content_view.bounds();
+        eprintln!(
+            "[file_promise] contentView bounds: {}x{}",
+            bounds.size.width, bounds.size.height
+        );
+
+        eprintln!("[file_promise] allocating PromiseDropView");
+        let overlay: Retained<PromiseDropView> = PromiseDropView::new(mtm, bounds);
+
+        eprintln!("[file_promise] setAutoresizingMask");
+        overlay.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+
+        // Register for promise drag types ONLY. Finder drops carry
+        // public.file-url which we DON'T register for, so they fall
+        // through to the WKWebView untouched.
+        eprintln!("[file_promise] building promise drag-type array");
+        let promise_types = NSArray::from_slice(&[
+            ns_string!("com.apple.NSFilePromiseProvider"),
+            // Legacy alias — still emitted by some apps' DnD code.
+            ns_string!("com.apple.pasteboard.promised-file-url"),
+        ]);
+
+        eprintln!("[file_promise] registerForDraggedTypes");
+        overlay.registerForDraggedTypes(&promise_types);
+
+        eprintln!("[file_promise] addSubview (NSWindowAbove)");
+        content_view.addSubview_positioned_relativeTo(&overlay, NSWindowOrderingMode::Above, None);
+
+        eprintln!("[file_promise] overlay installed; listening for NSFilePromiseProvider drops");
+    }
+
+    /// Pull a printable message out of a panic payload. Covers the
+    /// common case of `panic!("…")` (str / String); falls back to a
+    /// generic note for opaque payloads.
+    fn panic_payload_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+        if let Some(s) = panic.downcast_ref::<&'static str>() {
+            (*s).to_string()
+        } else if let Some(s) = panic.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "<non-string panic payload>".to_string()
+        }
     }
 
     define_class!(
@@ -174,55 +233,61 @@ mod macos {
         ///
         /// hitTest: returns nil so normal mouse events (clicks, scroll,
         /// drag-selection) pass straight through to the WKWebView
-        /// underneath. Drag-destination resolution uses a separate
-        /// AppKit path that doesn't go through hitTest, so promise
-        /// drops still find us.
+        /// underneath.
         #[unsafe(super(NSView))]
         #[name = "SmooBluePromiseDropView"]
         struct PromiseDropView;
 
         impl PromiseDropView {
             #[unsafe(method(hitTest:))]
-            fn hit_test(&self, _point: objc2_foundation::NSPoint) -> *mut NSView {
+            fn hit_test(&self, _point: NSPoint) -> *mut NSView {
                 std::ptr::null_mut()
             }
 
             #[unsafe(method(draggingEntered:))]
-            fn dragging_entered(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
-                debug!("file_promise: draggingEntered (promise type detected)");
+            fn dragging_entered(
+                &self,
+                _sender: &ProtocolObject<dyn NSDraggingInfo>,
+            ) -> NSDragOperation {
+                eprintln!("[file_promise] draggingEntered (promise type detected)");
                 NSDragOperation::Copy
             }
 
             #[unsafe(method(draggingUpdated:))]
-            fn dragging_updated(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) -> NSDragOperation {
+            fn dragging_updated(
+                &self,
+                _sender: &ProtocolObject<dyn NSDraggingInfo>,
+            ) -> NSDragOperation {
                 NSDragOperation::Copy
             }
 
             #[unsafe(method(prepareForDragOperation:))]
-            fn prepare_for_drag_operation(&self, _sender: &ProtocolObject<dyn NSDraggingInfo>) -> Bool {
+            fn prepare_for_drag_operation(
+                &self,
+                _sender: &ProtocolObject<dyn NSDraggingInfo>,
+            ) -> Bool {
                 Bool::YES
             }
 
             #[unsafe(method(performDragOperation:))]
-            fn perform_drag_operation(&self, sender: &ProtocolObject<dyn NSDraggingInfo>) -> Bool {
+            fn perform_drag_operation(
+                &self,
+                sender: &ProtocolObject<dyn NSDraggingInfo>,
+            ) -> Bool {
+                eprintln!("[file_promise] performDragOperation");
                 unsafe {
                     let pb = sender.draggingPasteboard();
                     let receivers_class = NSFilePromiseReceiver::class();
                     let classes = NSArray::from_slice(&[receivers_class]);
-                    // Cocoa's NSDictionary type-param shows up differently
-                    // across the two binding sites — readObjectsForClasses
-                    // wants NSDictionary<NSString>, receivePromisedFiles
-                    // wants NSDictionary<AnyObject>. Declare each at the
-                    // shape its caller expects.
                     let read_opts: Retained<NSDictionary<NSString>> = NSDictionary::new();
-                    let items: Option<Retained<NSArray<AnyObject>>> = pb
-                        .readObjectsForClasses_options(&classes, Some(&read_opts));
+                    let items: Option<Retained<NSArray<AnyObject>>> =
+                        pb.readObjectsForClasses_options(&classes, Some(&read_opts));
                     let Some(items) = items else {
-                        warn!("file_promise: performDragOperation but pasteboard returned no NSFilePromiseReceiver items");
+                        eprintln!("[file_promise] pasteboard returned no items");
                         return Bool::NO;
                     };
                     if items.count() == 0 {
-                        warn!("file_promise: zero receivers despite matching drag type");
+                        eprintln!("[file_promise] zero receivers despite matching drag type");
                         return Bool::NO;
                     }
 
@@ -236,43 +301,43 @@ mod macos {
                         let receiver: Retained<NSFilePromiseReceiver> =
                             Retained::cast_unchecked::<NSFilePromiseReceiver>(raw);
 
-                        // Take a sender clone per item — the block is
-                        // 'static and can outlive this loop iteration.
                         let tx = SENDER.get().cloned();
                         let block = RcBlock::new(
                             move |url: NonNull<NSURL>, err: *mut NSError| {
                                 if !err.is_null() {
                                     let err_ref: &NSError = &*err;
-                                    error!(
-                                        "file_promise: receivePromisedFiles error: {}",
-                                        err_ref.localizedDescription().to_string()
+                                    eprintln!(
+                                        "[file_promise] receivePromisedFiles error: {}",
+                                        err_ref.localizedDescription()
                                     );
                                     return;
                                 }
                                 let url_ref: &NSURL = url.as_ref();
                                 let Some(path_ns) = url_ref.path() else {
-                                    warn!("file_promise: resolved URL has no filesystem path");
+                                    eprintln!("[file_promise] resolved URL has no fs path");
                                     return;
                                 };
                                 let path = PathBuf::from(path_ns.to_string());
-                                debug!("file_promise: resolved promise → {}", path.display());
+                                eprintln!(
+                                    "[file_promise] resolved promise → {}",
+                                    path.display()
+                                );
                                 if let Some(tx) = tx.as_ref() {
                                     if let Err(e) = tx.send(path) {
-                                        error!("file_promise: channel closed: {e}");
+                                        eprintln!("[file_promise] channel closed: {e}");
                                     }
                                 } else {
-                                    warn!("file_promise: SENDER not initialized, dropping path");
+                                    eprintln!("[file_promise] SENDER missing, dropping path");
                                 }
                             },
                         );
 
-                        receiver
-                            .receivePromisedFilesAtDestination_options_operationQueue_reader(
-                                &dest_url,
-                                &empty_opts,
-                                &queue,
-                                &block,
-                            );
+                        receiver.receivePromisedFilesAtDestination_options_operationQueue_reader(
+                            &dest_url,
+                            &empty_opts,
+                            &queue,
+                            &block,
+                        );
                     }
 
                     Bool::YES
@@ -283,24 +348,13 @@ mod macos {
 
     impl PromiseDropView {
         /// Construct a new overlay view sized to the given frame.
+        /// `initWithFrame:` is the canonical NSView designated
+        /// initializer; we send it via msg_send! so the return type
+        /// resolves directly to `Retained<Self>` without intermediate
+        /// .cast() dances that don't exist on Allocated/Retained.
         fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
             let this = Self::alloc(mtm);
-            unsafe {
-                let initialized: Retained<Self> = msg_send![this, initWithFrame: frame];
-                initialized
-            }
-        }
-
-        fn set_autoresizing_mask(&self, mask: objc2_app_kit::NSAutoresizingMaskOptions) {
-            unsafe {
-                let _: () = msg_send![self, set_autoresizing_mask: mask];
-            }
-        }
-
-        fn register_for_dragged_types(&self, types: &NSArray<NSString>) {
-            unsafe {
-                let _: () = msg_send![self, register_for_dragged_types: types];
-            }
+            unsafe { msg_send![this, initWithFrame: frame] }
         }
     }
 }
