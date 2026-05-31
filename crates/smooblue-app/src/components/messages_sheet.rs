@@ -25,6 +25,7 @@
 use crate::auth_refresh::fresh_client;
 use crate::icons;
 use crate::state::MessagesFocus;
+use dioxus::document;
 use dioxus::prelude::*;
 use smooblue_atproto::{Message, MessageInput};
 use smooblue_oauth::Session;
@@ -38,6 +39,12 @@ const POLL_SECS: u64 = 10;
 /// Messages-per-page on the initial load. The chat lexicon paginates
 /// newest-first; 100 covers most active convos in a single fetch.
 const PAGE_LIMIT: u32 = 100;
+
+/// Scroll-distance from the top (px) at which we trigger an older-
+/// messages fetch. 150 gives the user a moment to actually see they
+/// triggered something; lower would fire only after a flick, higher
+/// would fire while they were still well inside the visible window.
+const SCROLL_TRIGGER_PX: i32 = 150;
 
 #[component]
 pub fn MessagesSheet() -> Element {
@@ -56,6 +63,22 @@ pub fn MessagesSheet() -> Element {
     // Tick that bumps every POLL_SECS while the sheet is open; the
     // load effect depends on it so the poll triggers a refetch.
     let mut poll_tick = use_signal(|| 0u64);
+    // Scroll-based "load older" state. After the initial top-page
+    // fetch, the server returns a cursor pointing at the NEXT page
+    // of older messages. When the user scrolls close to the top of
+    // the bubble list, we fire chat_get_messages with that cursor
+    // and prepend the result. `loading_older` gates against
+    // concurrent fetches (scroll events fire many times per second);
+    // `no_more_older` latches when the server returns no cursor.
+    let mut older_cursor = use_signal::<Option<String>>(|| None);
+    let mut loading_older = use_signal(|| false);
+    let mut no_more_older = use_signal(|| false);
+    // Counter that increments each time `messages` changes via append
+    // (new message arrives) — the auto-scroll-to-bottom effect
+    // observes it so the view sticks to the latest message after a
+    // send or a poll-discovered new arrival. Distinct from a prepend
+    // (older-message load), which must NOT scroll the view.
+    let mut tail_grew = use_signal(|| 0u64);
 
     // Snapshot the viewer's own DID so message rendering can decide
     // left-vs-right alignment per bubble. Defaults to empty string
@@ -96,6 +119,9 @@ pub fn MessagesSheet() -> Element {
                 load_error.set(None);
                 send_error.set(None);
                 draft.set(String::new());
+                older_cursor.set(None);
+                loading_older.set(false);
+                no_more_older.set(false);
                 return;
             };
             spawn(async move {
@@ -110,7 +136,19 @@ pub fn MessagesSheet() -> Element {
                         // and the latest message lands at the bottom.
                         let mut rev = resp.messages;
                         rev.reverse();
+                        // Initial-page semantics: replace messages,
+                        // capture the cursor for scroll-up paging.
+                        // A null cursor here means the convo's whole
+                        // history fits in the first page — no more
+                        // to load.
+                        let cursor_for_older = resp.cursor.clone();
+                        let cursor_was_none = cursor_for_older.is_none();
                         messages.set(rev);
+                        older_cursor.set(cursor_for_older);
+                        no_more_older.set(cursor_was_none);
+                        // Bump tail_grew so the auto-scroll-to-bottom
+                        // effect fires (initial open + every poll).
+                        tail_grew.with_mut(|n| *n = n.wrapping_add(1));
                         load_error.set(None);
                     }
                     Err(e) => load_error.set(Some(e.to_string())),
@@ -174,12 +212,120 @@ pub fn MessagesSheet() -> Element {
                     messages.write().push(Message::Live(view));
                     draft.set(String::new());
                     send_error.set(None);
+                    tail_grew.with_mut(|n| *n = n.wrapping_add(1));
                 }
                 Err(e) => send_error.set(Some(e.to_string())),
             }
             sending.set(false);
         });
     };
+
+    // Scroll handler — when the user scrolls within SCROLL_TRIGGER_PX
+    // of the top of the bubble list, fetch the next older-message
+    // page and prepend. Inlined (rather than dispatching to a
+    // separate closure) because both the eval-scrollTop call and the
+    // load-older fetch are async and need to share the same captured
+    // state without juggling FnMut clones.
+    //
+    // Self-guards against the per-frame fire rate of scroll events:
+    // `loading_older` latches once a fetch is in flight, so the next
+    // ~60 evals/sec all bail at the gate check.
+    let convo_id_for_scroll = snap.clone();
+    let on_scroll = move |_: ScrollEvent| {
+        let convo_id = match convo_id_for_scroll.clone() {
+            Some(c) => c,
+            None => return,
+        };
+        if *loading_older.read() || *no_more_older.read() {
+            return;
+        }
+        let cursor = match older_cursor.read().clone() {
+            Some(c) => c,
+            None => return,
+        };
+        let session_for_older = session;
+        spawn(async move {
+            // 1. Ask the webview where the scroll position is. dioxus
+            //    eval returns a JSON value; we want f64.
+            let mut eval = document::eval(
+                r#"
+                const el = document.querySelector('.messages__body');
+                dioxus.send(el ? el.scrollTop : 9999);
+                "#,
+            );
+            let Ok(top) = eval.recv::<f64>().await else {
+                return;
+            };
+            if top >= SCROLL_TRIGGER_PX as f64 {
+                return;
+            }
+            // 2. Re-check the gate now that we know we want to fire.
+            //    A concurrent scroll event may have already started a
+            //    fetch in the window between the gate check above and
+            //    this point.
+            if *loading_older.peek() {
+                return;
+            }
+            loading_older.set(true);
+            // 3. Fetch + prepend.
+            let Some(client) = fresh_client(session_for_older).await else {
+                loading_older.set(false);
+                return;
+            };
+            match client
+                .chat_get_messages(&convo_id, Some(&cursor), PAGE_LIMIT)
+                .await
+            {
+                Ok(resp) => {
+                    let mut older: Vec<Message> = resp.messages;
+                    older.reverse(); // server gives newest-first; we want oldest-top
+                                     // Prepend. CSS uses overflow-anchor: auto on
+                                     // .messages__body so WebKit holds the visible
+                                     // content in place while items insert above
+                                     // the current viewport — the user keeps their
+                                     // place mid-conversation rather than getting
+                                     // yanked back to the new top.
+                    let mut current = messages.write();
+                    let mut combined = Vec::with_capacity(older.len() + current.len());
+                    combined.extend(older);
+                    combined.extend(current.drain(..));
+                    *current = combined;
+                    let next_cursor = resp.cursor;
+                    if next_cursor.is_none() {
+                        no_more_older.set(true);
+                    }
+                    older_cursor.set(next_cursor);
+                }
+                Err(e) => {
+                    // Soft-fail older loads — the user has the recent
+                    // page; a transient blip shouldn't nuke the list.
+                    // Next scroll-to-top retries.
+                    eprintln!("[messages_sheet] load-older failed: {e}");
+                }
+            }
+            loading_older.set(false);
+        });
+    };
+
+    // Auto-scroll-to-bottom whenever `tail_grew` bumps (initial load,
+    // poll-discovered new message, successful send). Skipped on
+    // prepend (older-message load) because the prepend path doesn't
+    // touch tail_grew. Use document::eval since scroll geometry
+    // lives in the webview, not the Rust render tree.
+    let _ = use_resource(move || {
+        let _trigger = *tail_grew.read();
+        async move {
+            // One frame of slop so the freshly-appended bubble is in
+            // the DOM by the time we scroll.
+            tokio::time::sleep(Duration::from_millis(16)).await;
+            let _ = document::eval(
+                r#"
+                const el = document.querySelector('.messages__body');
+                if (el) { el.scrollTop = el.scrollHeight; }
+                "#,
+            );
+        }
+    });
 
     // Spawn-friendly clones so the button + textarea handlers each
     // get their own callable.
@@ -211,6 +357,12 @@ pub fn MessagesSheet() -> Element {
                     }
                 }
                 div { class: "messages__body",
+                    onscroll: on_scroll,
+                    if *loading_older.read() {
+                        div { class: "messages__loading-older", "Loading older messages…" }
+                    } else if *no_more_older.read() && !messages_snap.is_empty() {
+                        div { class: "messages__history-end", "Start of conversation." }
+                    }
                     if let Some(e) = load_err_snap.as_ref() {
                         div { class: "messages__error", "Couldn't load: {e}" }
                     } else if messages_snap.is_empty() {
