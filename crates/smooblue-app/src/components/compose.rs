@@ -173,6 +173,51 @@ pub fn ComposeSheet() -> Element {
         }
     });
 
+    // Drain file-promise drops queued by the macOS overlay
+    // (file_promise.rs). The queue is provided at App-level; when a
+    // path arrives we (1) flip compose open if it isn't already so
+    // the user sees their dropped image, then (2) feed the path
+    // through the same process_attachment pipeline as drag-drop.
+    // use_effect re-runs whenever pending_drops changes (Signal
+    // reactivity), so we don't poll.
+    let mut pending_drops = use_context::<Signal<std::collections::VecDeque<PathBuf>>>();
+    use_effect(move || {
+        if pending_drops.read().is_empty() {
+            return;
+        }
+        let mut atts = attachments;
+        let mut ctx_open = ctx;
+        let mut error_for_drop = error;
+        let drained: Vec<PathBuf> = pending_drops.write().drain(..).collect();
+        if !ctx_open.read().open {
+            ctx_open.write().open = true;
+        }
+        spawn(async move {
+            let already = atts.read().len();
+            let slots = MAX_IMAGES.saturating_sub(already);
+            if slots == 0 {
+                error_for_drop.set(Some(format!(
+                    "Already at {MAX_IMAGES} images — dropped screenshot ignored."
+                )));
+                return;
+            }
+            let llm: Option<Arc<dyn AltTextProvider>> =
+                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+            for path in drained.into_iter().take(slots) {
+                if !path.is_file() {
+                    continue;
+                }
+                let att = AttachedImage::new(path.clone());
+                let id = att.id;
+                atts.write().push(att);
+                let llm_for_image = llm.clone();
+                spawn(async move {
+                    process_attachment(atts, id, path, llm_for_image).await;
+                });
+            }
+        });
+    });
+
     let snap = ctx.read().clone();
     if !snap.open {
         return rsx! { Fragment {} };

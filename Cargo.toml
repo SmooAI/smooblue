@@ -116,6 +116,24 @@ objc2-vision = { version = "0.3", features = [
     "VNObservation",
     "VNTypes",
 ] }
+# AppKit + Objective-C blocks (macOS only). Used by the file-promise
+# drop overlay (file_promise.rs) to intercept screenshot-floater drags
+# — Wry can't resolve NSFilePromiseProvider items so we register a
+# tiny invisible NSView, scoped to promise types only, that resolves
+# the promise via NSFilePromiseReceiver and forwards the path to
+# compose.rs through a tokio channel.
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSWindow",
+    "NSView",
+    "NSResponder",
+    "NSPasteboard",
+    "NSPasteboardItem",
+    "NSDragging",
+    "NSFilePromiseReceiver",
+    "NSEvent",
+] }
+block2 = "0.6"
 
 # Test utilities
 wiremock = "0.6"

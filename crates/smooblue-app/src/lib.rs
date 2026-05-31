@@ -6,6 +6,7 @@ pub mod alt_text;
 pub mod auth_refresh;
 pub mod components;
 pub mod demo;
+pub mod file_promise;
 pub mod icons;
 pub mod image_prep;
 pub mod keyboard;
@@ -98,6 +99,35 @@ const INLINE_VIDEO_AUTOPAUSE_JS: &str = r#"
 pub fn App() -> Element {
     // Bootstrap global state on first render.
     state::use_bootstrap();
+
+    // Install the macOS NSFilePromiseProvider drop overlay on the main
+    // window so screenshot-floater drags resolve into compose. No-op
+    // on other platforms (linux/windows use the standard drag path).
+    // Runs exactly once for the lifetime of the App component, which
+    // is the lifetime of the app itself.
+    use_hook(file_promise::install_on_main_window);
+
+    // Queue of resolved file-promise drops waiting to be picked up by
+    // compose. ComposeSheet drains this on every render; if the sheet
+    // isn't open when a path arrives, the path stays queued AND we
+    // flip compose open so the user sees their dropped image.
+    let pending_drops = use_context_provider(|| {
+        Signal::new(std::collections::VecDeque::<std::path::PathBuf>::new())
+    });
+
+    // Drain the file-promise receiver into the queue. Spawned once at
+    // App-mount on the tokio runtime; lives for the app's lifetime.
+    // Take-once semantics on the receiver guard against double-spawn.
+    use_hook(move || {
+        if let Some(mut rx) = file_promise::take_receiver() {
+            let mut pending_drops = pending_drops;
+            spawn(async move {
+                while let Some(path) = rx.recv().await {
+                    pending_drops.write().push_back(path);
+                }
+            });
+        }
+    });
 
     let session = use_context::<Signal<Option<smooblue_oauth::Session>>>();
 
