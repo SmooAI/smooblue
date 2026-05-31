@@ -122,16 +122,35 @@ pub fn App() -> Element {
         Signal::new(std::collections::VecDeque::<std::path::PathBuf>::new())
     });
 
-    // Drain the file-promise receiver into the queue. Spawned once at
-    // App-mount; lives for the app's lifetime. take_receiver returns
-    // None if the install didn't initialize the channel (no-op on
-    // non-macOS, or if the overlay install bailed early).
+    // Mirror of the AppKit overlay's drag-tracking state — true between
+    // draggingEntered and draggingExited (or drop). ComposeSheet ORs
+    // this with its native HTML5 dragover signal to drive the yellow
+    // textarea highlight, so floater drags get the same visual
+    // feedback as Finder drags.
+    let promise_drag_active = use_context_provider(|| Signal::new(false));
+
+    // Translate FilePromiseEvent stream from the overlay into the two
+    // signals above. Spawned once at App-mount; lives for the app's
+    // lifetime. take_receiver returns None if the install didn't
+    // initialize the channel (non-macOS or install bailed early).
     use_hook(move || {
         if let Some(mut rx) = file_promise::take_receiver() {
             let mut pending_drops = pending_drops;
+            let mut promise_drag_active = promise_drag_active;
             spawn(async move {
-                while let Some(path) = rx.recv().await {
-                    pending_drops.write().push_back(path);
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        file_promise::FilePromiseEvent::DragEnter => {
+                            promise_drag_active.set(true);
+                        }
+                        file_promise::FilePromiseEvent::DragExit => {
+                            promise_drag_active.set(false);
+                        }
+                        file_promise::FilePromiseEvent::Drop(path) => {
+                            promise_drag_active.set(false);
+                            pending_drops.write().push_back(path);
+                        }
+                    }
                 }
             });
         }

@@ -47,6 +47,27 @@
 //!
 //! Non-macOS builds: stubs that no-op.
 
+use std::path::PathBuf;
+
+/// Events emitted from the AppKit drag-destination overlay to the
+/// Dioxus listener. Keeps drag-over UI state (the yellow textarea
+/// highlight) in sync with the AppKit drag-tracking lifecycle —
+/// otherwise the overlay would intercept the drag before the
+/// compose textarea's on_dragover handler could fire, and the user
+/// would get no visual feedback during a floater drag.
+#[derive(Debug, Clone)]
+pub enum FilePromiseEvent {
+    /// Drag with a registered promise type entered our overlay.
+    /// Open compose (if closed) + light up the over-highlight.
+    DragEnter,
+    /// Drag left the overlay without dropping. Clear the highlight;
+    /// keep compose open (closing on drag-away would be intrusive).
+    DragExit,
+    /// Drop completed; promise resolved to this file path. Clear
+    /// the highlight and attach the image.
+    Drop(PathBuf),
+}
+
 #[cfg(target_os = "macos")]
 pub use macos::{install_on_main_window, take_receiver};
 
@@ -54,12 +75,13 @@ pub use macos::{install_on_main_window, take_receiver};
 pub fn install_on_main_window() {}
 
 #[cfg(not(target_os = "macos"))]
-pub fn take_receiver() -> Option<tokio::sync::mpsc::UnboundedReceiver<std::path::PathBuf>> {
+pub fn take_receiver() -> Option<tokio::sync::mpsc::UnboundedReceiver<FilePromiseEvent>> {
     None
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use super::FilePromiseEvent;
     use std::panic::AssertUnwindSafe;
     use std::path::PathBuf;
     use std::ptr::NonNull;
@@ -81,9 +103,12 @@ mod macos {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
     /// Channel between the AppKit overlay callback (main thread, ObjC
-    /// runtime) and the Dioxus listener (tokio task).
-    static SENDER: OnceLock<UnboundedSender<PathBuf>> = OnceLock::new();
-    static RECEIVER: Mutex<Option<UnboundedReceiver<PathBuf>>> = Mutex::new(None);
+    /// runtime) and the Dioxus listener (tokio task). Carries the
+    /// drag-state lifecycle plus the resolved drop path, so the
+    /// Dioxus side can keep visual state in sync (compose highlight)
+    /// alongside attaching images.
+    static SENDER: OnceLock<UnboundedSender<FilePromiseEvent>> = OnceLock::new();
+    static RECEIVER: Mutex<Option<UnboundedReceiver<FilePromiseEvent>>> = Mutex::new(None);
 
     /// Guard against double-install. The overlay is per-window and the
     /// channel is global; both should initialize exactly once.
@@ -107,8 +132,17 @@ mod macos {
     /// Take the receiver for incoming promised paths. Called once at
     /// App's first render; the listener task then pushes paths into
     /// the attachments-pipeline queue.
-    pub fn take_receiver() -> Option<UnboundedReceiver<PathBuf>> {
+    pub fn take_receiver() -> Option<UnboundedReceiver<FilePromiseEvent>> {
         RECEIVER.lock().take()
+    }
+
+    /// Best-effort fire an event to the Dioxus listener. Drops the
+    /// event silently if the channel hasn't been initialized yet
+    /// (overlay install would have warned about that path).
+    fn emit(event: FilePromiseEvent) {
+        if let Some(tx) = SENDER.get() {
+            let _ = tx.send(event);
+        }
     }
 
     fn install_inner() {
@@ -250,6 +284,7 @@ mod macos {
                 _sender: &ProtocolObject<dyn NSDraggingInfo>,
             ) -> NSDragOperation {
                 eprintln!("[file_promise] draggingEntered (promise type detected)");
+                emit(FilePromiseEvent::DragEnter);
                 NSDragOperation::Copy
             }
 
@@ -259,6 +294,14 @@ mod macos {
                 _sender: &ProtocolObject<dyn NSDraggingInfo>,
             ) -> NSDragOperation {
                 NSDragOperation::Copy
+            }
+
+            #[unsafe(method(draggingExited:))]
+            fn dragging_exited(&self, _sender: Option<&ProtocolObject<dyn NSDraggingInfo>>) {
+                // Drag left without dropping. Clear the highlight so
+                // the textarea doesn't get stuck in "over" state.
+                eprintln!("[file_promise] draggingExited");
+                emit(FilePromiseEvent::DragExit);
             }
 
             #[unsafe(method(prepareForDragOperation:))]
@@ -301,7 +344,6 @@ mod macos {
                         let receiver: Retained<NSFilePromiseReceiver> =
                             Retained::cast_unchecked::<NSFilePromiseReceiver>(raw);
 
-                        let tx = SENDER.get().cloned();
                         let block = RcBlock::new(
                             move |url: NonNull<NSURL>, err: *mut NSError| {
                                 if !err.is_null() {
@@ -322,13 +364,7 @@ mod macos {
                                     "[file_promise] resolved promise → {}",
                                     path.display()
                                 );
-                                if let Some(tx) = tx.as_ref() {
-                                    if let Err(e) = tx.send(path) {
-                                        eprintln!("[file_promise] channel closed: {e}");
-                                    }
-                                } else {
-                                    eprintln!("[file_promise] SENDER missing, dropping path");
-                                }
+                                emit(FilePromiseEvent::Drop(path));
                             },
                         );
 

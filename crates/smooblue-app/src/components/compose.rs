@@ -173,25 +173,37 @@ pub fn ComposeSheet() -> Element {
         }
     });
 
-    // Drain file-promise drops queued by the macOS overlay
-    // (file_promise.rs). The queue is provided at App-level; when a
-    // path arrives we (1) flip compose open if it isn't already so
-    // the user sees their dropped image, then (2) feed the path
-    // through the same process_attachment pipeline as drag-drop.
-    // use_effect re-runs whenever pending_drops changes (Signal
-    // reactivity), so we don't poll.
+    // File-promise integration with the macOS overlay (file_promise.rs).
+    // Two App-level signals feed this:
+    //   - pending_drops: VecDeque<PathBuf>  — drops to attach
+    //   - promise_drag_active: bool         — true between draggingEntered
+    //                                          and draggingExited/drop,
+    //                                          drives the --drag highlight
+    //                                          on the outer container
+    // The use_effect re-runs on either signal changing; we open compose
+    // on drag-enter (so the user sees the highlight before they drop)
+    // AND on drop landing (when compose is otherwise closed), then
+    // drain pending paths through the same image-attachment pipeline.
     let mut pending_drops = use_context::<Signal<std::collections::VecDeque<PathBuf>>>();
+    let promise_drag_active = use_context::<Signal<bool>>();
     use_effect(move || {
-        if pending_drops.read().is_empty() {
+        let drag_active = *promise_drag_active.read();
+        let has_pending = !pending_drops.read().is_empty();
+        if !drag_active && !has_pending {
             return;
         }
         let mut atts = attachments;
         let mut ctx_open = ctx;
         let mut error_for_drop = error;
-        let drained: Vec<PathBuf> = pending_drops.write().drain(..).collect();
+        // Open compose for either: drag-enter (user sees highlight as
+        // they hover) or pending-drop (user sees the attached image).
         if !ctx_open.read().open {
             ctx_open.write().open = true;
         }
+        if !has_pending {
+            return;
+        }
+        let drained: Vec<PathBuf> = pending_drops.write().drain(..).collect();
         spawn(async move {
             let already = atts.read().len();
             let slots = MAX_IMAGES.saturating_sub(already);
@@ -637,7 +649,13 @@ pub fn ComposeSheet() -> Element {
         // `--compose` lifts the z-index above the other sheets.
         div { class: "modal__backdrop modal__backdrop--compose", onclick: close,
             div {
-                class: if *dragging.read() {
+                // `dragging` is the HTML5 dragover signal (Finder file
+                // drops); `promise_drag_active` is the AppKit overlay's
+                // drag-tracking signal (screenshot floater drops). Either
+                // source lights up the same --drag highlight so the user
+                // gets consistent visual feedback regardless of where the
+                // image came from.
+                class: if *dragging.read() || *promise_drag_active.read() {
                     "modal__sheet compose__sheet compose__sheet--drag"
                 } else {
                     "modal__sheet compose__sheet"
