@@ -37,6 +37,7 @@ async-trait = { workspace = true }
 
 keyring = { workspace = true }
 directories = { workspace = true }
+rusqlite = { workspace = true }
 rfd = { workspace = true }
 arboard = { workspace = true }
 image = { workspace = true }

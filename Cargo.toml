@@ -71,6 +71,13 @@ jsonwebtoken = "9"
 # Persistence
 keyring = "3"
 directories = "5"
+# Embedded SQLite for the Inbox triage column (pearl th-e17045).
+# `bundled` so we link a known-good SQLite into the binary rather than
+# whatever the host has — eliminates "libsqlite3 not found" on Linux
+# distros that don't ship it by default and keeps macOS users on the
+# same version we tested. `chrono` feature lets us bind ISO timestamps
+# as TEXT and read them back as DateTime.
+rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 
 # Synchronization — parking_lot's Mutex skips std's poison concept,
 # which means we don't have to `.lock().unwrap()` everywhere and risk

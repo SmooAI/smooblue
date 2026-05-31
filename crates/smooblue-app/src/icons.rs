@@ -53,6 +53,24 @@ pub fn Bell(size: Size) -> Element {
 }
 
 #[component]
+pub fn Inbox(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdInbox } }
+}
+
+#[component]
+pub fn Archive(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdArchive } }
+}
+
+#[component]
+pub fn Clock(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdClock } }
+}
+
+#[component]
 pub fn Compass(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdCompass } }

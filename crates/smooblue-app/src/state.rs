@@ -48,6 +48,12 @@ pub enum ColumnKind {
     /// as a convo list; tapping a row opens MessagesSheet with the
     /// message history + compose input.
     Messages,
+    /// Stripe-Inbox-style triage column combining direct replies,
+    /// @mentions, quote-posts, and DMs into a single list sorted
+    /// by directness score. Backed by the [`crate::inbox`] SQLite
+    /// store — ingestion populates the DB on a poll, this column
+    /// just reads it. Pearl th-e17045.
+    Inbox,
 }
 
 impl ColumnSpec {
@@ -102,6 +108,14 @@ impl ColumnSpec {
             id: "messages".into(),
             kind: ColumnKind::Messages,
             title: "Messages".into(),
+        }
+    }
+
+    pub fn inbox() -> Self {
+        Self {
+            id: "inbox".into(),
+            kind: ColumnKind::Inbox,
+            title: "Inbox".into(),
         }
     }
 

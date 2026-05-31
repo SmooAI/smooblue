@@ -73,6 +73,11 @@ enum ColumnData {
     /// of conversation rows; clicking opens the thread on bsky.app
     /// until the inline MessagesSheet lands in a follow-up.
     Convos(Vec<smooblue_atproto::ConvoView>),
+    /// Inbox triage list (pearl th-e17045). Rows come from the local
+    /// SQLite store; ingestion populates it from listNotifications +
+    /// listConvos. v1 ships read-only (Phase A); triage actions
+    /// (archive/snooze/quick-reply) land in subsequent phases.
+    Inbox(Vec<crate::inbox::InboxItem>),
 }
 
 impl ColumnData {
@@ -83,6 +88,7 @@ impl ColumnData {
             Self::Notifications { groups, .. } => groups.is_empty(),
             Self::Suggestions(actors) => actors.is_empty(),
             Self::Convos(convos) => convos.is_empty(),
+            Self::Inbox(items) => items.is_empty(),
         }
     }
 }
@@ -107,6 +113,11 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         // DMs — same cadence as notifications. Unread count surfaces
         // new messages without waiting for the user to click in.
         ColumnKind::Messages => Duration::from_secs(30),
+        // Inbox reads from the local SQLite store; the ingestion task
+        // (Phase B) handles upstream polling. 15s keeps the rendered
+        // list close to what the DB has if a triage action elsewhere
+        // mutates a row.
+        ColumnKind::Inbox => Duration::from_secs(15),
     }
 }
 
@@ -468,6 +479,11 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             }
                         }
                     }
+                    (ColumnData::Inbox(items), _, _) => rsx! {
+                        for it in items.iter() {
+                            InboxRow { key: "{it.item_id}", item: it.clone() }
+                        }
+                    },
                     _ => rsx! {},
                 }
                 if let Some(msg) = &*error.read() {
@@ -601,6 +617,94 @@ fn ConvoRow(convo: smooblue_atproto::ConvoView, me: String) -> Element {
     }
 }
 
+/// One row in the Inbox triage column. Avatar + actor + action
+/// caption ("replied to your post about…") + preview + age + a small
+/// source chip (reply / mention / quote / DM) + an unread dot.
+///
+/// Click routes: posts → ThreadFocus, DMs → MessagesFocus. Triage
+/// actions (archive/snooze/quick-reply) land in Phase C — Phase A
+/// is read-only.
+#[component]
+fn InboxRow(item: crate::inbox::InboxItem) -> Element {
+    use crate::inbox::InboxSource;
+    let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
+    let mut messages_focus = use_context::<Signal<crate::state::MessagesFocus>>();
+
+    let actor_name = item.actor_display_name.clone().unwrap_or_else(|| {
+        item.actor_handle
+            .clone()
+            .map(|h| format!("@{h}"))
+            .unwrap_or_else(|| item.actor_did.clone())
+    });
+
+    let (action_label, source_chip) = match item.source {
+        InboxSource::DirectReply => ("replied", "reply"),
+        InboxSource::ReplyToReply => ("replied in your thread", "reply"),
+        InboxSource::Quote => ("quoted your post", "quote"),
+        InboxSource::Mention => ("mentioned you", "mention"),
+        InboxSource::Dm => ("sent a DM", "DM"),
+    };
+
+    let subject_for_click = item.subject_uri.clone();
+    let source_for_click = item.source;
+    let onclick = move |_| match source_for_click {
+        InboxSource::Dm => {
+            messages_focus.set(crate::state::MessagesFocus(Some(subject_for_click.clone())));
+        }
+        _ => {
+            thread_focus.set(crate::state::ThreadFocus(Some(subject_for_click.clone())));
+        }
+    };
+
+    let age = relative_age(item.ts);
+
+    rsx! {
+        button { class: "inbox-row",
+            class: if item.read { "inbox-row inbox-row--read" } else { "inbox-row" },
+            onclick: onclick,
+            div { class: "inbox-row__avatar",
+                if let Some(u) = item.actor_avatar.as_ref() {
+                    img { src: "{u}", alt: "" }
+                } else {
+                    div { class: "inbox-row__avatar-placeholder" }
+                }
+            }
+            div { class: "inbox-row__body",
+                div { class: "inbox-row__head",
+                    span { class: "inbox-row__actor", "{actor_name}" }
+                    span { class: "inbox-row__action", " {action_label}" }
+                    span { class: "inbox-row__chip", "{source_chip}" }
+                    span { class: "inbox-row__age", "· {age}" }
+                }
+                if let Some(p) = item.preview.as_ref() {
+                    div { class: "inbox-row__preview", "{p}" }
+                }
+            }
+            if !item.read {
+                span { class: "inbox-row__unread-dot", title: "Unread" }
+            }
+        }
+    }
+}
+
+/// Render an absolute timestamp as a short relative age (e.g. "3m",
+/// "2h", "5d"). Mirrors the Twitter/Bluesky time chip style.
+fn relative_age(ts: chrono::DateTime<chrono::Utc>) -> String {
+    let now = chrono::Utc::now();
+    let dur = now - ts;
+    if dur.num_seconds() < 60 {
+        format!("{}s", dur.num_seconds().max(1))
+    } else if dur.num_minutes() < 60 {
+        format!("{}m", dur.num_minutes())
+    } else if dur.num_hours() < 24 {
+        format!("{}h", dur.num_hours())
+    } else if dur.num_days() < 7 {
+        format!("{}d", dur.num_days())
+    } else {
+        ts.format("%b %d").to_string()
+    }
+}
+
 /// One page of results from `fetch_page` — the data view + the cursor
 /// the AppView gave us for the next page (None ⇒ end of feed).
 struct Page {
@@ -630,6 +734,9 @@ async fn fetch_page(
             ColumnKind::Suggestions => ColumnData::Suggestions(crate::demo::suggestions()),
             // Demo mode shows an empty inbox — no canned convos yet.
             ColumnKind::Messages => ColumnData::Convos(Vec::new()),
+            // Demo mode: empty inbox triage list. The SQLite store is
+            // user-real anyway; demo just doesn't seed canned items.
+            ColumnKind::Inbox => ColumnData::Inbox(Vec::new()),
             ColumnKind::Home
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
@@ -757,6 +864,22 @@ async fn fetch_page(
                 cursor: r.cursor,
             })
             .map_err(|e| e.to_string()),
+        ColumnKind::Inbox => {
+            // Inbox doesn't hit the network here — it reads from the
+            // local SQLite store. Ingestion (Phase B) is the side
+            // that polls the AppView / chat service. cargo-isolated
+            // tokio task wraps the blocking SQLite call so the
+            // render thread doesn't stall on a busy WAL writer.
+            let _ = client; // silence unused-variable when this arm is the only one to compile
+            tokio::task::spawn_blocking(|| crate::inbox::list_active(200))
+                .await
+                .map_err(|e| format!("inbox list task panicked: {e}"))?
+                .map(|items| Page {
+                    data: ColumnData::Inbox(items),
+                    cursor: None, // no server-side pagination — DB-backed
+                })
+                .map_err(|e| e.to_string())
+        }
     }
 }
 
@@ -979,6 +1102,7 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind, filter_open: Signal
                     ColumnKind::List { .. } => rsx! { icons::Users { size: icons::Size::Sm } },
                     ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
                     ColumnKind::Messages => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
+                    ColumnKind::Inbox => rsx! { icons::Inbox { size: icons::Size::Sm } },
                     ColumnKind::Home => rsx! { icons::Home { size: icons::Size::Sm } },
                 }
             }

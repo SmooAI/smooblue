@@ -9,6 +9,7 @@ pub mod demo;
 pub mod file_promise;
 pub mod icons;
 pub mod image_prep;
+pub mod inbox;
 pub mod keyboard;
 pub mod ocr;
 pub mod persistence;
