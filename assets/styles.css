@@ -4068,3 +4068,201 @@ a {
 .messages__send {
     flex: 0 0 auto;
 }
+
+/* ===========================================================
+ *  INBOX ROW (triage column — replies + mentions + quotes + DMs)
+ *
+ *  One row per item; click body routes to ThreadSheet (posts) or
+ *  MessagesSheet (DMs) and marks the row read. Triage actions
+ *  (reply / snooze / archive) appear on hover. Read rows dim out
+ *  so the unread queue dominates visually.
+ * =========================================================== */
+.inbox-row__wrap {
+    position: relative;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.inbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-3);
+    background: transparent;
+    cursor: pointer;
+    color: var(--color-fg);
+    font: inherit;
+}
+
+.inbox-row:hover {
+    background: var(--color-surface-alt);
+}
+
+.inbox-row--read {
+    opacity: 0.65;
+}
+
+.inbox-row__avatar {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--color-surface-alt);
+}
+
+.inbox-row__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.inbox-row__avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    background: var(--color-surface-alt);
+}
+
+.inbox-row__body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.inbox-row__head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    font-size: var(--font-size-sm);
+    line-height: 1.2;
+}
+
+.inbox-row__actor {
+    font-weight: 600;
+}
+
+.inbox-row__action {
+    color: var(--color-fg-muted);
+}
+
+.inbox-row__chip {
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--color-surface-alt);
+    color: var(--color-fg-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.inbox-row__age {
+    color: var(--color-fg-muted);
+    font-size: var(--font-size-xs);
+}
+
+.inbox-row__preview {
+    margin-top: 4px;
+    font-size: var(--font-size-xs);
+    color: var(--color-fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.inbox-row__unread-dot {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-brand);
+    align-self: center;
+}
+
+/* Triage actions — hidden by default, appear on row hover. Stripe-
+ * Inbox style: actions surface only when the user is targeting
+ * the row, keep the resting state clean. */
+.inbox-row__actions {
+    display: flex;
+    gap: var(--space-1);
+    opacity: 0;
+    transition: opacity 80ms ease-out;
+    align-self: center;
+}
+
+.inbox-row:hover .inbox-row__actions {
+    opacity: 1;
+}
+
+.inbox-row__action-btn {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--color-fg-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.inbox-row__action-btn:hover {
+    background: var(--color-border);
+    color: var(--color-fg);
+}
+
+/* Snooze dropdown — pinned under the row's right edge. */
+.inbox-row__snooze-menu {
+    position: absolute;
+    top: 100%;
+    right: var(--space-3);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    min-width: 140px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+    padding: 4px 0;
+}
+
+.inbox-row__snooze-item {
+    background: transparent;
+    border: none;
+    padding: 8px 12px;
+    text-align: left;
+    color: var(--color-fg);
+    cursor: pointer;
+    font: inherit;
+}
+
+.inbox-row__snooze-item:hover {
+    background: var(--color-surface-alt);
+}
+
+/* Inline reply (DM only) — expands below the row when reply_open. */
+.inbox-row__reply {
+    padding: var(--space-3);
+    background: var(--color-surface-alt);
+    border-top: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.inbox-row__reply-input {
+    width: 100%;
+    min-height: 60px;
+    max-height: 200px;
+    resize: vertical;
+}
+
+.inbox-row__reply-error {
+    color: var(--color-error, #c53030);
+    font-size: var(--font-size-xs);
+}
+
+.inbox-row__reply-actions {
+    display: flex;
+    justify-content: flex-end;
+}

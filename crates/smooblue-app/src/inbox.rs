@@ -183,10 +183,15 @@ pub fn score(source: InboxSource, ts: DateTime<Utc>, read: bool) -> i32 {
     source.base_score() + unread_bump - age_penalty
 }
 
-/// Process-wide single connection. SQLite serializes writes
-/// internally; the outer mutex prevents two callers from racing on a
-/// transaction.
-static DB: OnceLock<Mutex<Connection>> = OnceLock::new();
+/// Process-wide connection slot. `Option<Connection>` (not
+/// `Connection` directly) so a transient disk failure on first
+/// access doesn't permanently lock out the inbox: subsequent calls
+/// retry the open. SQLite serializes writes internally; the outer
+/// mutex prevents two Rust callers from interleaving statements
+/// inside a transaction. Adversarial-review P2 — replaced an earlier
+/// `OnceLock<Mutex<Connection>>` that silently downgraded to
+/// `:memory:` on disk-open failure (silent data loss).
+static DB: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
 
 fn db_path() -> Result<PathBuf> {
     let dirs = ProjectDirs::from("ai", "Smoo", "smooblue")
@@ -209,24 +214,21 @@ fn open() -> Result<Connection> {
     Ok(conn)
 }
 
-/// Lazily-initialized DB accessor. First call opens + migrates;
-/// subsequent calls just lock the mutex.
+/// Lazily-initialized DB accessor. First call opens + migrates; on
+/// failure the slot is left empty and the next call retries (a
+/// transient permission glitch or filesystem hiccup self-heals).
+/// All errors propagate to the caller — no silent in-memory fallback
+/// that would let triage actions look like they landed when they
+/// didn't. Adversarial-review P2 fix.
 fn with_db<R>(f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
-    let db = DB.get_or_init(|| {
-        Mutex::new(open().unwrap_or_else(|e| {
-            // Fall back to an in-memory DB if disk open fails — UI
-            // stays functional, items just don't persist across launch.
-            // Loud log so the user can grep for it.
-            eprintln!("[inbox] disk open failed ({e}); falling back to :memory:");
-            let conn = Connection::open_in_memory().expect("in-memory sqlite open");
-            // Best-effort migrate; if even this fails, panic is fine
-            // because we have no fallback below.
-            migrate(&conn).expect("in-memory inbox migrate");
-            conn
-        }))
-    });
-    let guard = db.lock();
-    f(&guard)
+    let slot = DB.get_or_init(|| Mutex::new(None));
+    let mut guard = slot.lock();
+    if guard.is_none() {
+        *guard = Some(open()?);
+    }
+    // Unwrap is safe: we just set the slot to Some above, and the
+    // mutex guard prevents anyone else from setting it back to None.
+    f(guard.as_ref().expect("inbox connection set above"))
 }
 
 /// Apply pending migrations. Versioned via `PRAGMA user_version`.
@@ -503,7 +505,7 @@ mod tests {
         // real DB during tests.
         let conn = Connection::open_in_memory().expect("open");
         migrate(&conn).expect("migrate");
-        let _ = DB.set(Mutex::new(conn));
+        let _ = DB.set(Mutex::new(Some(conn)));
 
         let item = InboxItem {
             item_id: "item-1".into(),

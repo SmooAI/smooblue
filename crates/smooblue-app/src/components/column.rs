@@ -618,17 +618,32 @@ fn ConvoRow(convo: smooblue_atproto::ConvoView, me: String) -> Element {
 }
 
 /// One row in the Inbox triage column. Avatar + actor + action
-/// caption ("replied to your post about…") + preview + age + a small
-/// source chip (reply / mention / quote / DM) + an unread dot.
-///
-/// Click routes: posts → ThreadFocus, DMs → MessagesFocus. Triage
-/// actions (archive/snooze/quick-reply) land in Phase C — Phase A
-/// is read-only.
+/// caption + preview + age + source chip + triage actions visible
+/// on hover (reply / snooze / archive). Click body → opens
+/// thread/convo + marks read. Snooze opens a 4-option dropdown.
+/// Reply on a DM expands an inline textarea + Send button; reply
+/// on a post just opens the thread sheet so the existing PostCard
+/// flow handles the composing.
 #[component]
 fn InboxRow(item: crate::inbox::InboxItem) -> Element {
     use crate::inbox::InboxSource;
     let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
     let mut messages_focus = use_context::<Signal<crate::state::MessagesFocus>>();
+    let session_sig = use_context::<Signal<Option<smooblue_oauth::Session>>>();
+
+    // Optimistic hide: archive / snooze set this true; row disappears
+    // immediately. The 15s column poll picks up the persisted state
+    // from disk and confirms.
+    let mut hidden = use_signal(|| false);
+    let mut snooze_menu_open = use_signal(|| false);
+    let mut reply_open = use_signal(|| false);
+    let mut reply_draft = use_signal(String::new);
+    let mut sending = use_signal(|| false);
+    let mut send_error = use_signal::<Option<String>>(|| None);
+
+    if *hidden.read() {
+        return rsx! { Fragment {} };
+    }
 
     let actor_name = item.actor_display_name.clone().unwrap_or_else(|| {
         item.actor_handle
@@ -645,46 +660,237 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         InboxSource::Dm => ("sent a DM", "DM"),
     };
 
+    let id_for_click = item.item_id.clone();
     let subject_for_click = item.subject_uri.clone();
     let source_for_click = item.source;
-    let onclick = move |_| match source_for_click {
-        InboxSource::Dm => {
-            messages_focus.set(crate::state::MessagesFocus(Some(subject_for_click.clone())));
-        }
-        _ => {
-            thread_focus.set(crate::state::ThreadFocus(Some(subject_for_click.clone())));
+    let on_row_click = move |_| {
+        let id = id_for_click.clone();
+        spawn(async move {
+            let _ = tokio::task::spawn_blocking(move || crate::inbox::set_read(&id, true)).await;
+        });
+        match source_for_click {
+            InboxSource::Dm => {
+                messages_focus.set(crate::state::MessagesFocus(Some(subject_for_click.clone())));
+            }
+            _ => {
+                thread_focus.set(crate::state::ThreadFocus(Some(subject_for_click.clone())));
+            }
         }
     };
 
+    let id_for_archive = item.item_id.clone();
+    let on_archive = move |e: MouseEvent| {
+        e.stop_propagation();
+        hidden.set(true);
+        let id = id_for_archive.clone();
+        spawn(async move {
+            let res = tokio::task::spawn_blocking(move || crate::inbox::set_archived(&id, true))
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("blocking task panicked: {e}")));
+            if let Err(err) = res {
+                tracing::warn!(error = %err, "inbox: archive failed");
+            }
+        });
+    };
+
+    let on_snooze_toggle = move |e: MouseEvent| {
+        e.stop_propagation();
+        snooze_menu_open.with_mut(|v| *v = !*v);
+        reply_open.set(false);
+    };
+
+    let subject_for_reply_toggle = item.subject_uri.clone();
+    let on_reply_toggle = move |e: MouseEvent| {
+        e.stop_propagation();
+        // Posts: re-use the ThreadSheet → PostCard reply flow. An
+        // inline textarea here would lose facets / images / quote /
+        // threading; not worth the regression.
+        if !matches!(source_for_click, InboxSource::Dm) {
+            thread_focus.set(crate::state::ThreadFocus(Some(
+                subject_for_reply_toggle.clone(),
+            )));
+            return;
+        }
+        reply_open.with_mut(|v| *v = !*v);
+        snooze_menu_open.set(false);
+    };
+
+    // Per-callback closures rather than a shared inner closure
+    // because the shared variant would capture String (`item_id`)
+    // which isn't Copy, so only the first of the 4 menu buttons
+    // could move it. Inlining via the helper fn keeps things tight.
+    let id_1h = item.item_id.clone();
+    let on_snooze_1h = move |e: MouseEvent| {
+        e.stop_propagation();
+        schedule_snooze(id_1h.clone(), 1, hidden, snooze_menu_open);
+    };
+    let id_4h = item.item_id.clone();
+    let on_snooze_4h = move |e: MouseEvent| {
+        e.stop_propagation();
+        schedule_snooze(id_4h.clone(), 4, hidden, snooze_menu_open);
+    };
+    let id_tomorrow = item.item_id.clone();
+    let on_snooze_tomorrow = move |e: MouseEvent| {
+        e.stop_propagation();
+        schedule_snooze(id_tomorrow.clone(), 24, hidden, snooze_menu_open);
+    };
+    let id_monday = item.item_id.clone();
+    let on_snooze_monday = move |e: MouseEvent| {
+        e.stop_propagation();
+        // Hours until next Monday — approximate via local weekday.
+        // Snooze precision is "later today / next week"; a few
+        // hours' drift doesn't matter for triage UX.
+        use chrono::Datelike;
+        let weekday = chrono::Local::now().weekday().num_days_from_monday() as i64;
+        let days_until_monday = if weekday == 0 { 7 } else { 7 - weekday };
+        schedule_snooze(
+            id_monday.clone(),
+            days_until_monday * 24,
+            hidden,
+            snooze_menu_open,
+        );
+    };
+
+    let convo_id_for_send = item.subject_uri.clone();
+    let on_send = move |e: MouseEvent| {
+        e.stop_propagation();
+        let text = reply_draft.read().trim().to_string();
+        if text.is_empty() || *sending.read() {
+            return;
+        }
+        sending.set(true);
+        send_error.set(None);
+        let convo_id = convo_id_for_send.clone();
+        spawn(async move {
+            let Some(client) = crate::auth_refresh::fresh_client(session_sig).await else {
+                send_error.set(Some("not signed in".into()));
+                sending.set(false);
+                return;
+            };
+            let input = smooblue_atproto::MessageInput {
+                text,
+                facets: None,
+                embed: None,
+            };
+            match client.chat_send_message(&convo_id, &input).await {
+                Ok(_) => {
+                    reply_draft.set(String::new());
+                    reply_open.set(false);
+                }
+                Err(e) => send_error.set(Some(e.to_string())),
+            }
+            sending.set(false);
+        });
+    };
+
     let age = relative_age(item.ts);
+    let row_class = if item.read {
+        "inbox-row inbox-row--read"
+    } else {
+        "inbox-row"
+    };
 
     rsx! {
-        button { class: "inbox-row",
-            class: if item.read { "inbox-row inbox-row--read" } else { "inbox-row" },
-            onclick: onclick,
-            div { class: "inbox-row__avatar",
-                if let Some(u) = item.actor_avatar.as_ref() {
-                    img { src: "{u}", alt: "" }
-                } else {
-                    div { class: "inbox-row__avatar-placeholder" }
+        div { class: "inbox-row__wrap",
+            div { class: "{row_class}",
+                onclick: on_row_click,
+                div { class: "inbox-row__avatar",
+                    if let Some(u) = item.actor_avatar.as_ref() {
+                        img { src: "{u}", alt: "" }
+                    } else {
+                        div { class: "inbox-row__avatar-placeholder" }
+                    }
+                }
+                div { class: "inbox-row__body",
+                    div { class: "inbox-row__head",
+                        span { class: "inbox-row__actor", "{actor_name}" }
+                        span { class: "inbox-row__action", " {action_label}" }
+                        span { class: "inbox-row__chip", "{source_chip}" }
+                        span { class: "inbox-row__age", "· {age}" }
+                    }
+                    if let Some(p) = item.preview.as_ref() {
+                        div { class: "inbox-row__preview", "{p}" }
+                    }
+                }
+                div { class: "inbox-row__actions",
+                    button {
+                        class: "inbox-row__action-btn",
+                        title: "Reply",
+                        onclick: on_reply_toggle,
+                        icons::MessageQuote { size: icons::Size::Sm }
+                    }
+                    button {
+                        class: "inbox-row__action-btn",
+                        title: "Snooze",
+                        onclick: on_snooze_toggle,
+                        icons::Clock { size: icons::Size::Sm }
+                    }
+                    button {
+                        class: "inbox-row__action-btn",
+                        title: "Archive",
+                        onclick: on_archive,
+                        icons::Archive { size: icons::Size::Sm }
+                    }
+                }
+                if !item.read {
+                    span { class: "inbox-row__unread-dot", title: "Unread" }
                 }
             }
-            div { class: "inbox-row__body",
-                div { class: "inbox-row__head",
-                    span { class: "inbox-row__actor", "{actor_name}" }
-                    span { class: "inbox-row__action", " {action_label}" }
-                    span { class: "inbox-row__chip", "{source_chip}" }
-                    span { class: "inbox-row__age", "· {age}" }
-                }
-                if let Some(p) = item.preview.as_ref() {
-                    div { class: "inbox-row__preview", "{p}" }
+            if *snooze_menu_open.read() {
+                div { class: "inbox-row__snooze-menu",
+                    onclick: move |e| e.stop_propagation(),
+                    button { class: "inbox-row__snooze-item", onclick: on_snooze_1h, "1 hour" }
+                    button { class: "inbox-row__snooze-item", onclick: on_snooze_4h, "4 hours" }
+                    button { class: "inbox-row__snooze-item", onclick: on_snooze_tomorrow, "Tomorrow" }
+                    button { class: "inbox-row__snooze-item", onclick: on_snooze_monday, "Monday" }
                 }
             }
-            if !item.read {
-                span { class: "inbox-row__unread-dot", title: "Unread" }
+            if *reply_open.read() {
+                div { class: "inbox-row__reply",
+                    onclick: move |e| e.stop_propagation(),
+                    textarea {
+                        class: "input inbox-row__reply-input",
+                        placeholder: "Write a reply…",
+                        value: "{reply_draft.read()}",
+                        oninput: move |e| reply_draft.set(e.value()),
+                    }
+                    if let Some(err) = send_error.read().as_ref() {
+                        div { class: "inbox-row__reply-error", "Send failed: {err}" }
+                    }
+                    div { class: "inbox-row__reply-actions",
+                        button {
+                            class: "btn btn--primary",
+                            disabled: *sending.read() || reply_draft.read().trim().is_empty(),
+                            onclick: on_send,
+                            if *sending.read() { "Sending…" } else { "Send" }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+/// Common snooze action: hide locally, write the DB. Extracted as a
+/// fn (not a captured closure) so the per-button callbacks can each
+/// reference it without taking ownership of a non-Copy String.
+fn schedule_snooze(
+    item_id: String,
+    hours: i64,
+    mut hidden: Signal<bool>,
+    mut snooze_menu: Signal<bool>,
+) {
+    let until = Some(chrono::Utc::now() + chrono::Duration::hours(hours));
+    snooze_menu.set(false);
+    hidden.set(true);
+    spawn(async move {
+        let res = tokio::task::spawn_blocking(move || crate::inbox::set_snoozed(&item_id, until))
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("blocking task panicked: {e}")));
+        if let Err(err) = res {
+            tracing::warn!(error = %err, "inbox: snooze failed");
+        }
+    });
 }
 
 /// Render an absolute timestamp as a short relative age (e.g. "3m",
