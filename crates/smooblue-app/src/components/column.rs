@@ -527,13 +527,13 @@ fn is_paginated(kind: &ColumnKind) -> bool {
 
 /// One convo row in the Messages column. Avatar + handle/displayName
 /// of the OTHER member + last-message preview + unread badge. Click
-/// opens the thread on bsky.app for now (inline thread sheet lands
-/// in a follow-up — see pearl th-b313df). For a 1:1 DM we show the
-/// non-self member; for a group convo, the first non-self member
-/// (the row caption notes "and N others").
+/// opens the inline [`MessagesSheet`] for that convo. For a 1:1 DM we
+/// show the non-self member; for a group convo, the first non-self
+/// member (the row caption notes "and N others").
 #[component]
 fn ConvoRow(convo: smooblue_atproto::ConvoView, me: String) -> Element {
     let convo_id = convo.id.clone();
+    let mut messages_focus = use_context::<Signal<crate::state::MessagesFocus>>();
     let unread = convo.unread_count;
     // Pick the first member whose DID isn't ours; fall back to the
     // first member if the convo is somehow degenerate (e.g. our own
@@ -565,10 +565,7 @@ fn ConvoRow(convo: smooblue_atproto::ConvoView, me: String) -> Element {
     });
 
     let onclick = move |_| {
-        let url = format!("https://bsky.app/messages/{convo_id}");
-        if let Err(e) = crate::safe_open::open_in_browser(&url) {
-            tracing::warn!(error = %e, "failed to open convo in browser");
-        }
+        messages_focus.set(crate::state::MessagesFocus(Some(convo_id.clone())));
     };
 
     rsx! {

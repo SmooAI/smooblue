@@ -3,9 +3,9 @@
 
 use crate::components::{
     column::Column, compose::ComposeSheet, engagement::EngagementSheet, lightbox::LightboxSheet,
-    profile::ProfileSheet, profile_edit_sheet::ProfileEditSheet, report_sheet::ReportSheet,
-    saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
-    sidebar::Sidebar, thread::ThreadSheet,
+    messages_sheet::MessagesSheet, profile::ProfileSheet, profile_edit_sheet::ProfileEditSheet,
+    report_sheet::ReportSheet, saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet,
+    settings_sheet::SettingsSheet, sidebar::Sidebar, thread::ThreadSheet,
 };
 use crate::icons;
 use crate::keyboard::{self, KeyContext};
@@ -249,6 +249,7 @@ pub fn DeckShell() -> Element {
             SavedFeedsSheet { open: saved_feeds_open }
             SettingsSheet { open: settings_open }
             ThreadSheet {}
+            MessagesSheet {}
             ProfileSheet {}
             EngagementSheet {}
             ReportSheet {}

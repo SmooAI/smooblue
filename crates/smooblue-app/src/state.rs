@@ -401,6 +401,14 @@ pub enum Engagement {
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ThreadFocus(pub Option<String>);
 
+/// Which DM conversation `MessagesSheet` is currently showing.
+/// `None` ⇒ closed; `Some(convo_id)` ⇒ the sheet loads message
+/// history for that convo, polls for new messages, marks-read on
+/// open, and renders the compose input. Parallel structure to
+/// [`ThreadFocus`].
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct MessagesFocus(pub Option<String>);
+
 /// Global tick counter, bumped every second by [`DeckShell`]'s tick task.
 /// Components that render time-relative text (post / notification
 /// timestamps) read this signal so their render re-runs each tick —
@@ -489,6 +497,7 @@ pub fn use_bootstrap() {
             });
         Signal::new(ThreadFocus(initial))
     });
+    use_context_provider::<Signal<MessagesFocus>>(|| Signal::new(MessagesFocus(None)));
     use_context_provider::<Signal<Option<Session>>>(|| {
         // Demo mode (SMOOBLUE_DEMO=1) injects a synthetic session so the
         // app boots straight into the deck — no OAuth + no network.

@@ -3940,3 +3940,131 @@ a {
     line-height: 20px;
     text-align: center;
 }
+
+/* ===========================================================
+ *  MESSAGES SHEET (DM conversation view)
+ *
+ *  Slide-over modal that mirrors ThreadSheet's layout: header
+ *  + scrollable body + persistent compose strip at the bottom.
+ *  Bubbles are right-aligned for the viewer's own messages,
+ *  left-aligned for the other member's. Deleted-message
+ *  tombstones render as a muted center-aligned strip.
+ * =========================================================== */
+.messages__sheet {
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    width: min(560px, 90vw);
+}
+
+.messages__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.messages__title {
+    font-weight: 600;
+}
+
+.messages__close {
+    background: transparent;
+    border: none;
+    color: var(--color-fg-muted);
+    cursor: pointer;
+    padding: var(--space-1);
+}
+
+.messages__body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.messages__empty,
+.messages__error {
+    text-align: center;
+    color: var(--color-fg-muted);
+    padding: var(--space-4);
+}
+
+.messages__error {
+    color: var(--color-error, #c53030);
+}
+
+.messages__row {
+    display: flex;
+}
+
+/* Width-cap on bubbles so a long message wraps comfortably without
+ * stretching across the full sheet. */
+.messages__bubble {
+    max-width: 75%;
+    padding: var(--space-2) var(--space-3);
+    border-radius: 14px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+
+.messages__bubble--me {
+    margin-left: auto;
+    background: var(--color-brand);
+    color: var(--color-on-brand, white);
+}
+
+.messages__bubble--other {
+    margin-right: auto;
+    background: var(--color-surface-alt);
+    color: var(--color-fg);
+}
+
+.messages__bubble--deleted {
+    margin: 0 auto;
+    background: transparent;
+    color: var(--color-fg-muted);
+    font-style: italic;
+    font-size: var(--font-size-xs);
+}
+
+.messages__text {
+    white-space: pre-wrap;
+}
+
+.messages__time {
+    margin-top: 2px;
+    font-size: 10px;
+    opacity: 0.7;
+    text-align: right;
+}
+
+.messages__send-error {
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--color-border);
+    color: var(--color-error, #c53030);
+    font-size: var(--font-size-xs);
+}
+
+.messages__compose {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border-top: 1px solid var(--color-border);
+}
+
+.messages__input {
+    flex: 1 1 auto;
+    min-height: 60px;
+    max-height: 200px;
+    resize: vertical;
+}
+
+.messages__send {
+    flex: 0 0 auto;
+}

@@ -4,6 +4,7 @@ pub mod deck;
 pub mod embed;
 pub mod engagement;
 pub mod lightbox;
+pub mod messages_sheet;
 pub mod notification_card;
 pub mod post;
 pub mod profile;
