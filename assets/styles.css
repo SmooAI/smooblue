@@ -3839,3 +3839,104 @@ a {
 .modal__backdrop--compose {
     z-index: 60;
 }
+
+/* ===========================================================
+ *  CONVO ROW (Messages column)
+ *
+ *  Used in column.rs's `ConvoRow` component. Renders one DM
+ *  conversation as a horizontal row: square avatar on the left,
+ *  display-name + handle stacked above a one-line message preview
+ *  in the middle, optional unread-count badge on the right.
+ *
+ *  Whole row is a <button> so it's keyboard-focusable + has the
+ *  same affordance shape as the other clickable column items
+ *  (PostCard, NotificationCard, etc.).
+ * =========================================================== */
+.convo-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-3);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+    cursor: pointer;
+    color: var(--color-fg);
+    font: inherit;
+}
+
+.convo-row:hover {
+    background: var(--color-surface-alt);
+}
+
+.convo-row__avatar {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--color-surface-alt);
+}
+
+.convo-row__avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.convo-row__avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    background: var(--color-surface-alt);
+}
+
+.convo-row__body {
+    flex: 1 1 auto;
+    min-width: 0; /* let the preview text ellipsize instead of pushing the badge off-row */
+}
+
+.convo-row__head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    font-size: var(--font-size-sm);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.convo-row__display {
+    font-weight: 600;
+}
+
+.convo-row__handle,
+.convo-row__others {
+    color: var(--color-fg-muted);
+    font-size: var(--font-size-xs);
+}
+
+.convo-row__preview {
+    margin-top: 2px;
+    font-size: var(--font-size-xs);
+    color: var(--color-fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.convo-row__badge {
+    flex: 0 0 auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--color-brand);
+    color: var(--color-on-brand, white);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+}

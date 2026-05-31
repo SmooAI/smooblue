@@ -69,6 +69,10 @@ enum ColumnData {
     /// List of actors the AppView suggests the viewer follows. Each
     /// is rendered as a follow-row card with bio + Follow button.
     Suggestions(Vec<ActorProfile>),
+    /// Bluesky DMs (`chat.bsky.convo.listConvos`). Rendered as a list
+    /// of conversation rows; clicking opens the thread on bsky.app
+    /// until the inline MessagesSheet lands in a follow-up.
+    Convos(Vec<smooblue_atproto::ConvoView>),
 }
 
 impl ColumnData {
@@ -78,6 +82,7 @@ impl ColumnData {
             Self::Posts(p) => p.is_empty(),
             Self::Notifications { groups, .. } => groups.is_empty(),
             Self::Suggestions(actors) => actors.is_empty(),
+            Self::Convos(convos) => convos.is_empty(),
         }
     }
 }
@@ -99,6 +104,9 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         // Suggestions are personalized; refresh slowly — the user
         // doesn't want their suggested-follows list flickering.
         ColumnKind::Suggestions => Duration::from_secs(300),
+        // DMs — same cadence as notifications. Unread count surfaces
+        // new messages without waiting for the user to click in.
+        ColumnKind::Messages => Duration::from_secs(30),
     }
 }
 
@@ -444,6 +452,22 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             crate::components::suggestion::SuggestionRow { key: "{a.did}", actor: a.clone() }
                         }
                     },
+                    (ColumnData::Convos(convos), _, _) => {
+                        // Identify the viewer's own DID so we can render
+                        // the OTHER member in each 1:1 convo. (For
+                        // group convos there can be more than one
+                        // "other" — we just show the first for now.)
+                        let me = session
+                            .read()
+                            .as_ref()
+                            .map(|s| s.did.clone())
+                            .unwrap_or_default();
+                        rsx! {
+                            for c in convos.iter() {
+                                ConvoRow { key: "{c.id}", convo: c.clone(), me: me.clone() }
+                            }
+                        }
+                    }
                     _ => rsx! {},
                 }
                 if let Some(msg) = &*error.read() {
@@ -486,7 +510,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
 /// True when the column supports cursor-based fetch_more on scroll.
 /// Notifications and Suggestions have their own pagination semantics
 /// (notifications are time-bucketed and small; suggestions are a
-/// single page of personalized actors).
+/// single page of personalized actors). Messages is paginated by
+/// the chat lexicon but we cap at the first 50 convos for v1 — most
+/// inboxes fit, and Bluesky doesn't yet support search-within-DMs
+/// that would justify scrolling further.
 fn is_paginated(kind: &ColumnKind) -> bool {
     matches!(
         kind,
@@ -496,6 +523,85 @@ fn is_paginated(kind: &ColumnKind) -> bool {
             | ColumnKind::Feed { .. }
             | ColumnKind::List { .. }
     )
+}
+
+/// One convo row in the Messages column. Avatar + handle/displayName
+/// of the OTHER member + last-message preview + unread badge. Click
+/// opens the thread on bsky.app for now (inline thread sheet lands
+/// in a follow-up — see pearl th-b313df). For a 1:1 DM we show the
+/// non-self member; for a group convo, the first non-self member
+/// (the row caption notes "and N others").
+#[component]
+fn ConvoRow(convo: smooblue_atproto::ConvoView, me: String) -> Element {
+    let convo_id = convo.id.clone();
+    let unread = convo.unread_count;
+    // Pick the first member whose DID isn't ours; fall back to the
+    // first member if the convo is somehow degenerate (e.g. our own
+    // notes-to-self if Bluesky ever adds that).
+    let other = convo
+        .members
+        .iter()
+        .find(|m| m.did != me)
+        .or_else(|| convo.members.first())
+        .cloned();
+    let display = other.as_ref().map(|p| {
+        p.display_name
+            .clone()
+            .unwrap_or_else(|| format!("@{}", p.handle))
+    });
+    let handle = other.as_ref().map(|p| format!("@{}", p.handle));
+    let others_caption = if convo.members.len() > 2 {
+        Some(format!(" and {} others", convo.members.len() - 2))
+    } else {
+        None
+    };
+    let avatar = other.as_ref().and_then(|p| p.avatar.clone());
+    // last_message can be a tombstone for a deleted message — render
+    // an italic placeholder for those, otherwise the message text
+    // (collapsed to a single line).
+    let preview = convo.last_message.as_ref().map(|m| match m {
+        smooblue_atproto::Message::Live(v) => v.text.clone(),
+        smooblue_atproto::Message::Deleted(_) => "(message deleted)".to_string(),
+    });
+
+    let onclick = move |_| {
+        let url = format!("https://bsky.app/messages/{convo_id}");
+        if let Err(e) = crate::safe_open::open_in_browser(&url) {
+            tracing::warn!(error = %e, "failed to open convo in browser");
+        }
+    };
+
+    rsx! {
+        button { class: "convo-row",
+            onclick: onclick,
+            div { class: "convo-row__avatar",
+                if let Some(u) = avatar.as_ref() {
+                    img { src: "{u}", alt: "" }
+                } else {
+                    div { class: "convo-row__avatar-placeholder" }
+                }
+            }
+            div { class: "convo-row__body",
+                div { class: "convo-row__head",
+                    if let Some(d) = display.as_ref() {
+                        span { class: "convo-row__display", "{d}" }
+                    }
+                    if let Some(h) = handle.as_ref() {
+                        span { class: "convo-row__handle", "{h}" }
+                    }
+                    if let Some(o) = others_caption.as_ref() {
+                        span { class: "convo-row__others", "{o}" }
+                    }
+                }
+                if let Some(p) = preview.as_ref() {
+                    div { class: "convo-row__preview", "{p}" }
+                }
+            }
+            if unread > 0 {
+                span { class: "convo-row__badge", "{unread}" }
+            }
+        }
+    }
 }
 
 /// One page of results from `fetch_page` — the data view + the cursor
@@ -525,6 +631,8 @@ async fn fetch_page(
             }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
             ColumnKind::Suggestions => ColumnData::Suggestions(crate::demo::suggestions()),
+            // Demo mode shows an empty inbox — no canned convos yet.
+            ColumnKind::Messages => ColumnData::Convos(Vec::new()),
             ColumnKind::Home
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
@@ -641,6 +749,14 @@ async fn fetch_page(
             .await
             .map(|r| Page {
                 data: ColumnData::Suggestions(r.actors),
+                cursor: r.cursor,
+            })
+            .map_err(|e| e.to_string()),
+        ColumnKind::Messages => client
+            .chat_list_convos(cur, 50)
+            .await
+            .map(|r| Page {
+                data: ColumnData::Convos(r.convos),
                 cursor: r.cursor,
             })
             .map_err(|e| e.to_string()),
@@ -865,6 +981,7 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind, filter_open: Signal
                     ColumnKind::Feed { .. } => rsx! { icons::Compass { size: icons::Size::Sm } },
                     ColumnKind::List { .. } => rsx! { icons::Users { size: icons::Size::Sm } },
                     ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
+                    ColumnKind::Messages => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
                     ColumnKind::Home => rsx! { icons::Home { size: icons::Size::Sm } },
                 }
             }

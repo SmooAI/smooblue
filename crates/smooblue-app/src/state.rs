@@ -43,6 +43,11 @@ pub enum ColumnKind {
     /// the AppView thinks the viewer might want to follow. Renders as
     /// follow-row cards rather than posts.
     Suggestions,
+    /// `chat.bsky.convo.listConvos` — Bluesky DMs (proxied through
+    /// the user's PDS to `did:web:api.bsky.chat#bsky_chat`). Renders
+    /// as a convo list; tapping a row opens MessagesSheet with the
+    /// message history + compose input.
+    Messages,
 }
 
 impl ColumnSpec {
@@ -89,6 +94,14 @@ impl ColumnSpec {
             id: "suggestions".into(),
             kind: ColumnKind::Suggestions,
             title: "Suggested follows".into(),
+        }
+    }
+
+    pub fn messages() -> Self {
+        Self {
+            id: "messages".into(),
+            kind: ColumnKind::Messages,
+            title: "Messages".into(),
         }
     }
 

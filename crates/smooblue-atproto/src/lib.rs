@@ -10,12 +10,17 @@
 //! swap in `smooai_fetch` for retry/circuit-break once it surfaces a generic
 //! request-builder API; for now the DPoP nonce loop is hand-rolled.
 
+pub mod chat;
 mod client;
 mod error;
 pub mod feed;
 pub mod notifications;
 pub mod richtext;
 
+pub use chat::{
+    ChatProfile, ConvoView, DeletedMessageView, GetConvoResponse, GetMessagesResponse,
+    ListConvosResponse, Message, MessageInput, MessageSender, MessageView,
+};
 pub use client::{
     AspectRatio, AtClient, BlobLink, BlobRef, CreatedRecord, PostImage, PostVideo, ReplyRef,
     StrongRef,

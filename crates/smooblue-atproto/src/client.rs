@@ -1219,6 +1219,56 @@ impl AtClient {
         url: &Url,
         body: &serde_json::Value,
     ) -> Result<T, AtError> {
+        self.do_json("POST", url, Some(body), None).await
+    }
+
+    async fn get_json<T: DeserializeOwned>(&self, url: &Url) -> Result<T, AtError> {
+        self.do_json("GET", url, None, None).await
+    }
+
+    /// GET an XRPC endpoint via the user's PDS with an `atproto-proxy`
+    /// header that tells the PDS to forward the request to the named
+    /// service (identified by its DID + fragment). Used by the chat
+    /// module to talk to `did:web:api.bsky.chat#bsky_chat`. The URL
+    /// must already be built against the PDS (not the AppView).
+    pub(crate) async fn get_json_proxied<T: DeserializeOwned>(
+        &self,
+        url: &Url,
+        proxy_target: &str,
+    ) -> Result<T, AtError> {
+        self.do_json("GET", url, None, Some(proxy_target)).await
+    }
+
+    /// POST counterpart of [`Self::get_json_proxied`].
+    pub(crate) async fn post_json_proxied<T: DeserializeOwned>(
+        &self,
+        url: &Url,
+        body: &serde_json::Value,
+        proxy_target: &str,
+    ) -> Result<T, AtError> {
+        self.do_json("POST", url, Some(body), Some(proxy_target))
+            .await
+    }
+
+    /// Read-only access to the PDS URL from the current session.
+    /// Chat endpoints route through the PDS (with an `atproto-proxy`
+    /// header), not the AppView, so chat builders need this.
+    pub(crate) fn pds_url(&self) -> Result<Url, AtError> {
+        let s = self.session.lock();
+        Url::parse(&s.pds).map_err(|e| AtError::Decode(e.to_string()))
+    }
+
+    /// Shared DPoP-signed HTTP machinery for GET + POST, with optional
+    /// JSON body and optional `atproto-proxy` header. Both `get_json`
+    /// and `post_json` (and their `_proxied` variants) are thin shims
+    /// over this — keeps the DPoP + nonce retry loop in one place.
+    async fn do_json<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        url: &Url,
+        body: Option<&serde_json::Value>,
+        proxy_target: Option<&str>,
+    ) -> Result<T, AtError> {
         let mut nonce = self.session.lock().dpop_nonce.clone();
         for _ in 0..2 {
             let (access, dpop_key) = {
@@ -1229,15 +1279,31 @@ impl AtClient {
                 (s.access_token.clone(), s.dpop_key()?)
             };
             let proof =
-                dpop_key.sign_proof("POST", url.as_str(), nonce.as_deref(), Some(&access))?;
-            let resp = self
-                .http
-                .post(url.clone())
+                dpop_key.sign_proof(method, url.as_str(), nonce.as_deref(), Some(&access))?;
+
+            // Per RFC 9449, the Authorization scheme MUST be literally
+            // "DPoP" (not "Bearer"), even when the server's token_type
+            // says Bearer. Forcing the scheme keeps us correct.
+            let mut req = match method {
+                "GET" => self.http.get(url.clone()),
+                "POST" => self.http.post(url.clone()),
+                other => {
+                    return Err(AtError::Decode(format!(
+                        "unsupported HTTP method for do_json: {other}"
+                    )));
+                }
+            };
+            req = req
                 .header("Authorization", format!("DPoP {}", access))
-                .header("DPoP", proof)
-                .json(body)
-                .send()
-                .await?;
+                .header("DPoP", proof);
+            if let Some(target) = proxy_target {
+                req = req.header("atproto-proxy", target);
+            }
+            if let Some(b) = body {
+                req = req.json(b);
+            }
+
+            let resp = req.send().await?;
             let status = resp.status();
             let server_nonce = resp
                 .headers()
@@ -1247,10 +1313,12 @@ impl AtClient {
             if let Some(n) = &server_nonce {
                 self.session.lock().dpop_nonce = Some(n.clone());
             }
+
             if status.is_success() {
-                let body = resp.text().await?;
-                return serde_json::from_str(&body).map_err(AtError::from);
+                let resp_body = resp.text().await?;
+                return serde_json::from_str(&resp_body).map_err(AtError::from);
             }
+
             let resp_body = match resp.text().await {
                 Ok(b) => b,
                 Err(e) => {
@@ -1268,68 +1336,6 @@ impl AtClient {
             return Err(AtError::Status {
                 status: status.as_u16(),
                 body: resp_body,
-            });
-        }
-        Err(AtError::MissingDpopNonce)
-    }
-
-    async fn get_json<T: DeserializeOwned>(&self, url: &Url) -> Result<T, AtError> {
-        let mut nonce = self.session.lock().dpop_nonce.clone();
-
-        for _ in 0..2 {
-            let (access, dpop_key) = {
-                let s = self.session.lock();
-                if s.is_expired() {
-                    return Err(AtError::SessionExpired);
-                }
-                (s.access_token.clone(), s.dpop_key()?)
-            };
-            let proof =
-                dpop_key.sign_proof("GET", url.as_str(), nonce.as_deref(), Some(&access))?;
-            // Per RFC 9449, the Authorization scheme MUST be literally "DPoP"
-            // (not "Bearer", not whatever token_type the server happened to
-            // return). Some servers return token_type="Bearer" even for
-            // DPoP-bound tokens; forcing the scheme here keeps us correct.
-            let resp = self
-                .http
-                .get(url.clone())
-                .header("Authorization", format!("DPoP {}", access))
-                .header("DPoP", proof)
-                .send()
-                .await?;
-
-            let status = resp.status();
-            let server_nonce = resp
-                .headers()
-                .get("DPoP-Nonce")
-                .and_then(|h| h.to_str().ok())
-                .map(String::from);
-            if let Some(n) = &server_nonce {
-                self.session.lock().dpop_nonce = Some(n.clone());
-            }
-
-            if status.is_success() {
-                let body = resp.text().await?;
-                return serde_json::from_str(&body).map_err(AtError::from);
-            }
-
-            let body = match resp.text().await {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!(error = %e, status = %status, "smooblue: failed reading response body");
-                    String::new()
-                }
-            };
-            if (status == 401 || status == 400) && body.contains("use_dpop_nonce") {
-                if server_nonce.is_some() {
-                    nonce = server_nonce;
-                    continue;
-                }
-                return Err(AtError::MissingDpopNonce);
-            }
-            return Err(AtError::Status {
-                status: status.as_u16(),
-                body,
             });
         }
         Err(AtError::MissingDpopNonce)

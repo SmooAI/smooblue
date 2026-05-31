@@ -198,12 +198,13 @@ To report a vulnerability: email brent@smoo.ai or use [GitHub's private security
 
 ## Privacy — what Smooblue sends where
 
-| Data                      | Sent to                                  | When                                                                 |
-| ------------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
-| Handle, password (typed)  | **Nowhere** — Bluesky handles auth       | Never; OAuth means Smooblue never sees your password                 |
-| Bluesky access token      | Your PDS (which proxies to AppView)      | Every XRPC call                                                      |
-| Session (DPoP key + tokens) | Local file (0600 in config dir)        | After sign-in; survives rebuilds (Keychain ACL was unreliable)        |
-| Display name, handle, DID | **Smoo AI CRM** *(opt-in only)*          | Only if you tick "Stay in touch with Smoo AI" during sign-in         |
+| Data                      | Sent to                                                              | When                                                                 |
+| ------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Handle, password (typed)  | **Nowhere** — Bluesky handles auth                                   | Never; OAuth means Smooblue never sees your password                 |
+| Bluesky access token      | Your PDS (which proxies to AppView)                                  | Every XRPC call                                                      |
+| Session (DPoP key + tokens) | Local file (0600 in config dir)                                    | After sign-in; survives rebuilds (Keychain ACL was unreliable)        |
+| DM contents               | Your PDS → **`api.bsky.chat`** (Bluesky's chat service, **not E2E encrypted** — see Security doc) | When you open the Messages column or send a message                  |
+| Display name, handle, DID | **Smoo AI CRM** *(opt-in only)*                                      | Only if you tick "Stay in touch with Smoo AI" during sign-in         |
 
 The Smoo AI CRM sync is off by default and reversible from Settings.
 
