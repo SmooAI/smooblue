@@ -89,17 +89,19 @@ pub fn MessagesSheet() -> Element {
         .map(|s| s.did.clone())
         .unwrap_or_default();
 
-    // Polling tick — only runs while the sheet is open. Stopped by
-    // returning early when focus is None on each iteration.
+    // Polling tick — only bumps while the sheet is open. Skips the
+    // bump (but keeps sleeping) when focus is None so the resource
+    // doesn't churn on a closed sheet. Pearl: adversarial-review
+    // found that an unconditional `continue` here was a perpetual
+    // 10s wakeup; the gate is fine, the skip-the-bump path is cheap.
     {
         let focus_for_poll = focus;
         use_future(move || async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(POLL_SECS)).await;
-                if focus_for_poll.read().0.is_none() {
-                    continue;
+                if focus_for_poll.read().0.is_some() {
+                    poll_tick.with_mut(|t| *t = t.wrapping_add(1));
                 }
-                poll_tick.with_mut(|t| *t = t.wrapping_add(1));
             }
         });
     }
@@ -124,39 +126,56 @@ pub fn MessagesSheet() -> Element {
                 no_more_older.set(false);
                 return;
             };
+            // Convo-switch race guard (adversarial-review P1): the
+            // user can click convo A, then convo B, while A's fetch
+            // is still in flight. Capture the id we fired for; on
+            // landing, abort if focus has since moved elsewhere.
+            // Without this, A's response can land after B's and
+            // overwrite B's bubble list with A's messages.
+            let convo_id_for_check = convo_id.clone();
             spawn(async move {
                 let Some(client) = fresh_client(session_for_load).await else {
-                    load_error.set(Some("not signed in".into()));
+                    if focus_for_load.peek().0.as_deref() == Some(&convo_id_for_check) {
+                        load_error.set(Some("not signed in".into()));
+                    }
                     return;
                 };
                 match client.chat_get_messages(&convo_id, None, PAGE_LIMIT).await {
                     Ok(resp) => {
+                        // Stale-result guard. If the user has moved
+                        // to a different convo while we were awaiting,
+                        // drop this entire result silently — the
+                        // current-focus fetch is already in flight
+                        // from the next use_effect run.
+                        if focus_for_load.peek().0.as_deref() != Some(&convo_id_for_check) {
+                            return;
+                        }
                         // Server returns newest-first; reverse so the
                         // bubble list reads oldest→newest top-to-bottom
                         // and the latest message lands at the bottom.
                         let mut rev = resp.messages;
                         rev.reverse();
-                        // Initial-page semantics: replace messages,
-                        // capture the cursor for scroll-up paging.
-                        // A null cursor here means the convo's whole
-                        // history fits in the first page — no more
-                        // to load.
                         let cursor_for_older = resp.cursor.clone();
                         let cursor_was_none = cursor_for_older.is_none();
                         messages.set(rev);
                         older_cursor.set(cursor_for_older);
                         no_more_older.set(cursor_was_none);
-                        // Bump tail_grew so the auto-scroll-to-bottom
-                        // effect fires (initial open + every poll).
                         tail_grew.with_mut(|n| *n = n.wrapping_add(1));
                         load_error.set(None);
                     }
-                    Err(e) => load_error.set(Some(e.to_string())),
+                    Err(e) => {
+                        if focus_for_load.peek().0.as_deref() == Some(&convo_id_for_check) {
+                            load_error.set(Some(e.to_string()));
+                        }
+                    }
                 }
-                // Mark-as-read in the background — failure here is
-                // cosmetic (unread badge takes longer to clear).
+                // Mark-as-read in the background — also stale-guarded
+                // so we don't update_read for a convo the user left.
                 let convo_for_read = convo_id.clone();
                 spawn(async move {
+                    if focus_for_load.peek().0.as_deref() != Some(&convo_for_read) {
+                        return;
+                    }
                     let Some(client) = fresh_client(session_for_load).await else {
                         return;
                     };
@@ -259,14 +278,24 @@ pub fn MessagesSheet() -> Element {
             if top >= SCROLL_TRIGGER_PX as f64 {
                 return;
             }
-            // 2. Re-check the gate now that we know we want to fire.
-            //    A concurrent scroll event may have already started a
-            //    fetch in the window between the gate check above and
-            //    this point.
-            if *loading_older.peek() {
+            // 2. Atomic check-and-set on the gate. Naive `peek`-then-
+            //    `set` lets two concurrent scroll events both pass the
+            //    check before either sets the flag, then both fire the
+            //    fetch — duplicate older pages stack up. `with_mut`
+            //    runs the closure under the signal's exclusive write
+            //    lock, so the {observe, mutate} pair is one critical
+            //    section. Adversarial-review P2.
+            let acquired = loading_older.with_mut(|v| {
+                if *v {
+                    false
+                } else {
+                    *v = true;
+                    true
+                }
+            });
+            if !acquired {
                 return;
             }
-            loading_older.set(true);
             // 3. Fetch + prepend.
             let Some(client) = fresh_client(session_for_older).await else {
                 loading_older.set(false);

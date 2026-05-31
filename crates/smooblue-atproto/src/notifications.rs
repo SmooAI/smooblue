@@ -1,7 +1,7 @@
 //! Bluesky notifications — `app.bsky.notification.listNotifications`.
 
 use crate::feed::PostAuthor;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NotificationsResponse {
@@ -11,7 +11,7 @@ pub struct NotificationsResponse {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Notification {
     pub uri: String,
     pub cid: String,
