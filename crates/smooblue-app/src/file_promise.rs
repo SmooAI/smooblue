@@ -69,7 +69,7 @@ pub enum FilePromiseEvent {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos::{install_on_main_window, take_receiver};
+pub use macos::{emit_drop, install_on_main_window, take_receiver};
 
 #[cfg(not(target_os = "macos"))]
 pub fn install_on_main_window() {}
@@ -78,6 +78,14 @@ pub fn install_on_main_window() {}
 pub fn take_receiver() -> Option<tokio::sync::mpsc::UnboundedReceiver<FilePromiseEvent>> {
     None
 }
+
+/// Forward a resolved file path through the same channel the AppKit
+/// drop overlay uses, so the App-level listener treats Finder file
+/// drops (from anywhere in the window) the same as screenshot-floater
+/// promise drops: opens compose, attaches the image. No-op on
+/// non-macOS — the install never initialized the channel there.
+#[cfg(not(target_os = "macos"))]
+pub fn emit_drop(_path: std::path::PathBuf) {}
 
 #[cfg(target_os = "macos")]
 mod macos {
@@ -143,6 +151,17 @@ mod macos {
         if let Some(tx) = SENDER.get() {
             let _ = tx.send(event);
         }
+    }
+
+    /// External-drop entry — called from compose.rs or the deck root's
+    /// HTML5 drop handler when the user drags a regular Finder file
+    /// (public.file-url) anywhere onto the window. Routes through the
+    /// same `Drop(path)` event the AppKit promise overlay uses, so
+    /// the App-level listener does its existing "open compose +
+    /// attach" thing without caring whether the path came from a
+    /// promise resolution or a regular drop.
+    pub fn emit_drop(path: PathBuf) {
+        emit(FilePromiseEvent::Drop(path));
     }
 
     fn install_inner() {

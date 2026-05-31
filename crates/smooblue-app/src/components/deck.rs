@@ -224,6 +224,45 @@ pub fn DeckShell() -> Element {
         }
     };
 
+    // Window-level image drop: anywhere on the deck shell, drop an
+    // image file and compose opens with it attached. Same channel as
+    // the screenshot-floater overlay (file_promise::emit_drop), so
+    // both drop paths land in the App-level listener that pushes to
+    // pending_drops + flips compose open. Compose's own ondrop
+    // handler calls stop_propagation, so drops landing INSIDE the
+    // compose sheet aren't double-processed by this root handler.
+    //
+    // dragover MUST prevent_default to tell Wry "yes, we accept
+    // drops here" — otherwise the browser refuses to fire ondrop.
+    let on_window_dragover = move |e: DragEvent| {
+        e.prevent_default();
+    };
+    let on_window_drop = move |e: DragEvent| {
+        use dioxus::html::HasFileData;
+        e.prevent_default();
+        let Some(file_engine) = e.files() else {
+            return;
+        };
+        for name in file_engine.files() {
+            let path = std::path::PathBuf::from(&name);
+            if !path.is_file() {
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_ascii_lowercase())
+                .unwrap_or_default();
+            if !matches!(
+                ext.as_str(),
+                "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic"
+            ) {
+                continue;
+            }
+            crate::file_promise::emit_drop(path);
+        }
+    };
+
     rsx! {
         // tabindex=0 so the deck div can receive keyboard focus on
         // launch — otherwise document.activeElement is body and
@@ -232,6 +271,8 @@ pub fn DeckShell() -> Element {
             tabindex: "0",
             "data-theme": "{theme_attr}",
             onkeydown: onkeydown,
+            ondragover: on_window_dragover,
+            ondrop: on_window_drop,
             Sidebar { search_open, saved_feeds_open, settings_open }
             div { class: "deck-columns",
                 for spec in columns {

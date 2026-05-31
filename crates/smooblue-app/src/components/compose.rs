@@ -37,6 +37,22 @@ pub const MAX_LEN: usize = 300;
 /// Per-post image cap from the `app.bsky.embed.images` lexicon.
 pub const MAX_IMAGES: usize = 4;
 
+/// Per-image alt-text cap from the `app.bsky.embed.images#image.alt`
+/// lexicon (graphemes — we approximate with chars). Going over this
+/// makes the AppView reject the post with a validation error; the
+/// LLM auto-suggestion path can produce long descriptions, so we
+/// truncate proactively rather than failing at submit time.
+pub const MAX_ALT_LEN: usize = 2000;
+
+/// Truncate `s` to at most [`MAX_ALT_LEN`] chars. Char-based so we
+/// don't slice a UTF-8 codepoint in half on the byte boundary.
+fn truncate_alt(s: String) -> String {
+    if s.chars().count() <= MAX_ALT_LEN {
+        return s;
+    }
+    s.chars().take(MAX_ALT_LEN).collect()
+}
+
 /// Hard cap on dropped video file size before we accept it. Matches
 /// bsky's own `app.bsky.video.uploadVideo` ceiling — files above
 /// this would 413 at the AppView even if we managed to upload them,
@@ -113,7 +129,11 @@ impl AttachedImage {
     }
 
     /// Compute what the alt field SHOULD show given the current LLM +
-    /// OCR results. Returns `None` if neither has resolved yet.
+    /// OCR results. Returns `None` if neither has resolved yet. The
+    /// merged result is truncated to [`MAX_ALT_LEN`] chars — the LLM
+    /// can produce 3-4k-char scene descriptions, and Bluesky's
+    /// `app.bsky.embed.images#image.alt` field rejects anything
+    /// over 2000 graphemes at submit time.
     fn computed_alt(&self) -> Option<String> {
         let llm = self.ai_suggestion.as_ref().map(|s| s.text.as_str());
         let ocr = self.ocr_text.as_deref();
@@ -124,7 +144,7 @@ impl AttachedImage {
         if merged.is_empty() {
             None
         } else {
-            Some(merged)
+            Some(truncate_alt(merged))
         }
     }
 }
@@ -541,6 +561,11 @@ pub fn ComposeSheet() -> Element {
     let on_drop = move |e: DragEvent| {
         use dioxus::html::HasFileData;
         e.prevent_default();
+        // Stop the drop from bubbling to the deck-shell window-level
+        // handler — when compose is open, the local drop handler
+        // attaches the image; the window handler would re-attach the
+        // same path via the FilePromiseEvent::Drop channel.
+        e.stop_propagation();
         dragging.set(false);
         let Some(file_engine) = e.files() else {
             return;
@@ -763,7 +788,7 @@ pub fn ComposeSheet() -> Element {
                             value: "{v.alt}",
                             oninput: move |e| {
                                 if let Some(slot) = video_attachment.write().as_mut() {
-                                    slot.alt = e.value();
+                                    slot.alt = truncate_alt(e.value());
                                 }
                             },
                         }
@@ -872,7 +897,7 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
 
     let mut atts_for_alt = attachments;
     let set_alt = move |evt: Event<FormData>| {
-        let new_alt = evt.value();
+        let new_alt = truncate_alt(evt.value());
         if let Some(slot) = atts_for_alt.write().iter_mut().find(|a| a.id == id) {
             slot.alt = new_alt;
             slot.alt_user_edited = true;
@@ -1024,6 +1049,12 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
                     placeholder: "{placeholder_text}",
                     disabled: matches!(att.state, AttachmentState::Preparing | AttachmentState::Failed(_)),
                     value: "{alt}",
+                    // maxlength caps user keystrokes — set_alt also
+                    // truncate_alt's defensively so an auto-fill or
+                    // paste exceeding 2000 chars stays inside the
+                    // lexicon limit even if the input ever bypasses
+                    // the browser cap.
+                    maxlength: "{MAX_ALT_LEN}",
                     oninput: set_alt,
                 }
                 div { class: "compose__alt-meta",
