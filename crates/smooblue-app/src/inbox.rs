@@ -52,7 +52,15 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
+
+/// Hour-bucket granularity, in seconds. The sort uses
+/// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
+/// so a high-follower item sorts above more-direct peers WITHIN the
+/// same hour but never lifts past a fresher (newer-bucket) item as
+/// it ages. Pearl th-bce4fb. Make hour-bucket smaller (e.g. 1800
+/// for 30 min) if "celebrity boost lingers too long" is a complaint.
+const TS_BUCKET_SECS: i64 = 3600;
 
 /// Per-source base directness scores. Higher = more "for you, now".
 const SCORE_REPLY_TO_REPLY: i32 = 100;
@@ -170,6 +178,24 @@ pub struct InboxItem {
     /// notification view or the chat MessageView depending on `source`).
     /// Stored as TEXT (sqlite has no native JSON type for our purposes).
     pub payload_json: String,
+    /// Cached follower count of `actor_did` at last ingestion. Drives
+    /// the within-bucket sort tiebreak (pearl th-bce4fb) — items in
+    /// the same hour bucket sort by follower count first, then by
+    /// directness. 0 for actors we haven't fetched a profile for yet
+    /// (collapses to a directness-only sort within their bucket).
+    pub actor_follower_count: i64,
+    /// Epoch hour of `ts` (i.e. `ts.timestamp() / 3600`). Stored at
+    /// insert time rather than computed via SQLite's strftime so the
+    /// index is a stable integer and there's no parser coupling at
+    /// query time. Drives the primary sort dimension.
+    pub ts_bucket: i64,
+}
+
+/// Compute the hour bucket for a timestamp. Wrap as a function so
+/// the bucketing rule lives in one place — bumping
+/// [`TS_BUCKET_SECS`] re-buckets everything on the next ingestion.
+pub fn ts_bucket_for(ts: DateTime<Utc>) -> i64 {
+    ts.timestamp() / TS_BUCKET_SECS
 }
 
 /// Compute the live directness score given current age + read state.
@@ -271,7 +297,32 @@ fn migrate(conn: &Connection) -> Result<()> {
             "#,
         )?;
     }
-    // Future migrations: `if current < 2 { ... }` etc.
+    if current < 2 {
+        // v2: follower-count tiebreak within hour-bucketed time.
+        // Drop the old active-list index — it's replaced with a
+        // composite that matches the new ORDER BY exactly. Existing
+        // rows get follower_count=0 + ts_bucket=0 from the DEFAULTs;
+        // next ingestion cycle UPSERTs them with real values. In the
+        // meantime they all collapse into the "bucket 0" sort cell,
+        // which is below every newer-bucket item — annoying for ~30s
+        // but the only data-loss-free migration.
+        conn.execute_batch(
+            r#"
+            ALTER TABLE inbox_items ADD COLUMN actor_follower_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE inbox_items ADD COLUMN ts_bucket INTEGER NOT NULL DEFAULT 0;
+            DROP INDEX IF EXISTS inbox_active_idx;
+            CREATE INDEX inbox_active_idx
+                ON inbox_items(
+                    ts_bucket DESC,
+                    actor_follower_count DESC,
+                    directness DESC,
+                    ts DESC
+                )
+                WHERE archived = 0;
+            "#,
+        )?;
+    }
+    // Future migrations: `if current < 3 { ... }` etc.
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -289,21 +340,27 @@ pub fn upsert(item: &InboxItem) -> Result<()> {
                 item_id, source, actor_did, actor_handle, actor_display,
                 actor_avatar, subject_uri, preview, ts, directness,
                 read, archived, snoozed_until, device_id, synced_at,
-                payload_json
+                payload_json, actor_follower_count, ts_bucket
             )
             VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15,
-                ?16
+                ?16, ?17, ?18
             )
             ON CONFLICT(item_id) DO UPDATE SET
-                actor_handle  = excluded.actor_handle,
-                actor_display = excluded.actor_display,
-                actor_avatar  = excluded.actor_avatar,
-                preview       = excluded.preview,
-                directness    = excluded.directness,
-                payload_json  = excluded.payload_json
+                actor_handle         = excluded.actor_handle,
+                actor_display        = excluded.actor_display,
+                actor_avatar         = excluded.actor_avatar,
+                preview              = excluded.preview,
+                directness           = excluded.directness,
+                payload_json         = excluded.payload_json,
+                -- Re-ingestion CAN raise but never SILENTLY LOWERS the
+                -- cached follower count — protects against a transient
+                -- profile-fetch failure (which would write 0) blowing
+                -- away a real cached value.
+                actor_follower_count = MAX(actor_follower_count, excluded.actor_follower_count),
+                ts_bucket            = excluded.ts_bucket
             "#,
             params![
                 item.item_id,
@@ -322,7 +379,24 @@ pub fn upsert(item: &InboxItem) -> Result<()> {
                 item.device_id,
                 item.synced_at.map(|t| t.to_rfc3339()),
                 item.payload_json,
+                item.actor_follower_count,
+                item.ts_bucket,
             ],
+        )?;
+        Ok(())
+    })
+}
+
+/// Update the cached follower count for every row authored by
+/// `actor_did`. Called by the ingestion task's profile-enrichment
+/// pass after `get_profiles` returns. Idempotent + cheap — single
+/// UPDATE indexed on actor_did is unaffordably fast even with thousands
+/// of rows.
+pub fn set_actor_followers(actor_did: &str, count: i64) -> Result<()> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE inbox_items SET actor_follower_count = ?1 WHERE actor_did = ?2",
+            params![count, actor_did],
         )?;
         Ok(())
     })
@@ -339,11 +413,21 @@ pub fn list_active(limit: i64) -> Result<Vec<InboxItem>> {
             SELECT item_id, source, actor_did, actor_handle, actor_display,
                    actor_avatar, subject_uri, preview, ts, directness,
                    read, archived, snoozed_until, device_id, synced_at,
-                   payload_json
+                   payload_json, actor_follower_count, ts_bucket
             FROM inbox_items
             WHERE archived = 0
               AND (snoozed_until IS NULL OR snoozed_until <= ?1)
-            ORDER BY directness DESC, ts DESC
+            -- Pearl th-bce4fb: hour-bucket first, then follower count
+            -- within bucket (so a celebrity's mention floats above a
+            -- friend's deep-thread reply that arrived in the same
+            -- hour), then directness, then ts as a final stable
+            -- tiebreak. Idempotent + stable: as items age into older
+            -- buckets, the follower bump no longer lifts them past
+            -- newer arrivals.
+            ORDER BY ts_bucket DESC,
+                     actor_follower_count DESC,
+                     directness DESC,
+                     ts DESC
             LIMIT ?2
             "#,
         )?;
@@ -420,7 +504,7 @@ pub fn get(item_id: &str) -> Result<Option<InboxItem>> {
                 SELECT item_id, source, actor_did, actor_handle, actor_display,
                        actor_avatar, subject_uri, preview, ts, directness,
                        read, archived, snoozed_until, device_id, synced_at,
-                       payload_json
+                       payload_json, actor_follower_count, ts_bucket
                 FROM inbox_items
                 WHERE item_id = ?1
                 "#,
@@ -489,6 +573,8 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<InboxItem> {
         device_id: row.get("device_id")?,
         synced_at,
         payload_json: row.get("payload_json")?,
+        actor_follower_count: row.get("actor_follower_count")?,
+        ts_bucket: row.get("ts_bucket")?,
     })
 }
 
@@ -507,6 +593,7 @@ mod tests {
         migrate(&conn).expect("migrate");
         let _ = DB.set(Mutex::new(Some(conn)));
 
+        let now = Utc::now();
         let item = InboxItem {
             item_id: "item-1".into(),
             source: InboxSource::DirectReply,
@@ -516,14 +603,16 @@ mod tests {
             actor_avatar: None,
             subject_uri: "at://did:plc:me/app.bsky.feed.post/abc".into(),
             preview: Some("Sounds good!".into()),
-            ts: Utc::now(),
-            directness: score(InboxSource::DirectReply, Utc::now(), false),
+            ts: now,
+            directness: score(InboxSource::DirectReply, now, false),
             read: false,
             archived: false,
             snoozed_until: None,
             device_id: None,
             synced_at: None,
             payload_json: "{}".into(),
+            actor_follower_count: 0,
+            ts_bucket: ts_bucket_for(now),
         };
         upsert(&item).expect("upsert");
 

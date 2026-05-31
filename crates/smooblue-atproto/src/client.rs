@@ -1,7 +1,7 @@
 //! XRPC client with DPoP-bound auth + nonce retry.
 
 use crate::error::AtError;
-use crate::feed::FeedResponse;
+use crate::feed::{ActorProfile, FeedResponse};
 use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,12 @@ use smooblue_oauth::Session;
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
+
+/// Response shape for `app.bsky.actor.getProfiles` (batched profile fetch).
+#[derive(Debug, Clone, Deserialize)]
+struct GetProfilesResponse {
+    profiles: Vec<ActorProfile>,
+}
 
 /// Response from `com.atproto.repo.createRecord` — the URI of the new
 /// record (which callers need to later delete it for unlike/unrepost).
@@ -198,6 +204,34 @@ impl AtClient {
             .map_err(|e| AtError::Decode(e.to_string()))?;
         url.query_pairs_mut().append_pair("actor", actor);
         self.get_json(&url).await
+    }
+
+    /// `app.bsky.actor.getProfiles` — batched profile fetch. Lexicon
+    /// cap is 25 actors per call; this helper splits oversized inputs
+    /// into chunks and concatenates the results. Used by the Inbox
+    /// ingestion task to enrich items with the actor's follower count
+    /// in 2 round-trips per 50-item poll cycle (vs 50 single calls).
+    pub async fn get_profiles(
+        &self,
+        actors: &[String],
+    ) -> Result<Vec<crate::feed::ActorProfile>, AtError> {
+        const CHUNK: usize = 25;
+        let mut out = Vec::with_capacity(actors.len());
+        for batch in actors.chunks(CHUNK) {
+            let mut url = self
+                .appview
+                .join("/xrpc/app.bsky.actor.getProfiles")
+                .map_err(|e| AtError::Decode(e.to_string()))?;
+            {
+                let mut qp = url.query_pairs_mut();
+                for actor in batch {
+                    qp.append_pair("actors", actor);
+                }
+            }
+            let resp: GetProfilesResponse = self.get_json(&url).await?;
+            out.extend(resp.profiles);
+        }
+        Ok(out)
     }
 
     /// `app.bsky.feed.getAuthorFeed` — for profile / single-author columns.

@@ -126,6 +126,12 @@ fn notification_to_item(n: &Notification) -> Option<InboxItem> {
         device_id: None,
         synced_at: None,
         payload_json,
+        // Follower count starts at 0; the enrichment pass after the
+        // notifications ingest fills it via batched get_profiles +
+        // inbox::set_actor_followers. Items stay sorted by directness
+        // within their bucket until the enrichment lands.
+        actor_follower_count: 0,
+        ts_bucket: inbox::ts_bucket_for(ts),
     })
 }
 
@@ -187,6 +193,8 @@ fn convo_to_item(c: &ConvoView, my_did: &str) -> Option<InboxItem> {
         device_id: None,
         synced_at: None,
         payload_json,
+        actor_follower_count: 0,
+        ts_bucket: inbox::ts_bucket_for(ts),
     })
 }
 
@@ -234,6 +242,11 @@ async fn run_cycle(session: Signal<Option<Session>>) {
         .map(|s| s.did.clone())
         .unwrap_or_default();
 
+    // Distinct actor DIDs seen this cycle — used by the profile
+    // enrichment pass below to batch-fetch follower counts.
+    let mut actor_dids_to_enrich: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
     // ─── Notifications ────────────────────────────────────────
     match client
         .list_notifications(None, NOTIFICATION_PAGE_LIMIT)
@@ -248,8 +261,7 @@ async fn run_cycle(session: Signal<Option<Session>>) {
                     skipped += 1;
                     continue;
                 };
-                // Off the tokio runtime — SQLite calls are sync +
-                // can block briefly under WAL contention.
+                actor_dids_to_enrich.insert(item.actor_did.clone());
                 let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
                 match upsert_result {
                     Ok(Ok(())) => ingested += 1,
@@ -275,6 +287,7 @@ async fn run_cycle(session: Signal<Option<Session>>) {
                     skipped += 1;
                     continue;
                 };
+                actor_dids_to_enrich.insert(item.actor_did.clone());
                 let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
                 match upsert_result {
                     Ok(Ok(())) => ingested += 1,
@@ -285,6 +298,41 @@ async fn run_cycle(session: Signal<Option<Session>>) {
             eprintln!("[inbox_ingest] convos: ingested={ingested} skipped={skipped} total={total}");
         }
         Err(e) => eprintln!("[inbox_ingest] listConvos failed: {e}"),
+    }
+
+    // ─── Profile enrichment ─────────────────────────────────
+    // Batched get_profiles for every distinct actor we just saw,
+    // then write follower counts back to all their rows so the
+    // ts_bucket / follower_count / directness sort actually has
+    // useful follower data. Cheap (~2 round-trips per 50 unique
+    // actors) and fire-and-forget — failure leaves follower_count
+    // at its previous value (MAX semantics in inbox::upsert protect
+    // against a 0 from a stale path silently downgrading a real
+    // cached count). Pearl th-bce4fb.
+    let dids: Vec<String> = actor_dids_to_enrich.into_iter().collect();
+    if !dids.is_empty() {
+        match client.get_profiles(&dids).await {
+            Ok(profiles) => {
+                let mut updated = 0usize;
+                for p in profiles {
+                    let count = p.followers_count.unwrap_or(0) as i64;
+                    let did = p.did.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        inbox::set_actor_followers(&did, count)
+                    })
+                    .await;
+                    match res {
+                        Ok(Ok(())) => updated += 1,
+                        Ok(Err(e)) => {
+                            eprintln!("[inbox_ingest] set_actor_followers failed: {e}")
+                        }
+                        Err(e) => eprintln!("[inbox_ingest] enrich blocking task panicked: {e}"),
+                    }
+                }
+                eprintln!("[inbox_ingest] enriched followers: updated={updated}");
+            }
+            Err(e) => eprintln!("[inbox_ingest] get_profiles failed: {e}"),
+        }
     }
 }
 
