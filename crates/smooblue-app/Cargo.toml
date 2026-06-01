@@ -43,6 +43,11 @@ arboard = { workspace = true }
 image = { workspace = true }
 base64 = { workspace = true }
 anyhow = { workspace = true }
+# Cross-platform Mutex (no poison concept) — used by inbox.rs's
+# OnceLock<Mutex<Option<Connection>>> on every target. Was previously
+# in the macOS-only block alongside file_promise's use; moving up
+# here since SQLite ingestion ships everywhere.
+parking_lot = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Vision OCR — text extraction from images. macOS-only because
@@ -54,7 +59,6 @@ objc2-vision = { workspace = true }
 # AppKit drag-destination subclass for screenshot-floater drops.
 objc2-app-kit = { workspace = true }
 block2 = { workspace = true }
-parking_lot = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
