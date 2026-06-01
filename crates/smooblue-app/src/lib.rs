@@ -6,6 +6,7 @@ pub mod alt_text;
 pub mod auth_refresh;
 pub mod components;
 pub mod demo;
+pub mod diag_log;
 pub mod file_promise;
 pub mod icons;
 pub mod image_prep;

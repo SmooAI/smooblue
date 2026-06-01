@@ -242,7 +242,7 @@ async fn run_cycle(session: Signal<Option<Session>>) {
     }
 
     let Some(client) = fresh_client(session).await else {
-        eprintln!("[inbox_ingest] no fresh client this cycle");
+        crate::diag!("[inbox_ingest] no fresh client this cycle");
         return;
     };
 
@@ -273,7 +273,7 @@ async fn run_cycle(session: Signal<Option<Session>>) {
         {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("[inbox_ingest] listNotifications page {pages_fetched} failed: {e}");
+                crate::diag!("[inbox_ingest] listNotifications page {pages_fetched} failed: {e}");
                 break;
             }
         };
@@ -292,8 +292,8 @@ async fn run_cycle(session: Signal<Option<Session>>) {
             let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
             match upsert_result {
                 Ok(Ok(())) => total_ingested += 1,
-                Ok(Err(e)) => eprintln!("[inbox_ingest] notif upsert failed: {e}"),
-                Err(e) => eprintln!("[inbox_ingest] notif blocking task panicked: {e}"),
+                Ok(Err(e)) => crate::diag!("[inbox_ingest] notif upsert failed: {e}"),
+                Err(e) => crate::diag!("[inbox_ingest] notif blocking task panicked: {e}"),
             }
         }
         // No cursor means we've reached the end of the user's
@@ -322,13 +322,15 @@ async fn run_cycle(session: Signal<Option<Session>>) {
                 let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
                 match upsert_result {
                     Ok(Ok(())) => ingested += 1,
-                    Ok(Err(e)) => eprintln!("[inbox_ingest] dm upsert failed: {e}"),
-                    Err(e) => eprintln!("[inbox_ingest] dm blocking task panicked: {e}"),
+                    Ok(Err(e)) => crate::diag!("[inbox_ingest] dm upsert failed: {e}"),
+                    Err(e) => crate::diag!("[inbox_ingest] dm blocking task panicked: {e}"),
                 }
             }
-            eprintln!("[inbox_ingest] convos: ingested={ingested} skipped={skipped} total={total}");
+            crate::diag!(
+                "[inbox_ingest] convos: ingested={ingested} skipped={skipped} total={total}"
+            );
         }
-        Err(e) => eprintln!("[inbox_ingest] listConvos failed: {e}"),
+        Err(e) => crate::diag!("[inbox_ingest] listConvos failed: {e}"),
     }
 
     // ─── Profile enrichment ─────────────────────────────────
@@ -355,14 +357,14 @@ async fn run_cycle(session: Signal<Option<Session>>) {
                     match res {
                         Ok(Ok(())) => updated += 1,
                         Ok(Err(e)) => {
-                            eprintln!("[inbox_ingest] set_actor_followers failed: {e}")
+                            crate::diag!("[inbox_ingest] set_actor_followers failed: {e}")
                         }
-                        Err(e) => eprintln!("[inbox_ingest] enrich blocking task panicked: {e}"),
+                        Err(e) => crate::diag!("[inbox_ingest] enrich blocking task panicked: {e}"),
                     }
                 }
-                eprintln!("[inbox_ingest] enriched followers: updated={updated}");
+                crate::diag!("[inbox_ingest] enriched followers: updated={updated}");
             }
-            Err(e) => eprintln!("[inbox_ingest] get_profiles failed: {e}"),
+            Err(e) => crate::diag!("[inbox_ingest] get_profiles failed: {e}"),
         }
     }
 }
