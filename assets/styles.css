@@ -200,6 +200,29 @@ a {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
+    /* When a top-poll prepends new items, WebKit should keep the
+     * user's current scroll position anchored to whatever post they
+     * were reading rather than yanking them up by the height of the
+     * inserted content. `overflow-anchor: auto` is the CSS default,
+     * but stating it explicitly + alongside the unique selector
+     * makes the intent obvious + ensures any future CSS reset that
+     * sets it to `none` here gets caught in review. */
+    overflow-anchor: auto;
+}
+
+/* Mark every item the browser CAN anchor on. Without this, WebKit
+ * occasionally picks the loading-spinner or the "Load more" button
+ * as its anchor and the math goes wrong on top-poll insert. By
+ * white-listing PostCard / NotificationCard / SuggestionRow /
+ * InboxRow / ConvoRow as anchor-allowed and DISABLING anchoring on
+ * the trailing chrome, WebKit's choice is constrained to the
+ * actual content. */
+.deck-column__body .deck-column__loading,
+.deck-column__body .deck-column__empty,
+.deck-column__body .deck-column__error,
+.deck-column__body .deck-column__more,
+.deck-column__body .deck-column__load-more {
+    overflow-anchor: none;
 }
 
 .deck-column__empty,
