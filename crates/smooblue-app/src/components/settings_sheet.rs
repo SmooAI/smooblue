@@ -572,6 +572,17 @@ fn AccessibilityControls() -> Element {
                 }
                 span { class: "a11y__value", "{width}px" }
             }
+            div { class: "a11y__reset-row",
+                button {
+                    class: "a11y__reset",
+                    title: "Reset text size + column width to their defaults",
+                    onclick: move |_| {
+                        let defaults = crate::persistence::UiPrefs::default();
+                        prefs.set(defaults);
+                    },
+                    "Reset to defaults"
+                }
+            }
         }
     }
 }

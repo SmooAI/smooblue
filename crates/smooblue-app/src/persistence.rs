@@ -287,24 +287,36 @@ impl Default for UiPrefs {
     }
 }
 
+/// SQLite settings key — UiPrefs is stored as a single row keyed
+/// here, value is the JSON-serialized struct.
+const UI_PREFS_KEY: &str = "ui_prefs";
+
 pub fn save_ui_prefs(prefs: &UiPrefs) -> Result<(), String> {
-    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
-        .ok_or_else(|| "no config dir".to_string())?;
-    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
-    let path = dir.config_dir().join(UI_PREFS_FILE);
-    let json = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    let json = serde_json::to_string(prefs).map_err(|e| e.to_string())?;
+    crate::inbox::set_setting(UI_PREFS_KEY, &json).map_err(|e| e.to_string())
 }
 
 pub fn load_ui_prefs() -> UiPrefs {
-    let Some(dir) = directories::ProjectDirs::from("ai", "Smoo", "smooblue") else {
-        return UiPrefs::default();
-    };
-    let path = dir.config_dir().join(UI_PREFS_FILE);
-    let Ok(s) = std::fs::read_to_string(path) else {
-        return UiPrefs::default();
-    };
-    serde_json::from_str(&s).unwrap_or_default()
+    // Try SQLite first.
+    if let Ok(Some(s)) = crate::inbox::get_setting(UI_PREFS_KEY) {
+        if let Ok(p) = serde_json::from_str::<UiPrefs>(&s) {
+            return p;
+        }
+    }
+    // One-time migration from the v1.12.x JSON file. Read it,
+    // upsert into SQLite, then delete the legacy file so we don't
+    // resurrect stale state if the user later edits the JSON manually.
+    if let Some(dir) = directories::ProjectDirs::from("ai", "Smoo", "smooblue") {
+        let legacy = dir.config_dir().join(UI_PREFS_FILE);
+        if let Ok(s) = std::fs::read_to_string(&legacy) {
+            if let Ok(p) = serde_json::from_str::<UiPrefs>(&s) {
+                let _ = save_ui_prefs(&p);
+                let _ = std::fs::remove_file(&legacy);
+                return p;
+            }
+        }
+    }
+    UiPrefs::default()
 }
 
 #[cfg(test)]

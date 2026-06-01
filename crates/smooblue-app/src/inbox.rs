@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 /// Hour-bucket granularity, in seconds. The sort uses
 /// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
@@ -225,7 +225,27 @@ fn db_path() -> Result<PathBuf> {
     let data_dir = dirs.data_dir();
     std::fs::create_dir_all(data_dir)
         .with_context(|| format!("creating data dir {}", data_dir.display()))?;
-    Ok(data_dir.join("inbox.db"))
+    // One-time rename: the early inbox-only DB lived at inbox.db.
+    // It now hosts settings + (future) other tables; rename to
+    // smooblue.db so the filename matches its broader role. Safe
+    // because no other process holds the file at open time.
+    let new_path = data_dir.join("smooblue.db");
+    let legacy = data_dir.join("inbox.db");
+    if !new_path.exists() && legacy.exists() {
+        if let Err(e) = std::fs::rename(&legacy, &new_path) {
+            tracing::warn!(error = %e, "smoo db rename failed; opening legacy path");
+            return Ok(legacy);
+        }
+        // Best-effort move sidecars too (WAL + SHM).
+        for ext in ["-wal", "-shm"] {
+            let from = data_dir.join(format!("inbox.db{ext}"));
+            let to = data_dir.join(format!("smooblue.db{ext}"));
+            if from.exists() {
+                let _ = std::fs::rename(from, to);
+            }
+        }
+    }
+    Ok(new_path)
 }
 
 fn open() -> Result<Connection> {
@@ -322,9 +342,51 @@ fn migrate(conn: &Connection) -> Result<()> {
             "#,
         )?;
     }
-    // Future migrations: `if current < 3 { ... }` etc.
+    if current < 3 {
+        // v3: generic k/v settings table. Stores UI prefs (text size,
+        // column width) + any future per-user setting. Value is TEXT
+        // (typically serde_json) so the shape can evolve without a
+        // schema migration per setting.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            "#,
+        )?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
+}
+
+/// Read a setting by key. Returns None if the row doesn't exist.
+pub fn get_setting(key: &str) -> Result<Option<String>> {
+    with_db(|conn| {
+        let v: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(v)
+    })
+}
+
+/// Upsert a setting. value is opaque text — typically serde_json
+/// for structured settings (UiPrefs etc).
+pub fn set_setting(key: &str, value: &str) -> Result<()> {
+    with_db(|conn| {
+        conn.execute(
+            r#"
+            INSERT INTO settings (key, value) VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            params![key, value],
+        )?;
+        Ok(())
+    })
 }
 
 /// Insert (or update on conflict) a single inbox item. UPSERT

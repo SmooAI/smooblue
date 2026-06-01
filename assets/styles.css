@@ -4233,9 +4233,30 @@ a {
 }
 
 .a11y__hint {
-    color: var(--color-fg-muted);
-    font-size: var(--font-size-xs);
+    color: var(--muted-foreground);
+    font-size: calc(11px * var(--font-scale, 1));
     margin-left: 110px;
+}
+
+.a11y__reset-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.a11y__reset {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted-foreground);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: calc(12px * var(--font-scale, 1));
+}
+
+.a11y__reset:hover {
+    background: var(--muted);
+    color: var(--foreground);
 }
 
 /* ===========================================================
