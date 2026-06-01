@@ -97,7 +97,7 @@ a {
     background: var(--color-smooai-red);
     color: #fff;
     border-radius: 999px;
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     font-weight: 700;
     line-height: 16px;
     text-align: center;
@@ -207,7 +207,7 @@ a {
     padding: 24px 16px;
     color: var(--muted-foreground);
     text-align: center;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .deck-column__error {
@@ -216,13 +216,13 @@ a {
     background: rgba(255, 107, 108, 0.06);
     border-radius: var(--radius-sm);
     margin: 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .deck-column__error--soft {
     padding: 8px 12px;
     margin: 8px 12px;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     opacity: 0.7;
 }
 
@@ -231,7 +231,7 @@ a {
     text-align: center;
     padding: 16px 12px;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     border-top: 1px solid var(--border);
 }
 
@@ -247,7 +247,7 @@ a {
     color: var(--color-smooai-orange);
     border: 1px solid var(--color-smooai-orange);
     border-radius: var(--radius-sm);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     cursor: pointer;
     transition: background 120ms ease, color 120ms ease;
@@ -273,7 +273,7 @@ a {
     color: #fff;
     border: none;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     font-weight: 600;
     cursor: pointer;
     box-shadow: 0 4px 12px rgba(244, 159, 10, 0.35);
@@ -383,7 +383,7 @@ a {
 
 .post__handle {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -393,7 +393,7 @@ a {
 
 .post__time {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     margin-left: auto;
     flex-shrink: 0;
 }
@@ -403,7 +403,7 @@ a {
     white-space: pre-wrap;
     word-wrap: break-word;
     margin-bottom: 6px;
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
 }
 
 .post__embed {
@@ -500,7 +500,7 @@ a {
     left: 6px;
     background: rgba(0, 0, 0, 0.65);
     color: #fff;
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     font-weight: 700;
     letter-spacing: 0.4px;
     padding: 2px 5px;
@@ -551,13 +551,13 @@ a {
 
 .embed__link-domain {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     text-transform: lowercase;
 }
 
 .embed__link-title {
     color: var(--foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     line-height: 1.3;
     display: -webkit-box;
@@ -568,7 +568,7 @@ a {
 
 .embed__link-desc {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -643,7 +643,7 @@ a {
 
 .deck-column__filter-input {
     flex: 1 1 auto;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     padding: 4px 8px;
 }
 
@@ -703,7 +703,7 @@ a {
 .embed__quote--missing {
     color: var(--muted-foreground);
     font-style: italic;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     text-align: center;
     padding: 14px;
 }
@@ -712,7 +712,7 @@ a {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .embed__quote-avatar {
@@ -741,7 +741,7 @@ a {
 
 .embed__quote-handle {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -750,7 +750,7 @@ a {
 .embed__quote-text {
     margin: 0;
     color: var(--foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     line-height: 1.4;
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -792,7 +792,7 @@ a {
     gap: 14px;
     margin-top: 8px;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
 }
 
 /* Inherits hover behavior from .icon-action--reply / --repost / --like
@@ -869,7 +869,7 @@ a {
 }
 
 .compose__reply-author {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--muted-foreground);
     margin-bottom: 4px;
 }
@@ -880,7 +880,7 @@ a {
 }
 
 .compose__reply-text {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     color: var(--foreground);
     margin: 0;
     line-height: 1.4;
@@ -1065,14 +1065,14 @@ a {
 
 .notif__time {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     margin-left: auto;
     flex-shrink: 0;
 }
 
 .notif__phrase {
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     margin-top: 2px;
 }
 
@@ -1083,7 +1083,7 @@ a {
     border-radius: 8px;
     background: var(--card);
     border: 1px solid var(--border);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     line-height: 1.4;
     color: var(--foreground);
     /* Full text — no clamp. Users asked for the whole post so they
@@ -1125,7 +1125,7 @@ a {
 }
 
 .notif__quote-caption {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
     margin-bottom: 6px;
     text-transform: none;
@@ -1149,7 +1149,7 @@ a {
 .notif__quote-embed {
     /* Image grids and link cards inside a quote get the same small
        breathing room as in the main feed, just at slightly smaller scale. */
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
 }
 
 .notif__quote-embed .embed__images {
@@ -1176,7 +1176,7 @@ a {
 .compose__title {
     flex: 1;
     font-weight: 600;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     color: var(--foreground);
 }
 
@@ -1206,7 +1206,7 @@ a {
 .compose__textarea {
     min-height: 180px;
     line-height: 1.45;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     padding: 14px 16px;
     border-radius: var(--radius-md);
     transition: border-color 140ms ease, box-shadow 140ms ease;
@@ -1239,7 +1239,7 @@ a {
 
 .compose__counter {
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-variant-numeric: tabular-nums;
     min-width: 26px;
 }
@@ -1251,7 +1251,7 @@ a {
 
 .compose__hint {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-variant-numeric: tabular-nums;
     opacity: 0.7;
     margin-left: 2px;
@@ -1280,7 +1280,7 @@ a {
 
 .compose__error {
     color: var(--color-smooai-red);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     margin-top: 8px;
 }
 
@@ -1365,7 +1365,7 @@ a {
 .compose__thumb--failed {
     color: var(--color-smooai-red);
     font-weight: 800;
-    font-size: 24px;
+    font-size: calc(24px * var(--font-scale, 1));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1408,7 +1408,7 @@ a {
     flex: 1 1 auto;
     resize: none;
     min-height: 64px;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.4;
     padding: 6px 8px;
 }
@@ -1424,7 +1424,7 @@ a {
     justify-content: space-between;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
 }
 
@@ -1442,7 +1442,7 @@ a {
     align-items: center;
     justify-content: space-between;
     gap: 6px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--muted-foreground);
     text-transform: uppercase;
@@ -1453,7 +1453,7 @@ a {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     text-transform: none;
     letter-spacing: 0;
     padding: 2px 6px;
@@ -1511,13 +1511,13 @@ a {
 }
 
 .post__warning-label {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--color-smooai-red);
 }
 
 .post__warning-action {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--muted-foreground);
     font-style: italic;
 }
@@ -1543,7 +1543,7 @@ a {
 
 .saved-feeds__title {
     flex: 1 1 auto;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
@@ -1572,7 +1572,7 @@ a {
    section from the Your Lists section in one scrolling body. */
 .saved-feeds__section-title {
     margin: 14px 16px 6px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -1589,7 +1589,7 @@ a {
     color: var(--muted-foreground);
     text-align: center;
     padding: 40px 16px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .saved-feeds__error {
@@ -1646,7 +1646,7 @@ a {
 .saved-feeds__name {
     font-weight: 600;
     color: var(--foreground);
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1654,7 +1654,7 @@ a {
 }
 
 .saved-feeds__pinned {
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1667,7 +1667,7 @@ a {
 .saved-feeds__desc {
     margin: 2px 0 0;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -1677,7 +1677,7 @@ a {
 
 .saved-feeds__add {
     flex: 0 0 auto;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 6px 12px;
 }
 
@@ -1726,7 +1726,7 @@ a {
     color: var(--foreground);
     padding: 6px 16px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     transition: background 120ms ease, color 120ms ease;
 }
 
@@ -1752,7 +1752,7 @@ a {
 }
 
 .moderation__group-title {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -1763,7 +1763,7 @@ a {
 .moderation__empty {
     margin: 4px 2px 12px;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     font-style: italic;
 }
 
@@ -1799,7 +1799,7 @@ a {
 }
 
 .moderation__name {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--foreground);
     overflow: hidden;
@@ -1808,7 +1808,7 @@ a {
 }
 
 .moderation__handle {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
 }
 
@@ -1833,7 +1833,7 @@ a {
     color: var(--foreground);
     padding: 5px 10px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     font-weight: 500;
     cursor: pointer;
     transition: border-color 120ms ease, color 120ms ease;
@@ -1865,7 +1865,7 @@ a {
 
 .profile-edit__title {
     flex: 1 1 auto;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
@@ -1895,7 +1895,7 @@ a {
 
 .profile-edit__label {
     margin-top: 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     text-transform: uppercase;
     letter-spacing: 0.4px;
     font-weight: 700;
@@ -1914,7 +1914,7 @@ a {
 }
 
 .profile-edit__hint {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--color-smooai-green);
 }
 
@@ -1929,7 +1929,7 @@ a {
     padding: 24px;
     text-align: center;
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 /* ===========================================================
@@ -1952,7 +1952,7 @@ a {
 
 .compose__thread-label {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     font-family: var(--font-mono);
     padding-top: 8px;
@@ -1963,7 +1963,7 @@ a {
     flex: 1 1 auto;
     min-height: 56px;
     resize: none;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 6px 8px;
 }
 
@@ -1987,7 +1987,7 @@ a {
     color: var(--muted-foreground);
     padding: 4px 10px;
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -2023,13 +2023,13 @@ a {
 }
 
 .account-row__handle {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--foreground);
 }
 
 .account-row__did {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
     font-family: var(--font-mono);
     overflow: hidden;
@@ -2040,7 +2040,7 @@ a {
 .account-row__active-badge {
     background: var(--color-smooai-green);
     color: var(--color-smooai-dark-blue);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     padding: 2px 8px;
@@ -2085,14 +2085,14 @@ a {
 
 .custom-feed__row input {
     flex: 1 1 auto;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     padding: 6px 8px;
     font-family: var(--font-mono);
 }
 
 .custom-feed__hint {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     margin: 0 2px 6px;
 }
 
@@ -2107,7 +2107,7 @@ a {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--muted-foreground);
     padding: 0 0 0 38px;
     margin: -2px 0 -4px;
@@ -2176,7 +2176,7 @@ a {
 }
 
 .compose__video-name {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--foreground);
     overflow: hidden;
@@ -2185,7 +2185,7 @@ a {
 }
 
 .compose__video-size {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
 }
 
@@ -2206,7 +2206,7 @@ a {
 .compose__video-alt {
     min-height: 50px;
     resize: none;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     padding: 6px 8px;
 }
 
@@ -2271,7 +2271,7 @@ a {
 .lightbox__caption {
     max-width: min(92vw, 1200px);
     color: #d8dce8;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     line-height: 1.4;
     padding: 8px 12px;
     background: rgba(255, 255, 255, 0.06);
@@ -2343,7 +2343,7 @@ a {
 
 .report__title {
     flex: 1 1 auto;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
@@ -2374,7 +2374,7 @@ a {
 .report__hint {
     margin: 0;
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .report__reasons {
@@ -2391,7 +2391,7 @@ a {
     border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     transition: border-color 120ms ease, background 120ms ease;
 }
 
@@ -2409,7 +2409,7 @@ a {
 .report__detail {
     resize: none;
     min-height: 80px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     line-height: 1.4;
     padding: 8px 10px;
 }
@@ -2426,7 +2426,7 @@ a {
     background: rgba(244, 159, 10, 0.12);
     border-left: 3px solid var(--color-smooai-orange);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 /* ===========================================================
@@ -2445,7 +2445,7 @@ a {
     border: 1px solid var(--color-smooai-orange);
     border-radius: var(--radius-md);
     box-shadow: 0 6px 24px rgba(244, 159, 10, 0.25);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     max-width: 320px;
 }
 
@@ -2456,7 +2456,7 @@ a {
 }
 
 .update-toast__label {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     text-transform: uppercase;
     letter-spacing: 0.4px;
     font-weight: 700;
@@ -2469,7 +2469,7 @@ a {
     padding: 0;
     color: var(--color-smooai-orange);
     font-weight: 700;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     cursor: pointer;
     text-align: left;
 }
@@ -2513,7 +2513,7 @@ a {
 
 .kbd-help__title {
     flex: 1 1 auto;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
@@ -2540,7 +2540,7 @@ a {
 
 .kbd-help__section {
     margin: 14px 0 6px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -2556,14 +2556,14 @@ a {
     grid-template-columns: 130px 1fr;
     gap: 14px;
     padding: 5px 0;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .kbd-help__keys {
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     color: var(--color-smooai-orange);
     font-weight: 600;
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
 }
 
 .kbd-help__action {
@@ -2591,7 +2591,7 @@ a {
 
 .settings__title {
     flex: 1 1 auto;
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
@@ -2627,7 +2627,7 @@ a {
 
 .settings__section-title {
     margin: 0 0 10px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -2644,18 +2644,18 @@ a {
 
 .settings__row-label {
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .settings__row-value {
     color: var(--foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
 }
 
 .settings__row-link {
     color: var(--color-smooai-orange);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     text-decoration: none;
 }
 
@@ -2674,7 +2674,7 @@ a {
     padding: 6px 12px;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     transition: background 120ms ease, border-color 120ms ease;
 }
@@ -2725,7 +2725,7 @@ a {
         var(--color-smooai-red)
     );
     color: #fff;
-    font-size: 28px;
+    font-size: calc(28px * var(--font-scale, 1));
     font-weight: 800;
     font-family: var(--font-mono, ui-monospace, monospace);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -2739,26 +2739,26 @@ a {
 }
 
 .settings__about-name {
-    font-size: 18px;
+    font-size: calc(18px * var(--font-scale, 1));
     font-weight: 700;
     line-height: 1.1;
 }
 
 .settings__about-tagline {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     color: var(--text-muted);
     line-height: 1.3;
 }
 
 .settings__about-version {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     margin-top: 2px;
 }
 
 .settings__about-from {
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     line-height: 1.5;
     color: var(--text);
     padding: 8px 10px;
@@ -2777,7 +2777,7 @@ a {
 .settings__about-link {
     color: var(--color-smooai-orange);
     text-decoration: none;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 4px 0;
     cursor: pointer;
 }
@@ -2787,7 +2787,7 @@ a {
 }
 
 .settings__about-license {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     color: var(--text-muted);
     line-height: 1.4;
     margin-top: 6px;
@@ -2797,7 +2797,7 @@ a {
 .settings__roadmap {
     margin: 0;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.5;
     font-style: italic;
 }
@@ -2869,7 +2869,7 @@ a {
 .suggestion__name {
     font-weight: 700;
     color: var(--foreground);
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2882,7 +2882,7 @@ a {
 
 .suggestion__handle {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2892,7 +2892,7 @@ a {
 .suggestion__bio {
     margin: 4px 0 0;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.4;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -2903,7 +2903,7 @@ a {
 .suggestion__follow {
     flex: 0 0 auto;
     min-width: 80px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
 }
 
@@ -2939,7 +2939,7 @@ a {
 }
 
 .engagement__title {
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
     flex: 1 1 auto;
@@ -2971,7 +2971,7 @@ a {
     color: var(--muted-foreground);
     text-align: center;
     padding: 40px 16px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .engagement__error {
@@ -3032,7 +3032,7 @@ a {
 .actor-row__name {
     font-weight: 600;
     color: var(--foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3040,7 +3040,7 @@ a {
 
 .actor-row__handle {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3062,7 +3062,7 @@ a {
     padding: 2px 4px;
     margin: 0;
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     border-radius: 4px;
@@ -3110,7 +3110,7 @@ a {
 }
 
 .thread__title {
-    font-size: 15px;
+    font-size: calc(15px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
     flex: 1 1 auto;
@@ -3141,7 +3141,7 @@ a {
     color: var(--muted-foreground);
     text-align: center;
     padding: 30px 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .thread__error {
@@ -3199,7 +3199,7 @@ a {
 .thread__placeholder {
     color: var(--muted-foreground);
     font-style: italic;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 10px;
     border: 1px dashed var(--border);
     border-radius: var(--radius-sm);
@@ -3213,7 +3213,7 @@ a {
 
 .thread__continue {
     color: var(--color-smooai-orange);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-weight: 600;
     padding: 6px 10px;
     margin-top: 6px;
@@ -3332,7 +3332,7 @@ a {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .profile__add-column:hover {
@@ -3401,13 +3401,13 @@ a {
 }
 
 .profile__name {
-    font-size: 20px;
+    font-size: calc(20px * var(--font-scale, 1));
     font-weight: 700;
     color: var(--foreground);
 }
 
 .profile__followed-by {
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -3419,14 +3419,14 @@ a {
 
 .profile__handle {
     color: var(--muted-foreground);
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
 }
 
 .profile__bio {
     padding: 12px 16px 0;
     margin: 0;
     color: var(--foreground);
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -3459,7 +3459,7 @@ a {
 
 .profile__mutuals-text {
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.3;
 }
 
@@ -3478,7 +3478,7 @@ a {
 .profile__stat {
     display: flex;
     gap: 6px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 .profile__stat-num {
@@ -3501,7 +3501,7 @@ a {
     color: var(--muted-foreground);
     text-align: center;
     padding: 30px 12px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     font-style: italic;
 }
 
@@ -3514,7 +3514,7 @@ a {
 
 .profile__pinned-chip {
     display: inline-block;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.4px;
@@ -3527,7 +3527,7 @@ a {
     color: var(--muted-foreground);
     text-align: center;
     padding: 60px 16px;
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
 }
 
 .profile__error {
@@ -3583,7 +3583,7 @@ a {
 }
 
 .login__title {
-    font-size: 22px;
+    font-size: calc(22px * var(--font-scale, 1));
     font-weight: 700;
     margin-bottom: 4px;
     background: var(--gradient-brand);
@@ -3611,7 +3611,7 @@ a {
 .login__sub {
     color: var(--muted-foreground);
     margin-bottom: 24px;
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
 }
 
 /* Layout glue only — the field treatment comes from shared `.input`. */
@@ -3626,13 +3626,13 @@ a {
 
 .login__error {
     color: var(--color-smooai-red);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     margin-top: 12px;
 }
 
 .login__pending {
     color: var(--muted-foreground);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     margin-top: 12px;
 }
 
@@ -3646,7 +3646,7 @@ a {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--muted-foreground);
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.45;
     text-align: left;
     cursor: pointer;
@@ -3697,7 +3697,7 @@ a {
 
 .search__hint {
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 16px 8px;
     text-align: center;
     line-height: 1.5;
@@ -3705,7 +3705,7 @@ a {
 
 .search__error {
     color: var(--color-smooai-red);
-    font-size: 13px;
+    font-size: calc(13px * var(--font-scale, 1));
     padding: 12px 8px;
 }
 
@@ -3722,7 +3722,7 @@ a {
 .search__section-title {
     margin: 0 0 6px;
     padding: 0 4px;
-    font-size: 11px;
+    font-size: calc(11px * var(--font-scale, 1));
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -3765,7 +3765,7 @@ a {
 }
 
 .search__actor-name {
-    font-size: 14px;
+    font-size: calc(14px * var(--font-scale, 1));
     font-weight: 600;
     color: var(--text);
     white-space: nowrap;
@@ -3774,7 +3774,7 @@ a {
 }
 
 .search__actor-handle {
-    font-size: 12px;
+    font-size: calc(12px * var(--font-scale, 1));
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -4040,7 +4040,7 @@ a {
 
 .messages__time {
     margin-top: 2px;
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     opacity: 0.7;
     text-align: right;
 }
@@ -4198,7 +4198,7 @@ a {
     border-radius: 6px;
     background: var(--color-surface-alt);
     color: var(--color-fg-muted);
-    font-size: 10px;
+    font-size: calc(10px * var(--font-scale, 1));
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }

@@ -402,10 +402,19 @@ pub fn set_actor_followers(actor_did: &str, count: i64) -> Result<()> {
     })
 }
 
-/// Top of the active (non-archived, not currently snoozed) list,
-/// sorted by directness DESC, ts DESC. `limit` caps the read for the
-/// UI; pass a generous value like 200 — the index covers it cheaply.
+/// Top of the active list (offset 0). Wrapper around
+/// [`list_active_paged`] for callers that don't need pagination.
 pub fn list_active(limit: i64) -> Result<Vec<InboxItem>> {
+    list_active_paged(limit, 0)
+}
+
+/// Offset-paged read of the active list — for scroll-load on the
+/// Inbox column. Sort order matches [`list_active`]; offset/limit
+/// translate directly to SQL LIMIT/OFFSET. Stable within a poll
+/// cycle (sort columns are all server-derived); a row that the
+/// next ingestion mutates can shift offset semantics, but for triage
+/// UX where the user is actively scrolling that's fine.
+pub fn list_active_paged(limit: i64, offset: i64) -> Result<Vec<InboxItem>> {
     with_db(|conn| {
         let now = Utc::now().to_rfc3339();
         let mut stmt = conn.prepare(
@@ -428,10 +437,10 @@ pub fn list_active(limit: i64) -> Result<Vec<InboxItem>> {
                      actor_follower_count DESC,
                      directness DESC,
                      ts DESC
-            LIMIT ?2
+            LIMIT ?2 OFFSET ?3
             "#,
         )?;
-        let rows = stmt.query_map(params![now, limit], row_to_item)?;
+        let rows = stmt.query_map(params![now, limit, offset], row_to_item)?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
