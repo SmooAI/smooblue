@@ -129,6 +129,94 @@ jobs:
 
                   exit 0
 
+    # Linux counterpart of the macOS smoke-launch above. Builds the
+    # release binary (same one cargo-deb packages into the .deb) and
+    # boots it under Xvfb so WebKit-GTK can create its windows
+    # headlessly. Catches the class of bug that bit pearl
+    # th-bce4fb's pipeline: a dep cfg'd to macOS-only that crashes
+    # the Linux compile (parking_lot in inbox.rs). `cargo test
+    # (ubuntu-latest)` DID catch it but the Release PR's CI summary
+    # made the failure easy to miss — having a dedicated smoke job
+    # makes the regression louder + ALSO covers runtime issues that
+    # `cargo test` wouldn't (missing dylibs in the .deb's depends,
+    # wrong feature flags producing a broken binary, etc).
+    smoke-launch-linux:
+        name: Smoke — build + launch Linux binary
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Cache cargo
+              uses: Swatinem/rust-cache@v2
+              with:
+                  shared-key: smoke-launch-linux-release
+
+            # Runtime + dev libs the binary links against. The same
+            # set the cargo-deb manifest declares as the .deb's
+            # `depends` (libwebkit2gtk-4.1-0 etc) — installing the
+            # -dev variants here also covers compile-time linkage.
+            # xvfb gives us a virtual display so the GTK window can
+            # come up without a real X11 session.
+            - name: Install Linux deps + xvfb
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends \
+                      libwebkit2gtk-4.1-dev \
+                      libgtk-3-dev \
+                      libsoup-3.0-dev \
+                      libjavascriptcoregtk-4.1-dev \
+                      libayatana-appindicator3-dev \
+                      librsvg2-dev \
+                      libxdo-dev \
+                      xvfb
+
+            - name: Build release binary
+              run: cargo build --release -p smooblue-app
+
+            - name: Launch under Xvfb and verify alive after 10s
+              run: |
+                  set +e
+                  BIN="target/release/smooblue-app"
+                  if [[ ! -x "$BIN" ]]; then
+                      echo "::error::cargo build didn't produce $BIN"
+                      exit 1
+                  fi
+
+                  # xvfb-run sets up a virtual X display before
+                  # invoking the binary. -a auto-picks a free
+                  # display number; --server-args silences server
+                  # stderr that would otherwise drown the app log.
+                  SMOOBLUE_DEMO=1 RUST_BACKTRACE=full \
+                      xvfb-run -a --server-args="-screen 0 1280x800x24" \
+                      "$BIN" > /tmp/smooblue.out 2>&1 &
+                  PID=$!
+                  echo "▸ launched PID $PID"
+
+                  # WebKit-GTK init on a cold runner is slower than
+                  # AppKit; give it 15s rather than the macOS 10s.
+                  sleep 15
+
+                  # `kill -0` on the xvfb-run wrapper checks the
+                  # wrapper, not the app. Look for the actual
+                  # binary in the process tree.
+                  if ! pgrep -f "target/release/smooblue-app" > /dev/null; then
+                      echo "::error::Smooblue exited within 15s of launch"
+                      echo "--- combined output ---"
+                      cat /tmp/smooblue.out || true
+                      exit 1
+                  fi
+
+                  echo "✓ Smooblue still alive after 15s on Linux"
+
+                  pkill -TERM -f "target/release/smooblue-app" 2>/dev/null || true
+                  sleep 2
+                  pkill -KILL -f "target/release/smooblue-app" 2>/dev/null || true
+
+                  exit 0
+
     # Real Bluesky integration tests — runs nightly, not on every PR, so
     # api.bsky.app rate-limits don't gate development.
     real-bluesky:
