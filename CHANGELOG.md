@@ -1,5 +1,70 @@
 # Changelog
 
+## 1.11.0
+
+### Minor Changes
+
+- [`9196554`](https://github.com/SmooAI/smooblue/commit/91965547d6926a76a149bbe7ab81dcdb7c0d0b7e) Thanks [@brentrager](https://github.com/brentrager)! - **Inbox follower-count tiebreak** (pearl th-bce4fb). Within the same hour bucket, items now sort by the actor's follower count first, then by directness. Across hour boundaries the directness + recency dominance stays intact, so a celebrity's old mention can't lift past a fresh direct reply — followers only matter for items arriving in the same time slot.
+
+  New ORDER BY for the Inbox column:
+
+  ```
+  ORDER BY ts_bucket DESC,
+           actor_follower_count DESC,
+           directness DESC,
+           ts DESC
+  ```
+
+  `ts_bucket` is `epoch_seconds / 3600` (hour granularity), stored at insert time as an INTEGER column rather than computed via SQLite's `strftime` so the index is stable and the bucketing rule lives in one Rust function (`inbox::ts_bucket_for`). Schema migration v2 adds `actor_follower_count` + `ts_bucket` columns (default 0, backfilled on next ingestion cycle) and replaces the active-list index with the new composite.
+
+  Profile enrichment: ingestion task now collects distinct actor DIDs each cycle and batch-fetches their profiles via new `AtClient::get_profiles` (lexicon-spec'd at 25 actors per call; helper splits oversized inputs into chunks). Follower counts then go to `inbox::set_actor_followers(did, count)`, which UPDATEs every row authored by that actor — so a celebrity's follower bump lifts ALL their inbox rows, not just the latest.
+
+  The UPSERT path uses `MAX(actor_follower_count, excluded.actor_follower_count)` so a transient profile-fetch failure (which writes 0) can't silently downgrade a real cached value — protection against a re-ingest with stale data clobbering correct enrichment.
+
+  Idempotent + stable: same inputs → same order; new arrivals don't reorder existing items because each row's bucket is fixed at insert time.
+
+- [`24a929e`](https://github.com/SmooAI/smooblue/commit/24a929ec238e983775b60a046b2caa075ef90d20) Thanks [@brentrager](https://github.com/brentrager)! - **Inbox — Phase A foundation** (pearl th-e17045). New triage column lives in the deck (`ColumnKind::Inbox`, rail button between Messages and the divider). Phase A ships the schema + persistence + render skeleton; Phase B (next release) wires ingestion so the column actually populates.
+
+  What's in Phase A:
+
+  - **`smooblue_app::inbox` module** — types, persistence, scoring. Backed by SQLite via `rusqlite` (bundled, no system dep) at `directories::data_dir/smooblue/inbox.db` with WAL journaling.
+  - **Schema** with `device_id` + `synced_at` columns from day 1 so a future smoo.ai sync layer drops in without migration. Two indexes: `inbox_active_idx` (directness DESC, ts DESC, WHERE archived = 0) for the column read; `inbox_unsynced_idx` (WHERE synced_at IS NULL) for the future sync push set.
+  - **Directness scoring**: Reply-to-your-reply (100) > DM (90) > Quote (70) > Direct reply (60) > Mention (30). Age decay (1pt per 12h, capped at 40). Unread bump (+20) so unread floats within band.
+  - **CRUD API**: `upsert`, `list_active`, `set_read`, `set_archived`, `set_snoozed`, `unread_count`, `get`. UPSERT semantics on the insert so re-ingestion is naturally idempotent + preserves local triage state (read/archived/snoozed) when upstream payloads refresh.
+  - **Column render** with `InboxRow` component — avatar, actor, source chip (reply/mention/quote/DM), preview, age, unread dot. Click routes to ThreadFocus (posts) or MessagesFocus (DMs). Read rows dim.
+
+  Empty for now (no ingestion path yet). 4 new unit tests over schema migration + UPSERT round-trip + directness math.
+
+- [`33a77d5`](https://github.com/SmooAI/smooblue/commit/33a77d56ddf926b9c01aba4153444a95e1906ef4) Thanks [@brentrager](https://github.com/brentrager)! - **Inbox — Phase B ingestion** (pearl th-e17045). The Inbox column now actually populates. Background tokio task polls `listNotifications` (replies / mentions / quotes) + `listConvos` (DMs from someone other than you) every 30s and UPSERTs into the SQLite store. The Inbox column's 15s read poll picks up new rows automatically.
+
+  Mapping:
+
+  - `notification.reason = "reply"` → `InboxSource::DirectReply`
+  - `notification.reason = "mention"` → `InboxSource::Mention`
+  - `notification.reason = "quote"` → `InboxSource::Quote`
+  - `convo.last_message` where the sender isn't you → `InboxSource::Dm`
+  - Likes / reposts / follows / starterpack-joined are filtered out (noise for triage)
+
+  Stable `item_id` keys (`notif:{reason}:{cid}:{ts}` for posts, `dm:{convo_id}:{message_id}` for DMs) make re-polling idempotent — same notification on the next cycle just refreshes display fields via UPSERT, never duplicates the row or clobbers local triage state.
+
+  **Race-fix bonus**: applied three fixes the adversarial-review pass caught on MessagesSheet (the DM thread view shipped earlier):
+
+  1. **P1 — convo-switch race**: switching from convo A to B while A's `chat_get_messages` was still in flight could land A's messages on B's view. Added a stale-result guard that drops A's response if `focus` has since moved to B.
+  2. **P2 — perpetual poll wakeup**: the 10s polling loop used `continue` when focus was None, keeping the wakeup live forever even with the sheet closed. Replaced with a conditional bump — still sleeps every 10s but no-ops when closed.
+  3. **P2 — load-older race**: two near-simultaneous scroll events could both pass the `loading_older.read()` gate before either set it, then both fire `chat_get_messages` and stack duplicate older pages. Replaced naive read+set with `with_mut` atomic check-and-set.
+
+  Phase C (triage actions + quick-reply) next.
+
+- [`c6def58`](https://github.com/SmooAI/smooblue/commit/c6def58ac49b3866b1980502f9936c49618e83d6) Thanks [@brentrager](https://github.com/brentrager)! - **Inbox — Phase C triage actions** (pearl th-e17045). Three actions per row, visible on hover (Stripe-Inbox style), backed by the SQLite triage state shipped in Phases A/B:
+
+  - **Archive** (X icon) — `inbox::set_archived(true)` + optimistic local hide. Row disappears immediately; next 15s column poll confirms persisted state from disk.
+  - **Snooze** (Clock icon) — dropdown with 1h / 4h / Tomorrow / Monday. `inbox::set_snoozed(Some(when))`; row hides until the snooze elapses, then the column query's `WHERE snoozed_until IS NULL OR snoozed_until <= now()` re-surfaces it.
+  - **Reply** (MessageQuote icon) — DMs expand an inline textarea + Send button (calls `chat_send_message`); posts open the existing ThreadSheet for full-fidelity composing (facets / images / quote — losing those for inline reply would be a regression).
+
+  Row click marks the item read (`inbox::set_read(true)`) + opens ThreadFocus or MessagesFocus depending on source.
+
+  **Adversarial-review P2 fix bundled**: `inbox::with_db` no longer silently downgrades to `:memory:` on disk-open failure. The OnceLock now holds `Option<Connection>`; if the open fails, the slot stays empty and subsequent calls retry (transient permission glitches self-heal). The CRUD methods propagate the error to the UI as a real failure rather than letting triage actions silently land in a throwaway DB.
+
 ## 1.10.0
 
 ### Minor Changes
