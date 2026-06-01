@@ -1072,17 +1072,20 @@ async fn fetch_page(
             .map_err(|e| e.to_string()),
         ColumnKind::Inbox => {
             // Inbox doesn't hit the network here — it reads from the
-            // local SQLite store. Ingestion (Phase B) is the side
-            // that polls the AppView / chat service. cargo-isolated
-            // tokio task wraps the blocking SQLite call so the
-            // render thread doesn't stall on a busy WAL writer.
+            // local SQLite store. Ingestion (inbox_ingest.rs) is the
+            // side that polls the AppView / chat service. 500-item
+            // cap covers the active-triage UX even for accounts that
+            // have backfilled a lot (older items eventually fall off
+            // the bottom as bucket-DESC sort favors freshness).
+            // Cursor-based scroll-load on the column itself is
+            // tracked as pearl th-f5d4f4.
             let _ = client; // silence unused-variable when this arm is the only one to compile
-            tokio::task::spawn_blocking(|| crate::inbox::list_active(200))
+            tokio::task::spawn_blocking(|| crate::inbox::list_active(500))
                 .await
                 .map_err(|e| format!("inbox list task panicked: {e}"))?
                 .map(|items| Page {
                     data: ColumnData::Inbox(items),
-                    cursor: None, // no server-side pagination — DB-backed
+                    cursor: None,
                 })
                 .map_err(|e| e.to_string())
         }

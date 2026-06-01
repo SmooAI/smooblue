@@ -41,10 +41,20 @@ use std::time::Duration;
 /// Poll cadence — matches bsky.app's own Notifications refresh rate.
 const INGEST_INTERVAL_SECS: u64 = 30;
 
-/// Notifications per page. The first 50 covers the typical "what's
-/// happened in the last hour" window; if a user is incredibly active
-/// older items get picked up next tick.
-const NOTIFICATION_PAGE_LIMIT: u32 = 50;
+/// Notifications per page. 100 is the lexicon max per call; we then
+/// follow the cursor up to [`MAX_INGESTION_PAGES`] times so a busy
+/// account with lots of likes/reposts doesn't push real replies off
+/// the end of page 1. A user reported their reply-from-an-hour-ago
+/// never made it into the inbox because the first 50 items were
+/// dominated by likes — bumping the per-page + chasing the cursor
+/// fixes that without bloating each tick's HTTP cost meaningfully
+/// (3 paginated GETs vs 1).
+const NOTIFICATION_PAGE_LIMIT: u32 = 100;
+
+/// Max notification pages to follow per cycle. 3 × 100 = 300 items
+/// is enough that even an account averaging 10 notifications/minute
+/// catches every reply/mention/quote in a 30-min poll cycle.
+const MAX_INGESTION_PAGES: usize = 3;
 
 /// Convo pages per ingestion — same cadence as DMs column poll.
 const CONVO_PAGE_LIMIT: u32 = 50;
@@ -247,34 +257,55 @@ async fn run_cycle(session: Signal<Option<Session>>) {
     let mut actor_dids_to_enrich: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
-    // ─── Notifications ────────────────────────────────────────
-    match client
-        .list_notifications(None, NOTIFICATION_PAGE_LIMIT)
-        .await
-    {
-        Ok(resp) => {
-            let total = resp.notifications.len();
-            let mut ingested = 0usize;
-            let mut skipped = 0usize;
-            for n in &resp.notifications {
-                let Some(item) = notification_to_item(n) else {
-                    skipped += 1;
-                    continue;
-                };
-                actor_dids_to_enrich.insert(item.actor_did.clone());
-                let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
-                match upsert_result {
-                    Ok(Ok(())) => ingested += 1,
-                    Ok(Err(e)) => eprintln!("[inbox_ingest] notif upsert failed: {e}"),
-                    Err(e) => eprintln!("[inbox_ingest] notif blocking task panicked: {e}"),
-                }
-            }
-            eprintln!(
-                "[inbox_ingest] notifications: ingested={ingested} skipped={skipped} total={total}"
-            );
+    // ─── Notifications (paginated up to MAX_INGESTION_PAGES) ──
+    let mut cursor: Option<String> = None;
+    let mut total_seen = 0usize;
+    let mut total_ingested = 0usize;
+    let mut total_skipped = 0usize;
+    let mut pages_fetched = 0usize;
+    loop {
+        if pages_fetched >= MAX_INGESTION_PAGES {
+            break;
         }
-        Err(e) => eprintln!("[inbox_ingest] listNotifications failed: {e}"),
+        let resp = match client
+            .list_notifications(cursor.as_deref(), NOTIFICATION_PAGE_LIMIT)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[inbox_ingest] listNotifications page {pages_fetched} failed: {e}");
+                break;
+            }
+        };
+        pages_fetched += 1;
+        let page_total = resp.notifications.len();
+        if page_total == 0 {
+            break;
+        }
+        total_seen += page_total;
+        for n in &resp.notifications {
+            let Some(item) = notification_to_item(n) else {
+                total_skipped += 1;
+                continue;
+            };
+            actor_dids_to_enrich.insert(item.actor_did.clone());
+            let upsert_result = tokio::task::spawn_blocking(move || inbox::upsert(&item)).await;
+            match upsert_result {
+                Ok(Ok(())) => total_ingested += 1,
+                Ok(Err(e)) => eprintln!("[inbox_ingest] notif upsert failed: {e}"),
+                Err(e) => eprintln!("[inbox_ingest] notif blocking task panicked: {e}"),
+            }
+        }
+        // No cursor means we've reached the end of the user's
+        // notification history — bail before another GET.
+        cursor = match resp.cursor {
+            Some(c) => Some(c),
+            None => break,
+        };
     }
+    eprintln!(
+        "[inbox_ingest] notifications: pages={pages_fetched} ingested={total_ingested} skipped={total_skipped} total={total_seen}"
+    );
 
     // ─── Convos (DMs) ────────────────────────────────────────
     match client.chat_list_convos(None, CONVO_PAGE_LIMIT).await {
