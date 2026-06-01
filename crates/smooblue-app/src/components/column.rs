@@ -280,21 +280,24 @@ pub fn Column(spec: ColumnSpec) -> Element {
         }
     });
 
-    // "Load more" click handler. Skips entirely for non-paginated
+    // Trigger-load-more callback. Single source of truth — both the
+    // visible "Load more" button (onclick) AND the infinite-scroll
+    // onscroll handler call this. Skips entirely for non-paginated
     // column kinds (Notifications, Suggestions) and when:
     //   - a fetch is already in flight
     //   - the server told us there's no more (at_end)
     //   - we'd push the column over MAX_POSTS_PER_COLUMN
+    //   - the saved cursor is empty
     //
-    // Auto-trigger on scroll-near-bottom is a follow-up — Dioxus
-    // 0.6's ScrollData doesn't expose scroll position, so we'd need
-    // a JS-eval'd IntersectionObserver. Button works today.
+    // use_callback wraps the closure as `Callback<()>` which is
+    // Copy + Clone — so we can drop it into onclick AND the scroll
+    // handler without the dance of cloning a non-Clone FnMut.
     let kind_for_more = spec_kind.clone();
-    let load_more = move |_| {
+    let trigger_load_more = use_callback(move |_: ()| {
         if !is_paginated(&kind_for_more) {
             return;
         }
-        if *loading_more.read() || *at_end.read() {
+        if *loading_more.peek() || *at_end.peek() {
             return;
         }
         // Cap-guard: refuse rather than evict.
@@ -338,6 +341,47 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 }
             }
             loading_more.set(false);
+        });
+    });
+    let load_more = move |_| trigger_load_more.call(());
+
+    // Infinite-scroll trigger. Onscroll fires on every wheel tick, so
+    // we gate with `scroll_check_pending` to ensure only ONE async
+    // measurement is in flight at a time. The measurement reads the
+    // column body's scroll geometry via document::eval and, if we're
+    // within 600px of the bottom, fires the same callback the visible
+    // button does. The button still renders as a fallback for the
+    // rare case where eval is unavailable or the user wants explicit
+    // control.
+    let mut scroll_check_pending = use_signal(|| false);
+    let kind_for_scroll = spec_kind.clone();
+    let body_selector = format!("[data-column-body=\"{}\"]", spec_id);
+    let on_body_scroll = move |_evt: Event<ScrollData>| {
+        if *scroll_check_pending.peek() || *loading_more.peek() || *at_end.peek() {
+            return;
+        }
+        if !is_paginated(&kind_for_scroll) {
+            return;
+        }
+        let sel = body_selector.clone();
+        scroll_check_pending.set(true);
+        spawn(async move {
+            let mut eval = dioxus::document::eval(&format!(
+                r#"
+                const el = document.querySelector({sel});
+                if (!el) {{ dioxus.send(-1); }}
+                else {{ dioxus.send(el.scrollHeight - el.scrollTop - el.clientHeight); }}
+                "#,
+                sel = serde_json::to_string(&sel).unwrap_or_else(|_| "\"\"".to_string()),
+            ));
+            let dist: f64 = eval.recv().await.unwrap_or(-1.0);
+            scroll_check_pending.set(false);
+            // 600px sentinel: roughly two viewport heights of room so
+            // a fast-scroll burst pre-warms the next page before the
+            // user actually hits the end-of-feed indicator.
+            if (0.0..600.0).contains(&dist) {
+                trigger_load_more.call(());
+            }
         });
     };
     // Whether to render the "Load more" button (only on paginated
@@ -416,7 +460,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
                     }
                 }
             }
-            div { class: "deck-column__body",
+            div {
+                class: "deck-column__body",
+                // Unique selector for the document::eval scroll-geometry
+                // probe — column id is already namespaced by spec.id, so
+                // it's safe to query via attribute selector.
+                "data-column-body": "{spec.id}",
+                onscroll: on_body_scroll,
                 match (&*data.read(), &*error.read(), *loading.read()) {
                     (_, _, true) if data.read().is_empty() => rsx! { div { class: "deck-column__loading", "Loading…" } },
                     (data, _, _) if data.is_empty() => rsx! { div { class: "deck-column__empty", "Nothing here yet." } },

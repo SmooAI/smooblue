@@ -249,7 +249,13 @@ pub fn DeckShell() -> Element {
                         return;
                     }
                     "0" => {
-                        apply_zoom_for_key(1.0);
+                        // ⌘0 = "reset to defaults" for the whole a11y
+                        // surface, not just font_scale. The Settings
+                        // "Reset to defaults" button does the same
+                        // — keep these two paths writing the SAME
+                        // value (UiPrefs::default()) so the keyboard
+                        // shortcut can't drift from the visible UI.
+                        ui_prefs.set(crate::persistence::UiPrefs::default());
                         evt.prevent_default();
                         return;
                     }

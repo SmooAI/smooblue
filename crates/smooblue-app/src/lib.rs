@@ -186,6 +186,17 @@ pub fn App() -> Element {
 
     let session = use_context::<Signal<Option<smooblue_oauth::Session>>>();
 
+    // Inbox ingestion task. Polls listNotifications + listConvos every
+    // 30s, classifies + upserts into the inbox SQLite store so the
+    // Inbox column has triage rows to read. Spawned ONCE at App-mount
+    // and lives the lifetime of the process. Re-evaluates session
+    // freshness internally via fresh_client so OAuth-token rotation
+    // is transparent. v1.11-v1.14 shipped the ingester but forgot to
+    // call this — silent empty-inbox until now (pearl: filed below).
+    use_hook(move || {
+        crate::inbox_ingest::spawn_ingestion_task(session);
+    });
+
     rsx! {
         style { "{STYLES}" }
         script { "{INLINE_VIDEO_AUTOPAUSE_JS}" }
