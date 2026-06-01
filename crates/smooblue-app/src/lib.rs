@@ -116,6 +116,32 @@ pub fn App() -> Element {
     // incident can't land on main.
     use_hook(file_promise::install_on_main_window);
 
+    // Accessibility — font_scale + column_width. Loaded once from
+    // disk; mutated by Cmd+= / Cmd+- / Cmd+0, Cmd+wheel, and the
+    // Settings sliders. Applied via document.documentElement.style
+    // (zoom: scale; --column-width: Npx) using document::eval so
+    // every column + sheet picks up the change without a re-render.
+    // Pearl th-459511.
+    let ui_prefs = use_context_provider(|| Signal::new(crate::persistence::load_ui_prefs()));
+    use_effect(move || {
+        let prefs = ui_prefs.read().clone();
+        let js = format!(
+            r#"
+            const html = document.documentElement;
+            html.style.zoom = "{}";
+            html.style.setProperty("--column-width", "{}px");
+            "#,
+            prefs.font_scale, prefs.column_width_px,
+        );
+        let _ = dioxus::document::eval(&js);
+        // Persist on every change. File write is cheap and
+        // settings only change on user action — no debounce needed.
+        spawn(async move {
+            let _ = tokio::task::spawn_blocking(move || crate::persistence::save_ui_prefs(&prefs))
+                .await;
+        });
+    });
+
     // Queue of resolved file-promise drops waiting to be picked up by
     // compose. ComposeSheet drains this on every render; if the sheet
     // isn't open when a path arrives, the path stays queued AND we

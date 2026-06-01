@@ -211,17 +211,83 @@ pub fn DeckShell() -> Element {
     let theme = use_context::<Signal<ThemeMode>>();
     let theme_attr = theme.read().as_attr();
 
+    // Browser-style zoom: ⌘= / ⌘+ zoom in, ⌘- zoom out, ⌘0 reset.
+    // Caught BEFORE the keyboard chord dispatcher so the user's
+    // muscle memory wins over any future j/k chord that happens to
+    // collide. Pearl th-459511. Same step size as Chrome (10%).
+    let mut ui_prefs = use_context::<Signal<crate::persistence::UiPrefs>>();
+    const ZOOM_STEP: f32 = 0.1;
+    const ZOOM_MIN: f32 = 0.5;
+    const ZOOM_MAX: f32 = 3.0;
+    let apply_zoom = move |new_scale: f32| {
+        let clamped = new_scale.clamp(ZOOM_MIN, ZOOM_MAX);
+        ui_prefs.with_mut(|p| p.font_scale = clamped);
+    };
+    let mut apply_zoom_for_key = apply_zoom;
+
     let onkeydown = move |evt: KeyboardEvent| {
-        // Modifier state for combos (Cmd-K, Ctrl-d, etc.)
         let modifiers = evt.modifiers();
-        // Dispatch. If the handler consumed the key, prevent_default
-        // so the browser doesn't ALSO scroll the page on arrow keys
-        // / steal the keystroke for find-in-page (Cmd-K shadowed
-        // browser shortcuts, etc.).
         let key = evt.key();
+        let cmd = modifiers.meta() || modifiers.ctrl();
+        // Zoom shortcuts. Match the actual characters the OS produces
+        // for shifted-equals on US/international keyboards: both
+        // Character("+") (no-shift on some layouts) and Character("=")
+        // (with-shift treated as +) count. ⌘0 (zero) resets.
+        if cmd {
+            if let Key::Character(s) = &key {
+                match s.as_str() {
+                    "+" | "=" => {
+                        let cur = ui_prefs.peek().font_scale;
+                        apply_zoom_for_key(cur + ZOOM_STEP);
+                        evt.prevent_default();
+                        return;
+                    }
+                    "-" | "_" => {
+                        let cur = ui_prefs.peek().font_scale;
+                        apply_zoom_for_key(cur - ZOOM_STEP);
+                        evt.prevent_default();
+                        return;
+                    }
+                    "0" => {
+                        apply_zoom_for_key(1.0);
+                        evt.prevent_default();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         if keyboard::dispatch(&mut key_ctx, &key, modifiers) {
             evt.prevent_default();
         }
+    };
+
+    // Cmd + scroll-wheel zoom — matches Chrome/Safari/Firefox UX.
+    // Hooked on the deck-shell root via onwheel. Modifier check so
+    // a normal scroll-up still scrolls a column. Wry exposes
+    // WheelEvent.deltaY through Dioxus 0.6 as f64 (positive = down).
+    let mut apply_zoom_for_wheel = apply_zoom;
+    let on_wheel = move |evt: WheelEvent| {
+        let modifiers = evt.modifiers();
+        if !(modifiers.meta() || modifiers.ctrl()) {
+            return;
+        }
+        evt.prevent_default();
+        // delta_y() returns ScrollDelta; negative Y = scroll up = zoom in.
+        // Use the sign only so the zoom feels predictable regardless of
+        // trackpad-vs-mouse delta magnitude (mouse wheels report 100,
+        // trackpads report ~3).
+        let dy = match evt.delta() {
+            dioxus_elements::geometry::WheelDelta::Pixels(p) => p.y,
+            dioxus_elements::geometry::WheelDelta::Lines(l) => l.y,
+            dioxus_elements::geometry::WheelDelta::Pages(p) => p.y,
+        };
+        if dy == 0.0 {
+            return;
+        }
+        let cur = ui_prefs.peek().font_scale;
+        let step = if dy < 0.0 { ZOOM_STEP } else { -ZOOM_STEP };
+        apply_zoom_for_wheel(cur + step);
     };
 
     // Window-level image drop: anywhere on the deck shell, drop an
@@ -271,6 +337,7 @@ pub fn DeckShell() -> Element {
             tabindex: "0",
             "data-theme": "{theme_attr}",
             onkeydown: onkeydown,
+            onwheel: on_wheel,
             ondragover: on_window_dragover,
             ondrop: on_window_drop,
             Sidebar { search_open, saved_feeds_open, settings_open }

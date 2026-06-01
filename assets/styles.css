@@ -110,11 +110,13 @@ a {
  *  Single column
  * =========================================================== */
 .deck-column {
-    /* 320 px feels right after the rail-style PostCard revert:
-     * narrow enough to fit more columns side-by-side, wide enough
-     * that text doesn't wrap awkwardly next to the 36 px avatar
-     * rail. Was 350 originally. */
-    flex: 0 0 320px;
+    /* 320 px default after the rail-style PostCard revert (narrow
+     * enough to fit more columns side-by-side, wide enough that
+     * text doesn't wrap awkwardly next to the 36 px avatar rail).
+     * Pulled through --column-width so the a11y settings + drag-
+     * to-resize can override it without recompiling. Pearl
+     * th-459511. */
+    flex: 0 0 var(--column-width, 320px);
     display: flex;
     flex-direction: column;
     background: var(--card);
@@ -4067,6 +4069,52 @@ a {
 
 .messages__send {
     flex: 0 0 auto;
+}
+
+/* ===========================================================
+ *  ACCESSIBILITY CONTROLS (Settings → Appearance)
+ *
+ *  Text-size + column-width sliders. Wired to UiPrefs signal in
+ *  App — change applies instantly via document::eval setting
+ *  document.documentElement.style.zoom + --column-width. Pearl
+ *  th-459511.
+ * =========================================================== */
+.a11y__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+
+.a11y__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.a11y__label {
+    flex: 0 0 110px;
+    font-size: var(--font-size-sm);
+    color: var(--color-fg);
+}
+
+.a11y__slider {
+    flex: 1 1 auto;
+    accent-color: var(--color-brand);
+}
+
+.a11y__value {
+    flex: 0 0 56px;
+    text-align: right;
+    color: var(--color-fg-muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.a11y__hint {
+    color: var(--color-fg-muted);
+    font-size: var(--font-size-xs);
+    margin-left: 110px;
 }
 
 /* ===========================================================

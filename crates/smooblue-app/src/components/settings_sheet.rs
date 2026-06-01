@@ -91,6 +91,7 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                     section { class: "settings__section",
                         h3 { class: "settings__section-title", "Appearance" }
                         ThemePicker {}
+                        AccessibilityControls {}
                     }
 
                     // ── Multi-account switcher ─────────────────────
@@ -519,6 +520,57 @@ fn ThemePicker() -> Element {
                 },
                 onclick: set_light,
                 "Light"
+            }
+        }
+    }
+}
+
+/// Accessibility controls — text size + column width. Both apply
+/// instantly via the `use_effect` in `App` that watches the
+/// `UiPrefs` signal. Saved to disk on every change. Pearl th-459511.
+#[component]
+fn AccessibilityControls() -> Element {
+    let mut prefs = use_context::<Signal<crate::persistence::UiPrefs>>();
+    let scale = prefs.read().font_scale;
+    let width = prefs.read().column_width_px;
+    rsx! {
+        div { class: "a11y__group",
+            div { class: "a11y__row",
+                label { class: "a11y__label", "Text size" }
+                input {
+                    class: "a11y__slider",
+                    r#type: "range",
+                    min: "0.5",
+                    max: "3.0",
+                    step: "0.05",
+                    value: "{scale}",
+                    oninput: move |e| {
+                        if let Ok(v) = e.value().parse::<f32>() {
+                            prefs.with_mut(|p| p.font_scale = v.clamp(0.5, 3.0));
+                        }
+                    },
+                }
+                span { class: "a11y__value", "{(scale * 100.0).round() as i32}%" }
+            }
+            div { class: "a11y__hint",
+                "⌘= zoom in · ⌘- zoom out · ⌘0 reset · ⌘+scroll wheel"
+            }
+            div { class: "a11y__row",
+                label { class: "a11y__label", "Column width" }
+                input {
+                    class: "a11y__slider",
+                    r#type: "range",
+                    min: "240",
+                    max: "640",
+                    step: "10",
+                    value: "{width}",
+                    oninput: move |e| {
+                        if let Ok(v) = e.value().parse::<u32>() {
+                            prefs.with_mut(|p| p.column_width_px = v.clamp(240, 640));
+                        }
+                    },
+                }
+                span { class: "a11y__value", "{width}px" }
             }
         }
     }

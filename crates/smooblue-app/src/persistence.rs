@@ -26,6 +26,7 @@ const LAST_HANDLE_FILE: &str = "last_handle.txt";
 const DRAFT_FILE: &str = "draft.txt";
 const THEME_FILE: &str = "theme.txt";
 const SESSION_FILE: &str = "session.json";
+const UI_PREFS_FILE: &str = "ui_prefs.json";
 
 fn config_dir() -> Option<std::path::PathBuf> {
     Some(
@@ -261,6 +262,49 @@ pub fn load_theme() -> Option<String> {
     } else {
         Some(s)
     }
+}
+
+/// User interface preferences — accessibility + layout settings that
+/// persist across launches. `font_scale` is browser-style zoom
+/// (1.0 = native; ⌘+ / ⌘- bump by FONT_STEP); applied via the CSS
+/// `zoom` property on the deck root so all text, padding, and
+/// element sizes scale together (not just rem-based font sizes).
+/// `column_width_px` overrides the default column width — for users
+/// who bumped font scale and need wider columns to keep text from
+/// wrapping awkwardly. Pearl th-459511.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UiPrefs {
+    pub font_scale: f32,
+    pub column_width_px: u32,
+}
+
+impl Default for UiPrefs {
+    fn default() -> Self {
+        Self {
+            font_scale: 1.0,
+            column_width_px: 320, // matches the default --column-width in styles.css
+        }
+    }
+}
+
+pub fn save_ui_prefs(prefs: &UiPrefs) -> Result<(), String> {
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
+        .ok_or_else(|| "no config dir".to_string())?;
+    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
+    let path = dir.config_dir().join(UI_PREFS_FILE);
+    let json = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+pub fn load_ui_prefs() -> UiPrefs {
+    let Some(dir) = directories::ProjectDirs::from("ai", "Smoo", "smooblue") else {
+        return UiPrefs::default();
+    };
+    let path = dir.config_dir().join(UI_PREFS_FILE);
+    let Ok(s) = std::fs::read_to_string(path) else {
+        return UiPrefs::default();
+    };
+    serde_json::from_str(&s).unwrap_or_default()
 }
 
 #[cfg(test)]
