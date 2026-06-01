@@ -27,7 +27,7 @@ use crate::icons;
 use crate::state::MessagesFocus;
 use dioxus::document;
 use dioxus::prelude::*;
-use smooblue_atproto::{Message, MessageInput};
+use smooblue_atproto::{ChatProfile, Message, MessageInput};
 use smooblue_oauth::Session;
 use std::time::Duration;
 
@@ -60,6 +60,10 @@ pub fn MessagesSheet() -> Element {
     let mut send_error = use_signal::<Option<String>>(|| None);
     let mut draft = use_signal(String::new);
     let mut sending = use_signal(|| false);
+    // The other-party profile (avatar / display name / handle) for
+    // the header strip. Filled on first load via chat_get_convo —
+    // its members[] includes us + the partner; we strip us out.
+    let mut partner = use_signal::<Option<ChatProfile>>(|| None);
     // Tick that bumps every POLL_SECS while the sheet is open; the
     // load effect depends on it so the poll triggers a refetch.
     let mut poll_tick = use_signal(|| 0u64);
@@ -124,6 +128,7 @@ pub fn MessagesSheet() -> Element {
                 older_cursor.set(None);
                 loading_older.set(false);
                 no_more_older.set(false);
+                partner.set(None);
                 return;
             };
             // Convo-switch race guard (adversarial-review P1): the
@@ -168,6 +173,33 @@ pub fn MessagesSheet() -> Element {
                             load_error.set(Some(e.to_string()));
                         }
                     }
+                }
+                // Partner profile lookup — once per convo open
+                // (skip if we already have it). Side-fetch via
+                // chat_get_convo whose `members` includes both
+                // parties; pick the first member whose DID != ours.
+                if partner.peek().is_none() {
+                    let convo_for_partner = convo_id.clone();
+                    let me_for_partner = session_for_load
+                        .peek()
+                        .as_ref()
+                        .map(|s| s.did.clone())
+                        .unwrap_or_default();
+                    spawn(async move {
+                        let Some(client) = fresh_client(session_for_load).await else {
+                            return;
+                        };
+                        if let Ok(resp) = client.chat_get_convo(&convo_for_partner).await {
+                            let other = resp
+                                .convo
+                                .members
+                                .into_iter()
+                                .find(|m| m.did != me_for_partner);
+                            if let Some(p) = other {
+                                partner.set(Some(p));
+                            }
+                        }
+                    });
                 }
                 // Mark-as-read in the background — also stale-guarded
                 // so we don't update_read for a convo the user left.
@@ -372,13 +404,43 @@ pub fn MessagesSheet() -> Element {
     let messages_snap = messages.read().clone();
     let load_err_snap = load_error.read().clone();
     let send_err_snap = send_error.read().clone();
+    let partner_snap = partner.read().clone();
+
+    // Pre-compute per-message group flags. A "group" is a run of
+    // consecutive messages from the same sender (within 5 min). The
+    // first row in a group gets the avatar (other-party only) + top
+    // gap; the last row in a group keeps its directional tail
+    // (border-radius asymmetry) + shows the time chip.
+    let groups = compute_groups(&messages_snap);
+
+    let header_display = partner_snap.as_ref().and_then(|p| {
+        p.display_name
+            .clone()
+            .or_else(|| Some(format!("@{}", p.handle)))
+    });
+    let header_handle = partner_snap.as_ref().map(|p| format!("@{}", p.handle));
+    let header_avatar = partner_snap.as_ref().and_then(|p| p.avatar.clone());
 
     rsx! {
         div { class: "modal__backdrop", onclick: close,
             div { class: "modal__sheet messages__sheet",
                 onclick: move |e| e.stop_propagation(),
                 div { class: "messages__head",
-                    span { class: "messages__title", "Messages" }
+                    div { class: "messages__head-avatar",
+                        if let Some(url) = header_avatar.as_ref() {
+                            img { src: "{url}", alt: "" }
+                        }
+                    }
+                    div { class: "messages__head-text",
+                        if let Some(d) = header_display.as_ref() {
+                            div { class: "messages__head-display", "{d}" }
+                        } else {
+                            div { class: "messages__head-display", "Messages" }
+                        }
+                        if let Some(h) = header_handle.as_ref() {
+                            div { class: "messages__head-handle", "{h}" }
+                        }
+                    }
                     button { class: "messages__close",
                         title: "Close (Esc)",
                         onclick: close,
@@ -402,6 +464,9 @@ pub fn MessagesSheet() -> Element {
                                 key: "{message_key(msg, i)}",
                                 msg: msg.clone(),
                                 me: me_did.clone(),
+                                first_in_group: groups[i].first,
+                                last_in_group: groups[i].last,
+                                partner_avatar: header_avatar.clone(),
                             }
                         }
                     }
@@ -429,6 +494,76 @@ pub fn MessagesSheet() -> Element {
     }
 }
 
+/// Per-message grouping flags. Computed once per render so each
+/// MessageBubble knows whether to show the avatar / round corners /
+/// time chip without doing its own neighbor-lookup.
+#[derive(Clone, Copy, Debug, Default)]
+struct GroupFlags {
+    first: bool,
+    last: bool,
+}
+
+/// Window over consecutive messages from the same sender, splitting
+/// into separate groups if the time gap exceeds [`GROUP_GAP_SECS`].
+/// Returns one GroupFlags per input message.
+fn compute_groups(msgs: &[Message]) -> Vec<GroupFlags> {
+    const GROUP_GAP_SECS: i64 = 5 * 60;
+    if msgs.is_empty() {
+        return Vec::new();
+    }
+    let sender_of = |m: &Message| -> Option<String> {
+        match m {
+            Message::Live(v) => Some(v.sender.did.clone()),
+            Message::Deleted(d) => Some(d.sender.did.clone()),
+        }
+    };
+    let ts_of = |m: &Message| -> Option<chrono::DateTime<chrono::Utc>> {
+        let s = match m {
+            Message::Live(v) => &v.sent_at,
+            Message::Deleted(d) => &d.sent_at,
+        };
+        chrono::DateTime::parse_from_rfc3339(s)
+            .ok()
+            .map(|t| t.with_timezone(&chrono::Utc))
+    };
+    let mut out = vec![GroupFlags::default(); msgs.len()];
+    for i in 0..msgs.len() {
+        let is_first = if i == 0 {
+            true
+        } else {
+            let prev_sender = sender_of(&msgs[i - 1]);
+            let cur_sender = sender_of(&msgs[i]);
+            let prev_ts = ts_of(&msgs[i - 1]);
+            let cur_ts = ts_of(&msgs[i]);
+            let sender_changed = prev_sender != cur_sender;
+            let big_gap = match (prev_ts, cur_ts) {
+                (Some(a), Some(b)) => (b - a).num_seconds() > GROUP_GAP_SECS,
+                _ => false,
+            };
+            sender_changed || big_gap
+        };
+        let is_last = if i + 1 == msgs.len() {
+            true
+        } else {
+            let cur_sender = sender_of(&msgs[i]);
+            let next_sender = sender_of(&msgs[i + 1]);
+            let cur_ts = ts_of(&msgs[i]);
+            let next_ts = ts_of(&msgs[i + 1]);
+            let sender_changes = cur_sender != next_sender;
+            let big_gap = match (cur_ts, next_ts) {
+                (Some(a), Some(b)) => (b - a).num_seconds() > GROUP_GAP_SECS,
+                _ => false,
+            };
+            sender_changes || big_gap
+        };
+        out[i] = GroupFlags {
+            first: is_first,
+            last: is_last,
+        };
+    }
+    out
+}
+
 /// Stable key for a message in the rendered list. Server message ids
 /// are globally unique within a convo; combine with the index as a
 /// belt-and-suspenders against a server quirk that might repeat ids
@@ -441,7 +576,23 @@ fn message_key(msg: &Message, idx: usize) -> String {
 }
 
 #[component]
-fn MessageBubble(msg: Message, me: String) -> Element {
+fn MessageBubble(
+    msg: Message,
+    me: String,
+    first_in_group: bool,
+    last_in_group: bool,
+    partner_avatar: Option<String>,
+) -> Element {
+    let row_class = if first_in_group && last_in_group {
+        "messages__row messages__row--first-in-group messages__row--last-in-group"
+    } else if first_in_group {
+        "messages__row messages__row--first-in-group"
+    } else if last_in_group {
+        "messages__row messages__row--last-in-group"
+    } else {
+        "messages__row"
+    };
+
     match msg {
         Message::Live(v) => {
             let is_me = v.sender.did == me;
@@ -450,22 +601,47 @@ fn MessageBubble(msg: Message, me: String) -> Element {
             } else {
                 "messages__bubble messages__bubble--other"
             };
-            // Format the timestamp as just the time (HH:MM) — the
-            // header strip groups them by day in a future polish pass.
-            let time = format_short_time(&v.sent_at);
+            // Time chip shows only on the LAST bubble in a group —
+            // chat-UX standard so the gutter doesn't fill with HH:MM
+            // when the same person sends 4 messages in a minute.
+            let time = if last_in_group {
+                format_short_time(&v.sent_at)
+            } else {
+                None
+            };
+            let time_class = if is_me {
+                "messages__time messages__time--me"
+            } else {
+                "messages__time messages__time--other"
+            };
+            // Other-party rows: show the avatar on the FIRST row of a
+            // group (so multi-message bursts don't repeat the avatar);
+            // an empty spacer on subsequent rows keeps the bubbles
+            // horizontally aligned.
             rsx! {
-                div { class: "messages__row",
-                    div { class: "{bubble_class}",
-                        div { class: "messages__text", "{v.text}" }
-                        if let Some(t) = time {
-                            div { class: "messages__time", "{t}" }
+                div { class: "{row_class}",
+                    if !is_me {
+                        if first_in_group {
+                            div { class: "messages__row-avatar",
+                                if let Some(url) = partner_avatar.as_ref() {
+                                    img { src: "{url}", alt: "" }
+                                }
+                            }
+                        } else {
+                            div { class: "messages__row-avatar-spacer" }
                         }
                     }
+                    div { class: "{bubble_class}",
+                        div { class: "messages__text", "{v.text}" }
+                    }
+                }
+                if let Some(t) = time {
+                    div { class: "{time_class}", "{t}" }
                 }
             }
         }
         Message::Deleted(_) => rsx! {
-            div { class: "messages__row",
+            div { class: "{row_class}",
                 div { class: "messages__bubble messages__bubble--deleted",
                     "(message deleted)"
                 }

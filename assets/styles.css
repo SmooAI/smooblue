@@ -3955,116 +3955,237 @@ a {
 .messages__sheet {
     display: flex;
     flex-direction: column;
-    max-height: 80vh;
-    width: min(560px, 90vw);
+    max-height: 85vh;
+    width: min(600px, 92vw);
+    background: var(--background);
 }
 
 .messages__head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--color-border);
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+}
+
+.messages__head-avatar {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--muted);
+}
+
+.messages__head-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.messages__head-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.messages__head-display {
+    font-weight: 600;
+    font-size: calc(14px * var(--font-scale, 1));
+    color: var(--foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.messages__head-handle {
+    color: var(--muted-foreground);
+    font-size: calc(12px * var(--font-scale, 1));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .messages__title {
     font-weight: 600;
+    font-size: calc(14px * var(--font-scale, 1));
+    color: var(--foreground);
 }
 
 .messages__close {
     background: transparent;
     border: none;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     cursor: pointer;
-    padding: var(--space-1);
+    padding: 6px;
+    border-radius: 6px;
+    flex: 0 0 auto;
+}
+
+.messages__close:hover {
+    background: var(--muted);
 }
 
 .messages__body {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: var(--space-3);
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
+    gap: 14px;
+    background: var(--background);
+    overflow-anchor: auto;
+}
+
+.messages__loading-older,
+.messages__history-end {
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: calc(11px * var(--font-scale, 1));
+    padding: 6px;
 }
 
 .messages__empty,
 .messages__error {
     text-align: center;
-    color: var(--color-fg-muted);
-    padding: var(--space-4);
+    color: var(--muted-foreground);
+    padding: 32px 16px;
 }
 
 .messages__error {
-    color: var(--color-error, #c53030);
+    color: var(--color-smooai-red);
 }
 
+/* Each row holds one bubble. Avatar appears only on the FIRST row
+ * in a group from the OTHER party — keeps the column clean when one
+ * person sends multiple messages in a row. */
 .messages__row {
     display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-top: -8px; /* tight stack within a group */
 }
 
-/* Width-cap on bubbles so a long message wraps comfortably without
- * stretching across the full sheet. */
+.messages__row--first-in-group {
+    margin-top: 0;
+}
+
+.messages__row-avatar {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--muted);
+    align-self: flex-end;
+}
+
+.messages__row-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Empty avatar slot so subsequent in-group bubbles align with the
+ * first. */
+.messages__row-avatar-spacer {
+    flex: 0 0 28px;
+}
+
 .messages__bubble {
-    max-width: 75%;
-    padding: var(--space-2) var(--space-3);
-    border-radius: 14px;
+    max-width: 72%;
+    padding: 8px 12px;
+    border-radius: 16px;
     line-height: 1.4;
+    font-size: calc(14px * var(--font-scale, 1));
     word-wrap: break-word;
     overflow-wrap: anywhere;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
 }
 
 .messages__bubble--me {
     margin-left: auto;
-    background: var(--color-brand);
-    color: var(--color-on-brand, white);
+    background: var(--color-smooai-orange);
+    color: white;
+    border-bottom-right-radius: 4px; /* tail on the last-in-group only */
 }
 
 .messages__bubble--other {
     margin-right: auto;
-    background: var(--color-surface-alt);
-    color: var(--color-fg);
+    background: var(--card);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+}
+
+/* Mid-group bubbles get the fully rounded shape — only the LAST
+ * bubble in a group keeps its directional tail. */
+.messages__row:not(.messages__row--last-in-group) .messages__bubble--me {
+    border-bottom-right-radius: 16px;
+}
+
+.messages__row:not(.messages__row--last-in-group) .messages__bubble--other {
+    border-bottom-left-radius: 16px;
 }
 
 .messages__bubble--deleted {
-    margin: 0 auto;
+    margin: 4px auto;
     background: transparent;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-style: italic;
-    font-size: var(--font-size-xs);
+    font-size: calc(12px * var(--font-scale, 1));
+    border: none;
+    box-shadow: none;
 }
 
 .messages__text {
     white-space: pre-wrap;
 }
 
+/* Time chip below the last bubble in each group, side-aligned. */
 .messages__time {
-    margin-top: 2px;
+    color: var(--muted-foreground);
     font-size: calc(10px * var(--font-scale, 1));
-    opacity: 0.7;
+    margin-top: 2px;
+    padding: 0 4px;
+}
+
+.messages__time--me {
     text-align: right;
+    margin-left: auto;
+}
+
+.messages__time--other {
+    text-align: left;
+    margin-right: auto;
+    padding-left: 36px;
 }
 
 .messages__send-error {
-    padding: var(--space-2) var(--space-3);
-    border-top: 1px solid var(--color-border);
-    color: var(--color-error, #c53030);
-    font-size: var(--font-size-xs);
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    color: var(--color-smooai-red);
+    font-size: calc(12px * var(--font-scale, 1));
 }
 
 .messages__compose {
     display: flex;
     align-items: flex-end;
-    gap: var(--space-2);
-    padding: var(--space-3);
-    border-top: 1px solid var(--color-border);
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
 }
 
 .messages__input {
     flex: 1 1 auto;
-    min-height: 60px;
+    min-height: 44px;
     max-height: 200px;
     resize: vertical;
+    font-size: calc(14px * var(--font-scale, 1));
 }
 
 .messages__send {
