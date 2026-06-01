@@ -31,7 +31,18 @@ impl OAuthClientConfig {
             // override at runtime via `smooai-config` (key: `bskyOauthClientId`).
             client_id: "https://smoo.ai/smooblue/client-metadata.json".to_string(),
             appview: Url::parse("https://api.bsky.app").unwrap(),
-            scopes: vec!["atproto".into(), "transition:generic".into()],
+            // `transition:chat.bsky` is what unlocks the chat.bsky.*
+            // XRPC endpoints (listConvos, sendMessage, etc) that
+            // back the Messages column + the Inbox DM source.
+            // Without it the PDS proxy returns 403 ScopeMissingError
+            // and the column shows "Failed to load". Existing sessions
+            // signed in before this list was bumped need a sign-out
+            // + sign-in to pick up the new scope on a fresh token.
+            scopes: vec![
+                "atproto".into(),
+                "transition:generic".into(),
+                "transition:chat.bsky".into(),
+            ],
             callback_timeout: Duration::from_secs(180),
         }
     }
