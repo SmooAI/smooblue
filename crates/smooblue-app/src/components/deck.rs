@@ -268,33 +268,11 @@ pub fn DeckShell() -> Element {
         }
     };
 
-    // Cmd + scroll-wheel zoom — matches Chrome/Safari/Firefox UX.
-    // Hooked on the deck-shell root via onwheel. Modifier check so
-    // a normal scroll-up still scrolls a column. Wry exposes
-    // WheelEvent.deltaY through Dioxus 0.6 as f64 (positive = down).
-    let mut apply_zoom_for_wheel = apply_zoom;
-    let on_wheel = move |evt: WheelEvent| {
-        let modifiers = evt.modifiers();
-        if !(modifiers.meta() || modifiers.ctrl()) {
-            return;
-        }
-        evt.prevent_default();
-        // delta_y() returns ScrollDelta; negative Y = scroll up = zoom in.
-        // Use the sign only so the zoom feels predictable regardless of
-        // trackpad-vs-mouse delta magnitude (mouse wheels report 100,
-        // trackpads report ~3).
-        let dy = match evt.delta() {
-            dioxus_elements::geometry::WheelDelta::Pixels(p) => p.y,
-            dioxus_elements::geometry::WheelDelta::Lines(l) => l.y,
-            dioxus_elements::geometry::WheelDelta::Pages(p) => p.y,
-        };
-        if dy == 0.0 {
-            return;
-        }
-        let cur = ui_prefs.peek().font_scale;
-        let step = if dy < 0.0 { ZOOM_STEP } else { -ZOOM_STEP };
-        apply_zoom_for_wheel(cur + step);
-    };
+    // Note: Cmd+wheel zoom was removed in v1.15.x — too easy to
+    // trigger by accident while scrolling a column with the Cmd key
+    // tap-held (focus pivot, etc), which yanked the entire UI
+    // mid-scroll. ⌘+ / ⌘- / ⌘0 keyboard shortcuts + the Settings
+    // sliders cover the same surface area without that footgun.
 
     // Window-level image drop: anywhere on the deck shell, drop an
     // image file and compose opens with it attached. Same channel as
@@ -343,7 +321,6 @@ pub fn DeckShell() -> Element {
             tabindex: "0",
             "data-theme": "{theme_attr}",
             onkeydown: onkeydown,
-            onwheel: on_wheel,
             ondragover: on_window_dragover,
             ondrop: on_window_drop,
             Sidebar { search_open, saved_feeds_open, settings_open }

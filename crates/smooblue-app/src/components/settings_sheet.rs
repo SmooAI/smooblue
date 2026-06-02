@@ -553,7 +553,7 @@ fn AccessibilityControls() -> Element {
                 span { class: "a11y__value", "{(scale * 100.0).round() as i32}%" }
             }
             div { class: "a11y__hint",
-                "⌘= zoom in · ⌘- zoom out · ⌘0 reset · ⌘+scroll wheel"
+                "⌘= zoom in · ⌘- zoom out · ⌘0 reset to defaults"
             }
             div { class: "a11y__row",
                 label { class: "a11y__label", "Column width" }
