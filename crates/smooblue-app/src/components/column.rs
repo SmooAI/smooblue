@@ -38,6 +38,14 @@ use std::time::Duration;
 /// tail; evicting under the user's scroll position would be jarring.
 pub const MAX_POSTS_PER_COLUMN: usize = 2000;
 
+/// Same idea for the Notifications column. Grouped reasons (like /
+/// repost / follow) collapse N notifications into one row, so 1000
+/// groups represents far more than 1000 raw items — easily covers the
+/// active-triage window even for accounts that get thousands of likes
+/// a day. Above this we refuse new pages, same refuse-not-evict
+/// policy as posts.
+pub const MAX_NOTIF_GROUPS_PER_COLUMN: usize = 1000;
+
 /// How many items we ask for per page. Small enough that the first
 /// page paints fast, large enough that scroll-to-bottom doesn't fire
 /// a fetch_more on every flick.
@@ -240,8 +248,39 @@ pub fn Column(spec: ColumnSpec) -> Element {
                                     MAX_POSTS_PER_COLUMN,
                                 ))
                             }
-                            // Notifications + Suggestions don't paginate
-                            // this way — top-poll replaces wholesale.
+                            // Notifications: top-poll merges new groups
+                            // at the head (and grows existing groups
+                            // with new items) so paginated scrollback
+                            // below survives the 15s refresh cycle.
+                            (
+                                ColumnData::Notifications {
+                                    groups: existing_groups,
+                                    subjects: existing_subjects,
+                                },
+                                ColumnData::Notifications {
+                                    groups: new_groups,
+                                    subjects: new_subjects,
+                                },
+                            ) => {
+                                // New subjects win on conflict — they're
+                                // fresher than anything in scrollback.
+                                let mut merged_subjects = existing_subjects;
+                                for (k, v) in new_subjects {
+                                    merged_subjects.insert(k, v);
+                                }
+                                let merged_groups = merge_top_notif_groups(
+                                    existing_groups,
+                                    new_groups,
+                                    MAX_NOTIF_GROUPS_PER_COLUMN,
+                                );
+                                ColumnData::Notifications {
+                                    groups: merged_groups,
+                                    subjects: merged_subjects,
+                                }
+                            }
+                            // Suggestions / Messages / Inbox: top-poll
+                            // replaces wholesale (single page or
+                            // local-DB read).
                             (_, other) => other,
                         };
                         data.set(merged);
@@ -301,10 +340,14 @@ pub fn Column(spec: ColumnSpec) -> Element {
             return;
         }
         // Cap-guard: refuse rather than evict.
-        if let ColumnData::Posts(items) = &*data.peek() {
-            if items.len() >= MAX_POSTS_PER_COLUMN {
-                return;
+        match &*data.peek() {
+            ColumnData::Posts(items) if items.len() >= MAX_POSTS_PER_COLUMN => return,
+            ColumnData::Notifications { groups, .. }
+                if groups.len() >= MAX_NOTIF_GROUPS_PER_COLUMN =>
+            {
+                return
             }
+            _ => {}
         }
         // Need a non-empty cursor to ask for more.
         let cursor = match next_cursor.peek().clone() {
@@ -321,14 +364,44 @@ pub fn Column(spec: ColumnSpec) -> Element {
                     // dynamically and a held read-guard during a
                     // write panics.
                     let existing_snap = data.peek().clone();
-                    if let (ColumnData::Posts(existing), ColumnData::Posts(new_page)) =
-                        (existing_snap, more.data)
-                    {
-                        data.set(ColumnData::Posts(append_bottom_page(
-                            existing,
-                            new_page,
-                            MAX_POSTS_PER_COLUMN,
-                        )));
+                    match (existing_snap, more.data) {
+                        (ColumnData::Posts(existing), ColumnData::Posts(new_page)) => {
+                            data.set(ColumnData::Posts(append_bottom_page(
+                                existing,
+                                new_page,
+                                MAX_POSTS_PER_COLUMN,
+                            )));
+                        }
+                        (
+                            ColumnData::Notifications {
+                                groups: existing_groups,
+                                subjects: existing_subjects,
+                            },
+                            ColumnData::Notifications {
+                                groups: new_groups,
+                                subjects: new_subjects,
+                            },
+                        ) => {
+                            // Merge newly-hydrated subjects (post views
+                            // referenced by the older notifications).
+                            // Existing wins on conflict — top-poll just
+                            // ran and is fresher than anything we'd
+                            // pull from a backfill page.
+                            let mut merged_subjects = existing_subjects;
+                            for (k, v) in new_subjects {
+                                merged_subjects.entry(k).or_insert(v);
+                            }
+                            let merged_groups = append_bottom_notif_groups(
+                                existing_groups,
+                                new_groups,
+                                MAX_NOTIF_GROUPS_PER_COLUMN,
+                            );
+                            data.set(ColumnData::Notifications {
+                                groups: merged_groups,
+                                subjects: merged_subjects,
+                            });
+                        }
+                        _ => {}
                     }
                     if more.cursor.is_none() {
                         at_end.set(true);
@@ -384,6 +457,31 @@ pub fn Column(spec: ColumnSpec) -> Element {
             }
         });
     };
+    // "Mark all as read" callback — wired into the header's Inbox-only
+    // action. Updates the DB then re-reads list_active so the column
+    // reflects the change immediately (the 15s poll would otherwise
+    // be the source of truth for stale UI). For non-Inbox columns
+    // we pass None; the header just doesn't render the button.
+    let mark_all_inbox_read: Option<Callback<()>> = if matches!(spec_kind, ColumnKind::Inbox) {
+        let mut data_for_mark = data;
+        Some(use_callback(move |_: ()| {
+            spawn(async move {
+                let res = tokio::task::spawn_blocking(|| {
+                    crate::inbox::mark_all_read()?;
+                    crate::inbox::list_active(500)
+                })
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("blocking task panicked: {e}")));
+                match res {
+                    Ok(items) => data_for_mark.set(ColumnData::Inbox(items)),
+                    Err(err) => tracing::warn!(error = %err, "inbox: mark-all-read failed"),
+                }
+            });
+        }))
+    } else {
+        None
+    };
+
     // Whether to render the "Load more" button (only on paginated
     // kinds, only when not at-end, only when not capped).
     let kind_for_button_check = spec_kind.clone();
@@ -391,8 +489,19 @@ pub fn Column(spec: ColumnSpec) -> Element {
         && !*at_end.read()
         && match &*data.read() {
             ColumnData::Posts(items) => !items.is_empty() && items.len() < MAX_POSTS_PER_COLUMN,
+            ColumnData::Notifications { groups, .. } => {
+                !groups.is_empty() && groups.len() < MAX_NOTIF_GROUPS_PER_COLUMN
+            }
             _ => false,
         };
+
+    // Whether the column has hit its scrollback cap (refuse-rather-
+    // than-evict; the bottom indicator switches to a cap message).
+    let at_cap = match &*data.read() {
+        ColumnData::Posts(items) => items.len() >= MAX_POSTS_PER_COLUMN,
+        ColumnData::Notifications { groups, .. } => groups.len() >= MAX_NOTIF_GROUPS_PER_COLUMN,
+        _ => false,
+    };
 
     // Visual state derived from the shared drag context — used to dim
     // the column being dragged and highlight the drop target.
@@ -430,6 +539,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 title: spec.title.clone(),
                 kind: spec.kind.clone(),
                 filter_open,
+                mark_all_read: mark_all_inbox_read,
             }
             // Filter input — slides in below the header when the
             // funnel button on the header is clicked or when the
@@ -551,13 +661,15 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 // more to fetch, "Loading more…" while in flight,
                 // "End of feed" once we've exhausted the cursor,
                 // "Scrollback cap reached" if we hit the per-column
-                // memory ceiling.
-                if matches!(&*data.read(), ColumnData::Posts(items) if !items.is_empty()) {
+                // memory ceiling. Renders for any paginated kind with
+                // visible items — Posts (Home/Search/Feed/List/Author)
+                // and Notifications.
+                if is_paginated(&spec.kind) && !data.read().is_empty() {
                     if *loading_more.read() {
                         div { class: "deck-column__more", "Loading more…" }
-                    } else if matches!(&*data.read(), ColumnData::Posts(items) if items.len() >= MAX_POSTS_PER_COLUMN) {
+                    } else if at_cap {
                         div { class: "deck-column__more deck-column__more--cap",
-                            "Scrollback cap reached ({MAX_POSTS_PER_COLUMN} posts). Refresh to reset."
+                            "Scrollback cap reached. Refresh to reset."
                         }
                     } else if *at_end.read() {
                         div { class: "deck-column__more", "End of feed." }
@@ -574,12 +686,11 @@ pub fn Column(spec: ColumnSpec) -> Element {
 }
 
 /// True when the column supports cursor-based fetch_more on scroll.
-/// Notifications and Suggestions have their own pagination semantics
-/// (notifications are time-bucketed and small; suggestions are a
-/// single page of personalized actors). Messages is paginated by
-/// the chat lexicon but we cap at the first 50 convos for v1 — most
-/// inboxes fit, and Bluesky doesn't yet support search-within-DMs
-/// that would justify scrolling further.
+/// Suggestions has its own pagination semantics (single page of
+/// personalized actors). Messages is paginated by the chat lexicon
+/// but we cap at the first 50 convos for v1 — most inboxes fit, and
+/// Bluesky doesn't yet support search-within-DMs that would justify
+/// scrolling further.
 fn is_paginated(kind: &ColumnKind) -> bool {
     matches!(
         kind,
@@ -588,6 +699,7 @@ fn is_paginated(kind: &ColumnKind) -> bool {
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
             | ColumnKind::List { .. }
+            | ColumnKind::Notifications
     )
 }
 
@@ -690,6 +802,10 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
     let mut reply_draft = use_signal(String::new);
     let mut sending = use_signal(|| false);
     let mut send_error = use_signal::<Option<String>>(|| None);
+    // Optimistic read: mark-as-read button flips this immediately so
+    // the row's --read styling applies before the 15s poll re-reads
+    // from SQLite.
+    let mut read_now = use_signal(|| item.read);
 
     if *hidden.read() {
         return rsx! { Fragment {} };
@@ -833,8 +949,24 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         });
     };
 
+    let id_for_mark_read = item.item_id.clone();
+    let on_mark_read = move |e: MouseEvent| {
+        e.stop_propagation();
+        read_now.set(true);
+        let id = id_for_mark_read.clone();
+        spawn(async move {
+            let res = tokio::task::spawn_blocking(move || crate::inbox::set_read(&id, true))
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("blocking task panicked: {e}")));
+            if let Err(err) = res {
+                tracing::warn!(error = %err, "inbox: mark-as-read failed");
+            }
+        });
+    };
+
     let age = relative_age(item.ts);
-    let row_class = if item.read {
+    let is_read = *read_now.read();
+    let row_class = if is_read {
         "inbox-row inbox-row--read"
     } else {
         "inbox-row"
@@ -875,6 +1007,14 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         onclick: on_snooze_toggle,
                         icons::Clock { size: icons::Size::Sm }
                     }
+                    if !is_read {
+                        button {
+                            class: "inbox-row__action-btn",
+                            title: "Mark as read",
+                            onclick: on_mark_read,
+                            icons::Check { size: icons::Size::Sm }
+                        }
+                    }
                     button {
                         class: "inbox-row__action-btn",
                         title: "Archive",
@@ -882,7 +1022,7 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         icons::Archive { size: icons::Size::Sm }
                     }
                 }
-                if !item.read {
+                if !is_read {
                     span { class: "inbox-row__unread-dot", title: "Unread" }
                 }
             }
@@ -1037,17 +1177,16 @@ async fn fetch_page(
             })
             .map_err(|e| e.to_string()),
         ColumnKind::Notifications => {
-            // Notifications don't paginate via fetch_more — top-poll
-            // only. We don't expose a cursor.
             // 30 per fetch is the sweet spot: enough to give the user
             // a meaningful window, small enough that the cascade of
             // get_posts hydration + grouping + per-card clones stays
             // snappy. 50 was visibly laggy on busy accounts.
-            let items = client
+            let resp = client
                 .list_notifications(cur, 30)
                 .await
-                .map(|r| r.notifications)
                 .map_err(|e| e.to_string())?;
+            let next_cursor = resp.cursor;
+            let items = resp.notifications;
             // Hydrate subject posts in one batched call — but only
             // the URIs we don't already have cached from a prior poll.
             // For a notification-heavy user this can drop the per-
@@ -1077,7 +1216,7 @@ async fn fetch_page(
                     groups,
                     subjects: subjects_cache.clone(),
                 },
-                cursor: None,
+                cursor: next_cursor,
             })
         }
         ColumnKind::Search { query } => client
@@ -1162,6 +1301,67 @@ fn merge_top_page(existing: Vec<FeedItem>, fresh: Vec<FeedItem>, cap: usize) -> 
     new_items
 }
 
+/// Merge a fresh top-of-feed Notifications page into the existing
+/// group list. New unique groups go at the head (preserving fresh
+/// order). For new groups whose key matches an existing one (same
+/// reason+subject — e.g. another like on the same post), the new
+/// items are spliced into the existing group's `items` at the front
+/// (newest-first), with the existing group keeping its position so
+/// the user's scroll doesn't jump. Cap from the head if the merged
+/// result is too long.
+fn merge_top_notif_groups(
+    existing: Vec<NotificationGroup>,
+    fresh: Vec<NotificationGroup>,
+    cap: usize,
+) -> Vec<NotificationGroup> {
+    use std::collections::{HashMap, HashSet};
+
+    fn key(g: &NotificationGroup) -> (String, Option<String>) {
+        (g.reason.clone(), g.reason_subject.clone())
+    }
+
+    // Index existing groups by key for O(1) merge lookup.
+    let mut existing: Vec<NotificationGroup> = existing;
+    let mut existing_idx: HashMap<(String, Option<String>), usize> = existing
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (key(g), i))
+        .collect();
+
+    // Split fresh into "merge into existing" vs "new groups to prepend."
+    let mut to_prepend: Vec<NotificationGroup> = Vec::new();
+    for fresh_group in fresh {
+        let k = key(&fresh_group);
+        if let Some(&idx) = existing_idx.get(&k) {
+            // Merge: prepend fresh items (newest-first), dedupe by uri+cid.
+            let mut seen: HashSet<(String, String)> = existing[idx]
+                .items
+                .iter()
+                .map(|n| (n.uri.clone(), n.cid.clone()))
+                .collect();
+            let mut new_items: Vec<Notification> = fresh_group
+                .items
+                .into_iter()
+                .filter(|n| seen.insert((n.uri.clone(), n.cid.clone())))
+                .collect();
+            new_items.extend(std::mem::take(&mut existing[idx].items));
+            existing[idx].items = new_items;
+            if fresh_group.latest_at.is_some() {
+                existing[idx].latest_at = fresh_group.latest_at;
+            }
+        } else {
+            to_prepend.push(fresh_group);
+        }
+    }
+    // Prepend the new groups; existing index becomes stale but unused.
+    let _ = &mut existing_idx;
+    to_prepend.extend(existing);
+    if to_prepend.len() > cap {
+        to_prepend.truncate(cap);
+    }
+    to_prepend
+}
+
 /// Append a bottom-of-feed page (older items) to the existing list.
 /// De-dupe by key. Respects the cap — drops any items from `more`
 /// that would push us over the limit (refuse-rather-than-evict so a
@@ -1181,6 +1381,58 @@ fn append_bottom_page(
         .take(room)
     {
         existing.push(item);
+    }
+    existing
+}
+
+/// Append an older-notifications page to the existing list of groups.
+/// For each new group, if a group with the same `(reason, reason_subject)`
+/// key already exists, merge the new (older) items into that existing
+/// group — keeps "20 people liked your post" rolled into one card
+/// even when half the likers came in on a later page. Otherwise
+/// append at the bottom. Respects the cap (refuse-rather-than-evict).
+fn append_bottom_notif_groups(
+    mut existing: Vec<NotificationGroup>,
+    more: Vec<NotificationGroup>,
+    cap: usize,
+) -> Vec<NotificationGroup> {
+    use std::collections::HashSet;
+
+    fn group_key_pair(g: &NotificationGroup) -> (String, Option<String>) {
+        (g.reason.clone(), g.reason_subject.clone())
+    }
+
+    // Index existing groups by their dedup key for O(1) lookup.
+    let mut existing_idx: std::collections::HashMap<(String, Option<String>), usize> =
+        std::collections::HashMap::new();
+    for (i, g) in existing.iter().enumerate() {
+        existing_idx.insert(group_key_pair(g), i);
+    }
+
+    for new_group in more {
+        let key = group_key_pair(&new_group);
+        if let Some(&idx) = existing_idx.get(&key) {
+            // Merge new items into the existing group, deduping by
+            // the item's own uri+cid (a single notification can show
+            // up on adjacent pages if a new one arrived between our
+            // top-poll and the backfill fetch).
+            let mut seen: HashSet<(String, String)> = existing[idx]
+                .items
+                .iter()
+                .map(|n| (n.uri.clone(), n.cid.clone()))
+                .collect();
+            for item in new_group.items {
+                let id = (item.uri.clone(), item.cid.clone());
+                if seen.insert(id) {
+                    existing[idx].items.push(item);
+                }
+            }
+        } else if existing.len() < cap {
+            existing_idx.insert(key, existing.len());
+            existing.push(new_group);
+        }
+        // else: silently drop — the cap message in the column footer
+        // tells the user why no more groups are coming in.
     }
     existing
 }
@@ -1289,7 +1541,15 @@ fn subject_for<'a>(
 }
 
 #[component]
-fn ColumnHeader(id: String, title: String, kind: ColumnKind, filter_open: Signal<bool>) -> Element {
+fn ColumnHeader(
+    id: String,
+    title: String,
+    kind: ColumnKind,
+    filter_open: Signal<bool>,
+    /// Inbox-only: invoked by the "Mark all as read" header button.
+    /// `None` for other kinds — the button just doesn't render.
+    mark_all_read: Option<Callback<()>>,
+) -> Element {
     let mut cols = use_context::<Signal<Vec<crate::state::ColumnSpec>>>();
     let mut drag_ctx = use_context::<Signal<ColumnDrag>>();
     let id_for_close = id.clone();
@@ -1366,6 +1626,13 @@ fn ColumnHeader(id: String, title: String, kind: ColumnKind, filter_open: Signal
                 }
             }
             span { class: "deck-column__title", "{title}" }
+            if let Some(cb) = mark_all_read {
+                button { class: "deck-column__action",
+                    title: "Mark all as read",
+                    onclick: move |_| cb.call(()),
+                    icons::CheckCheck { size: icons::Size::Sm }
+                }
+            }
             button { class: "deck-column__action",
                 title: if *filter_open.read() { "Hide filter" } else { "Filter this column" },
                 onclick: toggle_filter,
@@ -1507,10 +1774,111 @@ mod tests {
         assert!(is_paginated(&ColumnKind::List {
             uri: "at://x".into()
         }));
-        // Notifications + Suggestions deliberately excluded — they
-        // have their own pagination semantics.
-        assert!(!is_paginated(&ColumnKind::Notifications));
+        // Notifications now paginates (infinite-scroll wired 2026-06-03).
+        assert!(is_paginated(&ColumnKind::Notifications));
+        // Suggestions stays single-page (server returns a single
+        // personalized actor set — there's no "older suggestions").
         assert!(!is_paginated(&ColumnKind::Suggestions));
+    }
+
+    fn mk_notif(reason: &str, subject: Option<&str>, uri: &str) -> Notification {
+        Notification {
+            uri: uri.into(),
+            cid: format!("cid:{uri}"),
+            author: PostAuthor {
+                did: format!("did:plc:{uri}"),
+                handle: format!("{uri}.test"),
+                display_name: None,
+                avatar: None,
+            },
+            reason: reason.into(),
+            reason_subject: subject.map(String::from),
+            indexed_at: None,
+            is_read: false,
+        }
+    }
+
+    fn mk_group(reason: &str, subject: Option<&str>, uris: &[&str]) -> NotificationGroup {
+        NotificationGroup {
+            reason: reason.into(),
+            reason_subject: subject.map(String::from),
+            items: uris.iter().map(|u| mk_notif(reason, subject, u)).collect(),
+            latest_at: None,
+        }
+    }
+
+    #[test]
+    fn merge_top_notif_prepends_new_groups_keeps_existing_tail() {
+        let existing = vec![
+            mk_group("like", Some("at://post/a"), &["like1", "like2"]),
+            mk_group("reply", None, &["reply1"]),
+        ];
+        let fresh = vec![
+            mk_group("follow", None, &["fnew1"]),
+            mk_group("like", Some("at://post/a"), &["like3"]), // merges into existing
+        ];
+        let merged = merge_top_notif_groups(existing, fresh, 100);
+        // Order: new follow group first, then the (still-positioned)
+        // existing like group with merged items, then the reply group.
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].reason, "follow");
+        assert_eq!(merged[1].reason, "like");
+        assert_eq!(merged[1].items.len(), 3); // like3 prepended + like1, like2
+        assert_eq!(merged[1].items[0].uri, "like3");
+        assert_eq!(merged[2].reason, "reply");
+    }
+
+    #[test]
+    fn merge_top_notif_dedupes_items_by_uri_cid() {
+        let existing = vec![mk_group("like", Some("at://post/a"), &["like1"])];
+        let fresh = vec![mk_group("like", Some("at://post/a"), &["like1", "like2"])];
+        let merged = merge_top_notif_groups(existing, fresh, 100);
+        assert_eq!(merged.len(), 1);
+        // like1 from fresh deduped; only like2 added.
+        let uris: Vec<&str> = merged[0].items.iter().map(|n| n.uri.as_str()).collect();
+        assert_eq!(uris, vec!["like2", "like1"]);
+    }
+
+    #[test]
+    fn append_bottom_notif_merges_same_key_groups_in_place() {
+        let existing = vec![
+            mk_group("reply", None, &["reply_top"]),
+            mk_group("like", Some("at://post/a"), &["like1"]),
+        ];
+        let more = vec![
+            mk_group("like", Some("at://post/a"), &["like_older"]),
+            mk_group("repost", Some("at://post/b"), &["repost_older"]),
+        ];
+        let out = append_bottom_notif_groups(existing, more, 100);
+        // Same-key group stays in place; new key appended at bottom.
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].reason, "reply");
+        assert_eq!(out[1].reason, "like");
+        assert_eq!(out[1].items.len(), 2);
+        assert_eq!(out[2].reason, "repost");
+    }
+
+    #[test]
+    fn append_bottom_notif_refuses_to_evict_past_cap() {
+        let existing: Vec<NotificationGroup> = (0..3)
+            .map(|i| mk_group("follow", None, &[&format!("f{i}")]))
+            .collect();
+        // 3 unique-key groups + cap = 3 → no new groups should append.
+        let existing: Vec<NotificationGroup> = existing
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut g)| {
+                g.reason_subject = Some(format!("subj{i}"));
+                g
+            })
+            .collect();
+        let more = vec![
+            mk_group("like", Some("at://post/x"), &["x1"]),
+            mk_group("like", Some("at://post/y"), &["y1"]),
+        ];
+        let out = append_bottom_notif_groups(existing, more, 3);
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|g| g.reason == "follow"));
     }
 
     #[test]

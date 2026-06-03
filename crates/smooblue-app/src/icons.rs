@@ -287,6 +287,18 @@ fn relative_time_from(rfc3339: &str) -> Option<String> {
 }
 
 #[component]
+pub fn Check(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdCheck } }
+}
+
+#[component]
+pub fn CheckCheck(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdCheckCheck } }
+}
+
+#[component]
 pub fn Play(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdPlay } }

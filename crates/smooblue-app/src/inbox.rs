@@ -523,6 +523,30 @@ pub fn set_read(item_id: &str, read: bool) -> Result<()> {
     })
 }
 
+/// Mark every currently-active item (unread, non-archived, not
+/// currently snoozed) as read in one statement. Returns the number
+/// of rows updated so the caller can show feedback. Used by the
+/// column header "Mark all as read" action — the per-row set_read
+/// path is for click-to-open and the explicit per-row button.
+pub fn mark_all_read() -> Result<usize> {
+    with_db(|conn| {
+        // snoozed_until is stored as RFC3339 to match list_active's
+        // string-compare against Utc::now().to_rfc3339() — using
+        // datetime('now') here would mix format families and produce
+        // wrong-comparison hits on snoozed items.
+        let now = Utc::now().to_rfc3339();
+        let n = conn.execute(
+            "UPDATE inbox_items \
+             SET read = 1, synced_at = NULL \
+             WHERE read = 0 \
+               AND archived = 0 \
+               AND (snoozed_until IS NULL OR snoozed_until <= ?1)",
+            params![now],
+        )?;
+        Ok(n)
+    })
+}
+
 /// Archive (or unarchive) an item — hides from the active list.
 pub fn set_archived(item_id: &str, archived: bool) -> Result<()> {
     with_db(|conn| {
