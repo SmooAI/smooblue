@@ -4439,6 +4439,19 @@ a {
     color: var(--color-fg);
 }
 
+/* "Already read" state for the per-row mark-as-read button. Stays
+ * rendered (so the affordance is always discoverable) but visually
+ * recedes and stops taking pointer events. */
+.inbox-row__action-btn--done {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.inbox-row__action-btn--done:hover {
+    background: transparent;
+    color: var(--color-fg-muted);
+}
+
 /* Snooze dropdown — pinned under the row's right edge. */
 .inbox-row__snooze-menu {
     position: absolute;

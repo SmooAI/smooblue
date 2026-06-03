@@ -1007,13 +1007,17 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         onclick: on_snooze_toggle,
                         icons::Clock { size: icons::Size::Sm }
                     }
-                    if !is_read {
-                        button {
-                            class: "inbox-row__action-btn",
-                            title: "Mark as read",
-                            onclick: on_mark_read,
-                            icons::Check { size: icons::Size::Sm }
-                        }
+                    // Always render so the affordance is discoverable.
+                    // Dims (--done class) once the row is read; clicking
+                    // an already-read row is a no-op via the disabled
+                    // attribute (set_read(true) on a read row would be
+                    // wasted writes + needless sync churn).
+                    button {
+                        class: if is_read { "inbox-row__action-btn inbox-row__action-btn--done" } else { "inbox-row__action-btn" },
+                        title: if is_read { "Read" } else { "Mark as read" },
+                        disabled: is_read,
+                        onclick: on_mark_read,
+                        icons::Check { size: icons::Size::Sm }
                     }
                     button {
                         class: "inbox-row__action-btn",
