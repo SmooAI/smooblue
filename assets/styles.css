@@ -320,22 +320,25 @@ a {
     flex-wrap: wrap;
     gap: 10px;
     transition: background 100ms;
-    /* Each card is its own paint + layout island. WebKit never
-     * re-invalidates the rest of the column when one card
-     * changes (contain: layout style paint). Cheap, no visible
-     * skeleton flash.
+    /* Each card is its own paint + layout island so changes don't
+     * cascade up the column.
      *
-     * NOTE: we used to set `content-visibility: auto` here too
-     * (so off-screen cards skipped rendering entirely) but on
-     * fast-scrolling feed columns that produced a brief blank-
-     * card flash as each card entered the viewport — WebKit's
-     * content-visibility paint is async, and the user-visible
-     * gap is jarring even when it's <100ms. The original
-     * "big thread flashing" issue was actually image-decode
-     * reflows (now fixed with per-image aspectRatio + the 16:9
-     * CSS fallback on single-image embeds), so we don't need
-     * content-visibility to solve it. */
+     * `content-visibility: auto` lets WebKit skip painting cards
+     * that are off-screen entirely. Without it, the 2000-row
+     * scrollback cap × rich post DOM blows past the WKWebView's
+     * GPU tile cache; at scrollback distance the cards have to
+     * re-rasterize from the DOM, producing seconds-long blank
+     * tiles (text + images both missing). We previously removed
+     * this because of a sub-100ms entry flash on fast scroll —
+     * but that's a much smaller artifact than the eviction blank,
+     * and `auto` in `contain-intrinsic-size` lets WebKit cache
+     * each card's last-measured size so the scrollbar stays
+     * accurate. 220px is the cold-start estimate (avatar+name+
+     * 2-line text+actions row); WebKit replaces it the first
+     * time a card is laid out. */
     contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
 }
 
 .post:hover {
@@ -931,11 +934,14 @@ a {
     border-bottom: 1px solid var(--border);
     transition: background 100ms;
     cursor: pointer;
-    /* Paint + layout isolation per card so changes don't cascade
-     * up the column. See .post for the long form of why we
-     * dropped `content-visibility: auto` here too (same
-     * blank-card-flash problem on fast scroll). */
+    /* Paint + layout isolation per card. content-visibility re-added
+     * to skip off-screen paint at scrollback distance — see .post
+     * for the full rationale. 140px is the cold-start estimate
+     * (head row + subject quote); WebKit replaces it after first
+     * layout via `auto`. */
     contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 140px;
 }
 
 .notif__head-row {
@@ -3890,6 +3896,10 @@ a {
     cursor: pointer;
     color: var(--color-fg);
     font: inherit;
+    /* Skip off-screen paint at scrollback distance; see .post. */
+    contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 64px;
 }
 
 .convo-row:hover {
@@ -4293,6 +4303,12 @@ a {
 .inbox-row__wrap {
     position: relative;
     border-bottom: 1px solid var(--color-border);
+    /* Skip off-screen paint at scrollback distance; see .post for
+     * full rationale. Inbox rows are short and uniform — 84px is
+     * close to actual height (avatar + 2-line caption + actions). */
+    contain: layout style paint;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 84px;
 }
 
 .inbox-row {

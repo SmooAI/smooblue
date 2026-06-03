@@ -348,7 +348,13 @@ pub fn PostCard(
                 onclick: open_profile,
                 title: "Open profile column",
                 if let Some(url) = avatar {
-                    img { loading: "lazy", decoding: "async", src: "{url}", alt: "{handle}" }
+                    // Eager: avatars are tiny and ALWAYS rendered for
+                    // every row. Lazy here means a 100-300ms blank
+                    // circle on every newly-visible card during fast
+                    // column scroll. The bytes are already in the
+                    // WebKit image cache after first paint, so eager
+                    // pays nothing on the re-scroll path.
+                    img { loading: "eager", decoding: "async", src: "{url}", alt: "{handle}" }
                 }
             }
             div { class: "post__body",

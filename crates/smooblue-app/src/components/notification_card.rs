@@ -221,7 +221,7 @@ fn AvatarStack(actors: Vec<PostAuthor>) -> Element {
                                 class: "notif__avatar-btn",
                                 title: "{a.handle}",
                                 onclick: on_click,
-                                img { loading: "lazy", decoding: "async", class: "notif__avatar-img", src: "{url}", alt: "{a.handle}" }
+                                img { loading: "eager", decoding: "async", class: "notif__avatar-img", src: "{url}", alt: "{a.handle}" }
                             }
                         }
                     } else {

@@ -268,7 +268,7 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
                     div { class: "embed__quote-head",
                         if let Some(av) = &author.avatar {
                             img {
-                                loading: "lazy",
+                                loading: "eager",
                                 decoding: "async",
                                 class: "embed__quote-avatar embed__quote-avatar--clickable",
                                 src: "{av}",
