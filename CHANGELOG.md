@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.16.1
+
+### Patch Changes
+
+- [`3e60acb`](https://github.com/SmooAI/smooblue/commit/3e60acbddbf08833fea51ce5fe40994d312fe6ec) Thanks [@brentrager](https://github.com/brentrager)! - Inbox per-row mark-as-read button is now always rendered (dims + disables itself once the row is read) instead of hiding when the row was already read. Previously the affordance disappeared the moment you marked anything, so users couldn't find it after hitting "Mark all as read" once. Tooltip also flips from "Mark as read" → "Read" to make the state explicit.
+
 ## 1.16.0
 
 ### Minor Changes
