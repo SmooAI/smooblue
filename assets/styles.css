@@ -221,8 +221,20 @@ a {
 .deck-column__body .deck-column__empty,
 .deck-column__body .deck-column__error,
 .deck-column__body .deck-column__more,
-.deck-column__body .deck-column__load-more {
+.deck-column__body .deck-column__load-more,
+.deck-column__body .deck-column__virtual-spacer {
     overflow-anchor: none;
+}
+
+/* Virtualization spacers. Held at exactly the dimensions set by the
+ * inline `style="height: Npx"` so the scrollbar geometry matches
+ * "all rows rendered" even though we only mount the visible slice +
+ * buffer. `flex: 0 0 auto` keeps the column's flex layout from
+ * trying to grow them or collapse them. */
+.deck-column__virtual-spacer {
+    flex: 0 0 auto;
+    width: 100%;
+    pointer-events: none;
 }
 
 .deck-column__empty,
@@ -321,24 +333,14 @@ a {
     gap: 10px;
     transition: background 100ms;
     /* Each card is its own paint + layout island so changes don't
-     * cascade up the column.
-     *
-     * `content-visibility: auto` lets WebKit skip painting cards
-     * that are off-screen entirely. Without it, the 2000-row
-     * scrollback cap × rich post DOM blows past the WKWebView's
-     * GPU tile cache; at scrollback distance the cards have to
-     * re-rasterize from the DOM, producing seconds-long blank
-     * tiles (text + images both missing). We previously removed
-     * this because of a sub-100ms entry flash on fast scroll —
-     * but that's a much smaller artifact than the eviction blank,
-     * and `auto` in `contain-intrinsic-size` lets WebKit cache
-     * each card's last-measured size so the scrollbar stays
-     * accurate. 220px is the cold-start estimate (avatar+name+
-     * 2-line text+actions row); WebKit replaces it the first
-     * time a card is laid out. */
+     * cascade up the column. content-visibility used to live here
+     * but the per-card paint-on-entry gap was visible during fast
+     * scroll, especially after idle. The Rust side now virtualizes
+     * the column body (only ~3 viewports of rows are mounted at a
+     * time), so we don't need content-visibility's off-screen skip
+     * to keep the GPU happy — virtualization caps both the DOM
+     * size AND the painted tile count. */
     contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 220px;
 }
 
 .post:hover {
@@ -934,14 +936,10 @@ a {
     border-bottom: 1px solid var(--border);
     transition: background 100ms;
     cursor: pointer;
-    /* Paint + layout isolation per card. content-visibility re-added
-     * to skip off-screen paint at scrollback distance — see .post
-     * for the full rationale. 140px is the cold-start estimate
-     * (head row + subject quote); WebKit replaces it after first
-     * layout via `auto`. */
+    /* Paint + layout isolation per card. content-visibility lived
+     * here briefly but virtualization (see .post) made it
+     * unnecessary. */
     contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 140px;
 }
 
 .notif__head-row {
@@ -3896,10 +3894,8 @@ a {
     cursor: pointer;
     color: var(--color-fg);
     font: inherit;
-    /* Skip off-screen paint at scrollback distance; see .post. */
+    /* Virtualized by the Rust render path — see .post. */
     contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 64px;
 }
 
 .convo-row:hover {
@@ -4303,12 +4299,8 @@ a {
 .inbox-row__wrap {
     position: relative;
     border-bottom: 1px solid var(--color-border);
-    /* Skip off-screen paint at scrollback distance; see .post for
-     * full rationale. Inbox rows are short and uniform — 84px is
-     * close to actual height (avatar + 2-line caption + actions). */
+    /* Virtualized by the Rust render path — see .post. */
     contain: layout style paint;
-    content-visibility: auto;
-    contain-intrinsic-size: auto 84px;
 }
 
 .inbox-row {

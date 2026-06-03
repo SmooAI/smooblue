@@ -418,42 +418,67 @@ pub fn Column(spec: ColumnSpec) -> Element {
     });
     let load_more = move |_| trigger_load_more.call(());
 
-    // Infinite-scroll trigger. Onscroll fires on every wheel tick, so
-    // we gate with `scroll_check_pending` to ensure only ONE async
-    // measurement is in flight at a time. The measurement reads the
-    // column body's scroll geometry via document::eval and, if we're
-    // within 600px of the bottom, fires the same callback the visible
-    // button does. The button still renders as a fallback for the
-    // rare case where eval is unavailable or the user wants explicit
-    // control.
+    // Viewport state for the virtualized render path. Updated on
+    // every scroll tick + once on mount via a document::eval round-
+    // trip. `(scroll_top, client_h, scroll_h)`. Drives both the
+    // visible-slice computation AND the infinite-scroll trigger
+    // (within-600px-of-bottom heuristic).
+    let mut viewport = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64));
     let mut scroll_check_pending = use_signal(|| false);
     let kind_for_scroll = spec_kind.clone();
     let body_selector = format!("[data-column-body=\"{}\"]", spec_id);
+    let body_selector_for_scroll = body_selector.clone();
     let on_body_scroll = move |_evt: Event<ScrollData>| {
-        if *scroll_check_pending.peek() || *loading_more.peek() || *at_end.peek() {
+        if *scroll_check_pending.peek() {
             return;
         }
-        if !is_paginated(&kind_for_scroll) {
-            return;
-        }
-        let sel = body_selector.clone();
+        let sel = body_selector_for_scroll.clone();
+        let kind = kind_for_scroll.clone();
         scroll_check_pending.set(true);
         spawn(async move {
             let mut eval = dioxus::document::eval(&format!(
                 r#"
                 const el = document.querySelector({sel});
-                if (!el) {{ dioxus.send(-1); }}
-                else {{ dioxus.send(el.scrollHeight - el.scrollTop - el.clientHeight); }}
+                if (!el) {{ dioxus.send([-1, -1, -1]); }}
+                else {{ dioxus.send([el.scrollTop, el.clientHeight, el.scrollHeight]); }}
                 "#,
                 sel = serde_json::to_string(&sel).unwrap_or_else(|_| "\"\"".to_string()),
             ));
-            let dist: f64 = eval.recv().await.unwrap_or(-1.0);
+            let vals: Vec<f64> = eval.recv().await.unwrap_or_default();
             scroll_check_pending.set(false);
-            // 600px sentinel: roughly two viewport heights of room so
-            // a fast-scroll burst pre-warms the next page before the
-            // user actually hits the end-of-feed indicator.
-            if (0.0..600.0).contains(&dist) {
-                trigger_load_more.call(());
+            if vals.len() == 3 && vals[0] >= 0.0 {
+                viewport.set((vals[0], vals[1], vals[2]));
+                // Infinite-scroll trigger: within 600px of bottom.
+                let dist = vals[2] - vals[0] - vals[1];
+                if is_paginated(&kind)
+                    && !*loading_more.peek()
+                    && !*at_end.peek()
+                    && (0.0..600.0).contains(&dist)
+                {
+                    trigger_load_more.call(());
+                }
+            }
+        });
+    };
+    // Prime the viewport signal on first mount so virtualization has
+    // a real clientHeight before the first user scroll. Without this,
+    // the initial render slices using clientHeight=0 (renders zero
+    // rows) until the user scrolls.
+    let body_selector_for_mount = body_selector.clone();
+    let on_body_mounted = move |_evt: Event<MountedData>| {
+        let sel = body_selector_for_mount.clone();
+        spawn(async move {
+            let mut eval = dioxus::document::eval(&format!(
+                r#"
+                const el = document.querySelector({sel});
+                if (!el) {{ dioxus.send([-1, -1, -1]); }}
+                else {{ dioxus.send([el.scrollTop, el.clientHeight, el.scrollHeight]); }}
+                "#,
+                sel = serde_json::to_string(&sel).unwrap_or_else(|_| "\"\"".to_string()),
+            ));
+            let vals: Vec<f64> = eval.recv().await.unwrap_or_default();
+            if vals.len() == 3 && vals[0] >= 0.0 {
+                viewport.set((vals[0], vals[1], vals[2]));
             }
         });
     };
@@ -577,6 +602,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 // it's safe to query via attribute selector.
                 "data-column-body": "{spec.id}",
                 onscroll: on_body_scroll,
+                onmounted: on_body_mounted,
                 match (&*data.read(), &*error.read(), *loading.read()) {
                     (_, _, true) if data.read().is_empty() => rsx! { div { class: "deck-column__loading", "Loading…" } },
                     (data, _, _) if data.is_empty() => rsx! { div { class: "deck-column__empty", "Nothing here yet." } },
@@ -592,8 +618,16 @@ pub fn Column(spec: ColumnSpec) -> Element {
                                 }
                             }
                         } else {
+                            let (vp_top, vp_h, _) = *viewport.read();
+                            let row_h = estimated_row_height_px(&spec.kind);
+                            let (first, last, top_spacer, bot_spacer) =
+                                virtual_range(filtered.len(), vp_top, vp_h, row_h);
+                            let slice: Vec<&FeedItem> = filtered[first..last].to_vec();
                             rsx! {
-                                for item in filtered.into_iter() {
+                                div { class: "deck-column__virtual-spacer",
+                                    style: "height: {top_spacer}px",
+                                }
+                                for item in slice.into_iter() {
                                     // Same post URI can appear twice in a
                                     // feed (e.g. two reposters surfaced it).
                                     // Disambiguate the key with the reposter
@@ -606,18 +640,33 @@ pub fn Column(spec: ColumnSpec) -> Element {
                                         reply_parent_handle: feed_item_parent_handle(item),
                                     }
                                 }
+                                div { class: "deck-column__virtual-spacer",
+                                    style: "height: {bot_spacer}px",
+                                }
                             }
                         }
                     }
-                    (ColumnData::Notifications { groups, subjects }, _, _) => rsx! {
-                        for (i, g) in groups.iter().enumerate() {
-                            NotificationCard {
-                                key: "{group_key(g, i)}",
-                                group: g.clone(),
-                                subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
+                    (ColumnData::Notifications { groups, subjects }, _, _) => {
+                        let (vp_top, vp_h, _) = *viewport.read();
+                        let row_h = estimated_row_height_px(&spec.kind);
+                        let (first, last, top_spacer, bot_spacer) =
+                            virtual_range(groups.len(), vp_top, vp_h, row_h);
+                        rsx! {
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {top_spacer}px",
+                            }
+                            for (i, g) in groups[first..last].iter().enumerate() {
+                                NotificationCard {
+                                    key: "{group_key(g, first + i)}",
+                                    group: g.clone(),
+                                    subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
+                                }
+                            }
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {bot_spacer}px",
                             }
                         }
-                    },
+                    }
                     (ColumnData::Suggestions(actors), _, _) => rsx! {
                         for a in actors.iter() {
                             crate::components::suggestion::SuggestionRow { key: "{a.did}", actor: a.clone() }
@@ -633,17 +682,39 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             .as_ref()
                             .map(|s| s.did.clone())
                             .unwrap_or_default();
+                        let (vp_top, vp_h, _) = *viewport.read();
+                        let row_h = estimated_row_height_px(&spec.kind);
+                        let (first, last, top_spacer, bot_spacer) =
+                            virtual_range(convos.len(), vp_top, vp_h, row_h);
                         rsx! {
-                            for c in convos.iter() {
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {top_spacer}px",
+                            }
+                            for c in convos[first..last].iter() {
                                 ConvoRow { key: "{c.id}", convo: c.clone(), me: me.clone() }
+                            }
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {bot_spacer}px",
                             }
                         }
                     }
-                    (ColumnData::Inbox(items), _, _) => rsx! {
-                        for it in items.iter() {
-                            InboxRow { key: "{it.item_id}", item: it.clone() }
+                    (ColumnData::Inbox(items), _, _) => {
+                        let (vp_top, vp_h, _) = *viewport.read();
+                        let row_h = estimated_row_height_px(&spec.kind);
+                        let (first, last, top_spacer, bot_spacer) =
+                            virtual_range(items.len(), vp_top, vp_h, row_h);
+                        rsx! {
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {top_spacer}px",
+                            }
+                            for it in items[first..last].iter() {
+                                InboxRow { key: "{it.item_id}", item: it.clone() }
+                            }
+                            div { class: "deck-column__virtual-spacer",
+                                style: "height: {bot_spacer}px",
+                            }
                         }
-                    },
+                    }
                     _ => rsx! {},
                 }
                 if let Some(msg) = &*error.read() {
@@ -683,6 +754,58 @@ pub fn Column(spec: ColumnSpec) -> Element {
             }
         }
     }
+}
+
+/// Per-kind estimated row height for the virtualized render path.
+/// Rows actually vary in height (a text-only post is shorter than
+/// one with an image grid + quote) but the estimate only has to be
+/// close enough for the slice window to cover the viewport with
+/// buffer. The buffer (2 viewports on each side) absorbs the drift.
+pub fn estimated_row_height_px(kind: &ColumnKind) -> f64 {
+    match kind {
+        ColumnKind::Messages => 72.0,
+        ColumnKind::Inbox => 90.0,
+        ColumnKind::Notifications => 110.0,
+        ColumnKind::Suggestions => 96.0,
+        // Posts: home / search / feed / list / author. Real height
+        // ranges ~120px (text-only) to ~500px+ (4-image grid + quote).
+        // 240 is the rough median of a logged-in user's feed.
+        _ => 240.0,
+    }
+}
+
+/// Compute the visible-slice window for the virtualized render. Returns
+/// (first_idx, last_idx, top_spacer_px, bot_spacer_px). The slice is
+/// `[first..last]` (last exclusive). Spacer divs above/below preserve
+/// the scrollbar geometry as if all `total` items were rendered.
+pub fn virtual_range(
+    total: usize,
+    scroll_top: f64,
+    client_h: f64,
+    row_h: f64,
+) -> (usize, usize, f64, f64) {
+    if total == 0 || row_h <= 0.0 {
+        return (0, 0, 0.0, 0.0);
+    }
+    // Cold-start (no viewport measurement yet): render a single
+    // viewport's worth so the user has something to look at without
+    // waiting for the post-mount eval round-trip. Without this the
+    // first paint is empty.
+    let effective_h = if client_h <= 0.0 { 800.0 } else { client_h };
+    let items_per_vp = ((effective_h / row_h).ceil() as usize).max(1);
+    // 2 viewports of buffer above + below. Enough that the user
+    // would need to scroll-flick 2x screen-height to see a blank,
+    // by which time onscroll has already updated the window.
+    let buffer_items = items_per_vp.saturating_mul(2);
+    let first_in_vp = (scroll_top.max(0.0) / row_h).floor() as usize;
+    let first = first_in_vp.saturating_sub(buffer_items);
+    let last = first_in_vp
+        .saturating_add(items_per_vp)
+        .saturating_add(buffer_items)
+        .min(total);
+    let top = first as f64 * row_h;
+    let bot = total.saturating_sub(last) as f64 * row_h;
+    (first, last, top, bot)
 }
 
 /// True when the column supports cursor-based fetch_more on scroll.
@@ -1883,6 +2006,60 @@ mod tests {
         let out = append_bottom_notif_groups(existing, more, 3);
         assert_eq!(out.len(), 3);
         assert!(out.iter().all(|g| g.reason == "follow"));
+    }
+
+    #[test]
+    fn virtual_range_empty_list_returns_empty_window() {
+        let (first, last, top, bot) = virtual_range(0, 0.0, 800.0, 240.0);
+        assert_eq!((first, last), (0, 0));
+        assert_eq!((top, bot), (0.0, 0.0));
+    }
+
+    #[test]
+    fn virtual_range_cold_viewport_renders_a_default_window() {
+        // viewport=0 (not measured yet) should fall back to a single
+        // viewport so the first paint has rows visible without waiting
+        // for the eval round-trip.
+        let (first, last, _top, _bot) = virtual_range(500, 0.0, 0.0, 240.0);
+        assert_eq!(first, 0);
+        // 800px fallback / 240px row ≈ 4 in viewport, no buffer above
+        // (we're at the top), 2vp = 8 items of buffer below → ~12 total.
+        assert!((4..=20).contains(&last), "got last={last}");
+    }
+
+    #[test]
+    fn virtual_range_at_top_of_long_list_renders_buffer_below() {
+        // scroll_top=0, 800px viewport, 240px rows, 500 items.
+        // items_per_vp = ceil(800/240) = 4
+        // first_in_vp = 0
+        // buffer = 2*4 = 8
+        // first = 0, last = 0 + 4 + 8 = 12
+        let (first, last, top, bot) = virtual_range(500, 0.0, 800.0, 240.0);
+        assert_eq!(first, 0);
+        assert_eq!(last, 12);
+        assert_eq!(top, 0.0);
+        assert_eq!(bot, (500 - 12) as f64 * 240.0);
+    }
+
+    #[test]
+    fn virtual_range_in_middle_keeps_buffer_on_both_sides() {
+        // Scroll to halfway through 500-item list: scroll_top = 250*240 = 60000.
+        let (first, last, top, _bot) = virtual_range(500, 60000.0, 800.0, 240.0);
+        // first_in_vp = 250; buffer below + viewport = 4+8 = 12;
+        // buffer above = 8 → first = 242, last = 262.
+        assert_eq!(first, 242);
+        assert_eq!(last, 262);
+        assert_eq!(top, 242.0 * 240.0);
+    }
+
+    #[test]
+    fn virtual_range_clamps_window_at_end_of_list() {
+        // Scroll to the bottom: scroll_top should clamp `last` to `total`.
+        let (first, last, _top, bot) = virtual_range(20, 4000.0, 800.0, 240.0);
+        assert!(last <= 20);
+        assert!(first <= last);
+        // No items past the end, so bottom spacer is zero.
+        assert_eq!(bot, (20 - last) as f64 * 240.0);
     }
 
     #[test]
