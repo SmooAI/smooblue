@@ -16,6 +16,15 @@ struct GetProfilesResponse {
     profiles: Vec<ActorProfile>,
 }
 
+/// Response shape for `app.bsky.actor.searchActorsTypeahead`. ActorProfile
+/// is permissive enough to parse the lighter `profileViewBasic` shape
+/// that the typeahead endpoint actually returns (all extra fields default
+/// to `None`).
+#[derive(Debug, Clone, Deserialize)]
+struct SearchActorsTypeaheadResponse {
+    actors: Vec<ActorProfile>,
+}
+
 /// Response from `com.atproto.repo.createRecord` — the URI of the new
 /// record (which callers need to later delete it for unlike/unrepost).
 #[derive(Clone, Debug, Deserialize)]
@@ -232,6 +241,27 @@ impl AtClient {
             out.extend(resp.profiles);
         }
         Ok(out)
+    }
+
+    /// `app.bsky.actor.searchActorsTypeahead` — fast actor lookup for
+    /// @mention autocomplete. Cheaper than `searchActors` (skips full
+    /// profile views, returns just `profileViewBasic`) and tuned for
+    /// incremental keystrokes. Lexicon caps `limit` at 100; we default
+    /// callers to ~8 for popover-sized result lists.
+    pub async fn search_actors_typeahead(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<ActorProfile>, AtError> {
+        let mut url = self
+            .appview
+            .join("/xrpc/app.bsky.actor.searchActorsTypeahead")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("limit", &limit.to_string());
+        let resp: SearchActorsTypeaheadResponse = self.get_json(&url).await?;
+        Ok(resp.actors)
     }
 
     /// `app.bsky.feed.getAuthorFeed` — for profile / single-author columns.

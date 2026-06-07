@@ -25,7 +25,9 @@ use crate::image_prep::{prepare_from_path, PreparedImage};
 use crate::ocr;
 use crate::state::ComposeContext;
 use dioxus::prelude::*;
-use smooblue_atproto::{AspectRatio, BlobRef, PostImage, PostVideo, ReplyRef, StrongRef};
+use smooblue_atproto::{
+    ActorProfile, AspectRatio, BlobRef, PostImage, PostVideo, ReplyRef, StrongRef,
+};
 use smooblue_oauth::Session;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,6 +53,69 @@ fn truncate_alt(s: String) -> String {
         return s;
     }
     s.chars().take(MAX_ALT_LEN).collect()
+}
+
+/// True if `c` is a valid character inside a Bluesky handle. Per the
+/// atproto handle grammar, handles are dot-separated alphanumeric
+/// labels with `-` allowed inside; that means inside a single label
+/// (which is what the user is mid-typing) the legal chars are
+/// `[a-zA-Z0-9._-]`. We accept all of those so partials like
+/// `@foo.bar.bsky.so` get recognized as one mention prefix instead
+/// of being split at the first dot.
+fn is_handle_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
+}
+
+/// Extract the active `@mention` partial from the END of the
+/// textarea's text — the heuristic for "user is mid-typing a
+/// mention." Returns `None` if the last sequence isn't a trailing
+/// `@<handle-chars>` (i.e. there's whitespace after it, or there's
+/// no `@` near the end at all). The `@` must be either at the very
+/// start of the text or preceded by whitespace, so mid-word `@`
+/// (like an email or an `at` in a sentence — though those are rare)
+/// doesn't accidentally pop the popover. Returns the partial
+/// AFTER the `@`, or `Some("")` immediately after typing `@`.
+pub fn active_mention_prefix(text: &str) -> Option<&str> {
+    let trail_handle_start = text
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| is_handle_char(*c))
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(text.len());
+    // Char immediately before the handle run must be `@`.
+    let at_pos = text[..trail_handle_start].chars().last()?;
+    if at_pos != '@' {
+        return None;
+    }
+    let at_byte = trail_handle_start - '@'.len_utf8();
+    // The `@` itself must be at-string-start or after whitespace.
+    if at_byte > 0 {
+        let prev = text[..at_byte].chars().last()?;
+        if !prev.is_whitespace() {
+            return None;
+        }
+    }
+    Some(&text[trail_handle_start..])
+}
+
+/// Replace the trailing `@<partial>` (as identified by
+/// [`active_mention_prefix`]) with `@<full_handle> `. Returns the
+/// new text; if no active mention is present, returns the input
+/// unchanged. Adds a trailing space so the user can keep typing
+/// without manually breaking out of the popover.
+pub fn replace_mention_prefix(text: &str, full_handle: &str) -> String {
+    let Some(partial) = active_mention_prefix(text) else {
+        return text.to_string();
+    };
+    // Strip the partial AND the leading `@` to get the prefix.
+    let cut = text.len() - partial.len() - '@'.len_utf8();
+    let mut out = String::with_capacity(cut + 2 + full_handle.len());
+    out.push_str(&text[..cut]);
+    out.push('@');
+    out.push_str(full_handle);
+    out.push(' ');
+    out
 }
 
 /// Hard cap on dropped video file size before we accept it. Matches
@@ -176,6 +241,67 @@ pub fn ComposeSheet() -> Element {
     // Plain text only — no images / facets / quotes on extras
     // (keeps the UI focused; the root carries the heavy payload).
     let mut thread_extras = use_signal::<Vec<String>>(Vec::new);
+
+    // @mention typeahead state. `mention_query` is the partial after
+    // the trailing `@` in the textarea (None when no active mention).
+    // The use_effect below debounces it and pushes results into
+    // `mention_results`. `mention_selected` tracks the keyboard
+    // selection within the popover.
+    let mut mention_query = use_signal::<Option<String>>(|| None);
+    let mut mention_results = use_signal::<Vec<ActorProfile>>(Vec::new);
+    let mut mention_selected = use_signal::<usize>(|| 0);
+    // Monotonic search sequence — when a later keystroke kicks off a
+    // newer search, older in-flight responses set seq and discover
+    // they're stale, dropping their results instead of clobbering
+    // newer ones.
+    let mut mention_search_seq = use_signal::<u64>(|| 0);
+
+    // Debounced typeahead. `mention_query` change → wait 150ms → if
+    // the query is still the same (no further keystrokes have
+    // superseded it), call the AppView. Failure silently empties the
+    // result list — the user can keep typing and just won't get
+    // suggestions, which is strictly better than blocking on a
+    // network blip.
+    use_effect(move || {
+        let q_snap = mention_query.read().clone();
+        let Some(q) = q_snap.filter(|s| !s.is_empty()) else {
+            mention_results.set(Vec::new());
+            mention_selected.set(0);
+            return;
+        };
+        let session_for_search = session;
+        let seq = {
+            let mut s = mention_search_seq.write();
+            *s = s.wrapping_add(1);
+            *s
+        };
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            // Bail if the user has already started a newer query.
+            if *mention_search_seq.peek() != seq {
+                return;
+            }
+            // Bail if the query no longer matches (user kept typing
+            // past the debounce window and the effect re-fired).
+            if mention_query.peek().as_deref() != Some(q.as_str()) {
+                return;
+            }
+            let Some(client) = fresh_client(session_for_search).await else {
+                return;
+            };
+            match client.search_actors_typeahead(&q, 8).await {
+                Ok(actors) => {
+                    if *mention_search_seq.peek() == seq {
+                        mention_results.set(actors);
+                        mention_selected.set(0);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "compose: actor typeahead search failed");
+                }
+            }
+        });
+    });
 
     // Debug helper: SMOOBLUE_DEBUG_ATTACH=/path/to/image.jpg injects a
     // synthetic attachment on first render so screenshots and UI
@@ -715,47 +841,173 @@ pub fn ComposeSheet() -> Element {
                         p { class: "compose__reply-text", "{q.text}" }
                     }
                 }
-                textarea {
-                    class: "{textarea_class}",
-                    placeholder: "{placeholder}",
-                    autofocus: true,
-                    value: "{text}",
-                    oninput: move |e| {
-                        let v = e.value();
-                        // Update the signal first — the textarea must
-                        // reflect the keystroke immediately.
-                        text.set(v.clone());
-                        // Move the file write OFF the render thread.
-                        // Was blocking inline before, causing visible
-                        // keystroke lag on long drafts / slower disks
-                        // (every keystroke = create_dir_all + write).
-                        // spawn_blocking is safe + cheap; a few
-                        // redundant writes per second is fine, the
-                        // file just gets overwritten with the latest.
-                        if !crate::demo::is_active() {
-                            tokio::task::spawn_blocking(move || {
-                                let _ = crate::persistence::save_draft(&v);
-                            });
+                div { class: "compose__textarea-wrap",
+                    textarea {
+                        class: "{textarea_class}",
+                        placeholder: "{placeholder}",
+                        autofocus: true,
+                        value: "{text}",
+                        oninput: move |e| {
+                            let v = e.value();
+                            // Update the signal first — the textarea must
+                            // reflect the keystroke immediately.
+                            text.set(v.clone());
+                            // Drive the @mention popover off the same
+                            // event so we don't need a second listener.
+                            mention_query.set(active_mention_prefix(&v).map(String::from));
+                            // Move the file write OFF the render thread.
+                            // Was blocking inline before, causing visible
+                            // keystroke lag on long drafts / slower disks
+                            // (every keystroke = create_dir_all + write).
+                            // spawn_blocking is safe + cheap; a few
+                            // redundant writes per second is fine, the
+                            // file just gets overwritten with the latest.
+                            if !crate::demo::is_active() {
+                                tokio::task::spawn_blocking(move || {
+                                    let _ = crate::persistence::save_draft(&v);
+                                });
+                            }
+                        },
+                        onkeydown: move |e| {
+                            let popover_open = mention_query.peek().is_some()
+                                && !mention_results.peek().is_empty();
+                            // Popover-active key handling takes precedence over
+                            // the default ⌘↵ submit so the user can pick a
+                            // suggestion mid-compose without accidentally posting.
+                            if popover_open {
+                                let key = e.key();
+                                match key {
+                                    Key::ArrowDown => {
+                                        e.prevent_default();
+                                        let len = mention_results.peek().len();
+                                        let cur = *mention_selected.peek();
+                                        mention_selected.set((cur + 1) % len.max(1));
+                                        return;
+                                    }
+                                    Key::ArrowUp => {
+                                        e.prevent_default();
+                                        let len = mention_results.peek().len().max(1);
+                                        let cur = *mention_selected.peek();
+                                        mention_selected.set((cur + len - 1) % len);
+                                        return;
+                                    }
+                                    Key::Escape => {
+                                        e.prevent_default();
+                                        mention_query.set(None);
+                                        mention_results.set(Vec::new());
+                                        return;
+                                    }
+                                    Key::Enter | Key::Tab => {
+                                        e.prevent_default();
+                                        let idx = *mention_selected.peek();
+                                        // Pull the actor out and drop the
+                                        // peek guard BEFORE any .set() —
+                                        // Dioxus tracks signal borrows
+                                        // dynamically and a held read-guard
+                                        // during a write panics.
+                                        let actor: Option<ActorProfile> = {
+                                            let snap = mention_results.peek();
+                                            snap.get(idx).cloned()
+                                        };
+                                        if let Some(actor) = actor {
+                                            let new_text = {
+                                                let snap = text.peek();
+                                                replace_mention_prefix(&snap, &actor.handle)
+                                            };
+                                            text.set(new_text.clone());
+                                            mention_query.set(None);
+                                            mention_results.set(Vec::new());
+                                            if !crate::demo::is_active() {
+                                                tokio::task::spawn_blocking(move || {
+                                                    let _ = crate::persistence::save_draft(
+                                                        &new_text,
+                                                    );
+                                                });
+                                            }
+                                        }
+                                        return;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            let cmd = e.modifiers().meta() || e.modifiers().ctrl();
+                            if cmd && e.key() == Key::Enter {
+                                do_submit_kbd();
+                                return;
+                            }
+                            // ⌘V / Ctrl+V: try to attach a clipboard image
+                            // before the textarea's native paste handler runs.
+                            // We don't prevent_default — if the clipboard has
+                            // text, the textarea's native paste still fires.
+                            // The image-attach path is no-op when the
+                            // clipboard has no image (e.g. plain-text paste).
+                            // Solves macOS's screenshot-floater drag, which
+                            // hands Wry an unresolvable NSFilePromise.
+                            if cmd && e.key().to_string() == "v" {
+                                spawn_paste_clipboard_image(attachments);
+                            }
+                        },
+                    }
+                    // @mention typeahead popover — anchored beneath the
+                    // textarea (same wrap div, position: absolute via CSS).
+                    if mention_query.read().is_some() && !mention_results.read().is_empty() {
+                        div { class: "compose__mention-popover",
+                            for (i, actor) in mention_results.read().iter().enumerate() {
+                                {
+                                    let actor = actor.clone();
+                                    let handle = actor.handle.clone();
+                                    let selected = i == *mention_selected.read();
+                                    let row_class = if selected {
+                                        "compose__mention-row compose__mention-row--selected"
+                                    } else {
+                                        "compose__mention-row"
+                                    };
+                                    rsx! {
+                                        button {
+                                            key: "{actor.did}",
+                                            class: "{row_class}",
+                                            onmousedown: move |e| {
+                                                // mousedown (not click) so we beat the
+                                                // textarea's blur-on-click which would
+                                                // close the popover before the click
+                                                // handler fires.
+                                                e.prevent_default();
+                                                let new_text = {
+                                                    let snap = text.peek();
+                                                    replace_mention_prefix(&snap, &handle)
+                                                };
+                                                text.set(new_text.clone());
+                                                mention_query.set(None);
+                                                mention_results.set(Vec::new());
+                                                if !crate::demo::is_active() {
+                                                    tokio::task::spawn_blocking(move || {
+                                                        let _ = crate::persistence::save_draft(
+                                                            &new_text,
+                                                        );
+                                                    });
+                                                }
+                                            },
+                                            div { class: "compose__mention-avatar",
+                                                if let Some(av) = actor.avatar.as_ref() {
+                                                    img { src: "{av}", alt: "{actor.handle}" }
+                                                }
+                                            }
+                                            div { class: "compose__mention-meta",
+                                                if let Some(name) = actor
+                                                    .display_name
+                                                    .as_ref()
+                                                    .filter(|s| !s.is_empty())
+                                                {
+                                                    span { class: "compose__mention-name", "{name}" }
+                                                }
+                                                span { class: "compose__mention-handle", "@{actor.handle}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
-                    },
-                    onkeydown: move |e| {
-                        let cmd = e.modifiers().meta() || e.modifiers().ctrl();
-                        if cmd && e.key() == Key::Enter {
-                            do_submit_kbd();
-                            return;
-                        }
-                        // ⌘V / Ctrl+V: try to attach a clipboard image
-                        // before the textarea's native paste handler runs.
-                        // We don't prevent_default — if the clipboard has
-                        // text, the textarea's native paste still fires.
-                        // The image-attach path is no-op when the
-                        // clipboard has no image (e.g. plain-text paste).
-                        // Solves macOS's screenshot-floater drag, which
-                        // hands Wry an unresolvable NSFilePromise.
-                        if cmd && e.key().to_string() == "v" {
-                            spawn_paste_clipboard_image(attachments);
-                        }
-                    },
+                    }
                 }
                 if has_attachments {
                     AttachmentGrid { attachments }
@@ -1253,5 +1505,73 @@ fn ProgressRing(used: usize, max: usize) -> Element {
                 transform: "rotate(-90 {cx} {cx})",
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod mention_prefix_tests {
+    use super::{active_mention_prefix, replace_mention_prefix};
+
+    #[test]
+    fn no_at_no_prefix() {
+        assert_eq!(active_mention_prefix("hello world"), None);
+        assert_eq!(active_mention_prefix(""), None);
+    }
+
+    #[test]
+    fn standalone_at_is_empty_prefix() {
+        assert_eq!(active_mention_prefix("@"), Some(""));
+        assert_eq!(active_mention_prefix("hello @"), Some(""));
+    }
+
+    #[test]
+    fn partial_handle_matches() {
+        assert_eq!(active_mention_prefix("hey @al"), Some("al"));
+        assert_eq!(active_mention_prefix("@alice.bsky"), Some("alice.bsky"));
+    }
+
+    #[test]
+    fn whitespace_after_at_kills_prefix() {
+        // Space after the handle = mention is committed, not active.
+        assert_eq!(active_mention_prefix("hey @alice "), None);
+    }
+
+    #[test]
+    fn at_must_be_at_word_start() {
+        // `@` in the middle of a word (e.g. email-style) doesn't fire.
+        assert_eq!(active_mention_prefix("foo@alice"), None);
+        assert_eq!(active_mention_prefix("email me at foo@bar"), None);
+    }
+
+    #[test]
+    fn handle_chars_include_dot_underscore_dash() {
+        assert_eq!(
+            active_mention_prefix("hi @alice.bsky-test_user"),
+            Some("alice.bsky-test_user")
+        );
+    }
+
+    #[test]
+    fn replace_appends_handle_and_space() {
+        let out = replace_mention_prefix("hey @al", "alice.bsky.social");
+        assert_eq!(out, "hey @alice.bsky.social ");
+    }
+
+    #[test]
+    fn replace_handles_at_start_of_text() {
+        let out = replace_mention_prefix("@", "alice.bsky.social");
+        assert_eq!(out, "@alice.bsky.social ");
+    }
+
+    #[test]
+    fn replace_no_active_mention_is_identity() {
+        let out = replace_mention_prefix("hey alice", "alice.bsky.social");
+        assert_eq!(out, "hey alice");
+    }
+
+    #[test]
+    fn replace_preserves_text_before_the_mention() {
+        let out = replace_mention_prefix("thanks for the heads-up\n\n@a", "alice.bsky.social");
+        assert_eq!(out, "thanks for the heads-up\n\n@alice.bsky.social ");
     }
 }
