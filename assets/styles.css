@@ -1228,6 +1228,11 @@ a {
 .compose__sheet {
     width: min(560px, 92vw);
     padding: 22px 22px 18px;
+    /* Allow the @mention popover to extend above the sheet's top
+     * edge when it pops up (textarea is near the top, so a tall
+     * suggestion list grows into the backdrop area above). Without
+     * this the upstream `.modal__sheet` overflow rule clips it. */
+    overflow: visible;
 }
 
 .compose__textarea {
@@ -1266,15 +1271,23 @@ a {
 
 .compose__mention-popover {
     position: absolute;
-    top: calc(100% + 4px);
+    /* Pop upward — anchored to the textarea's TOP edge, growing
+     * toward the dialog header. The action bar (Post button +
+     * attachments row) sits below the textarea with no spare room,
+     * so popping down clipped the popover and overlapped the
+     * action bar. Up has space above the textarea (compose title
+     * row is short) and reads naturally since the cursor + active
+     * partial are in the lower part of the textarea by the time
+     * the popover shows. */
+    bottom: calc(100% + 4px);
     left: 0;
     right: 0;
-    z-index: 5;
+    z-index: 50;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
-    max-height: 280px;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.32);
+    max-height: 240px;
     overflow-y: auto;
     padding: 4px;
     display: flex;
