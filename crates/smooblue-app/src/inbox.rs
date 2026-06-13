@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 /// Hour-bucket granularity, in seconds. The sort uses
 /// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
@@ -184,6 +184,13 @@ pub struct InboxItem {
     /// directness. 0 for actors we haven't fetched a profile for yet
     /// (collapses to a directness-only sort within their bucket).
     pub actor_follower_count: i64,
+    /// Cached *follows* count of `actor_did` — how many accounts they
+    /// follow. Paired with `actor_follower_count` to show a
+    /// followers:following ratio: a big follower count earned by
+    /// mass-following everyone (ratio ≈ 1) isn't the clout of a big
+    /// count with few follows. Display-only; not a sort dimension.
+    /// 0 until the profile fetch fills it.
+    pub actor_follows_count: i64,
     /// Epoch hour of `ts` (i.e. `ts.timestamp() / 3600`). Stored at
     /// insert time rather than computed via SQLite's strftime so the
     /// index is a stable integer and there's no parser coupling at
@@ -356,6 +363,18 @@ fn migrate(conn: &Connection) -> Result<()> {
             "#,
         )?;
     }
+    if current < 4 {
+        // v4: cache the actor's *follows* count alongside the follower
+        // count, so the UI can show a followers:following ratio. Display-
+        // only — not part of the active-list ORDER BY, so no index change.
+        // Existing rows default to 0 and get the real value on the next
+        // profile-enrichment pass.
+        conn.execute_batch(
+            r#"
+            ALTER TABLE inbox_items ADD COLUMN actor_follows_count INTEGER NOT NULL DEFAULT 0;
+            "#,
+        )?;
+    }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }
@@ -402,13 +421,13 @@ pub fn upsert(item: &InboxItem) -> Result<()> {
                 item_id, source, actor_did, actor_handle, actor_display,
                 actor_avatar, subject_uri, preview, ts, directness,
                 read, archived, snoozed_until, device_id, synced_at,
-                payload_json, actor_follower_count, ts_bucket
+                payload_json, actor_follower_count, ts_bucket, actor_follows_count
             )
             VALUES (
                 ?1, ?2, ?3, ?4, ?5,
                 ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18
+                ?16, ?17, ?18, ?19
             )
             ON CONFLICT(item_id) DO UPDATE SET
                 actor_handle         = excluded.actor_handle,
@@ -422,6 +441,7 @@ pub fn upsert(item: &InboxItem) -> Result<()> {
                 -- profile-fetch failure (which would write 0) blowing
                 -- away a real cached value.
                 actor_follower_count = MAX(actor_follower_count, excluded.actor_follower_count),
+                actor_follows_count  = MAX(actor_follows_count, excluded.actor_follows_count),
                 ts_bucket            = excluded.ts_bucket
             "#,
             params![
@@ -443,22 +463,25 @@ pub fn upsert(item: &InboxItem) -> Result<()> {
                 item.payload_json,
                 item.actor_follower_count,
                 item.ts_bucket,
+                item.actor_follows_count,
             ],
         )?;
         Ok(())
     })
 }
 
-/// Update the cached follower count for every row authored by
-/// `actor_did`. Called by the ingestion task's profile-enrichment
-/// pass after `get_profiles` returns. Idempotent + cheap — single
+/// Update the cached follower + follows counts for every row authored
+/// by `actor_did`. Called by the ingestion task's profile-enrichment
+/// pass after `get_profiles` returns. Idempotent + cheap — a single
 /// UPDATE indexed on actor_did is unaffordably fast even with thousands
-/// of rows.
-pub fn set_actor_followers(actor_did: &str, count: i64) -> Result<()> {
+/// of rows. `follows` powers the followers:following ratio in the UI.
+pub fn set_actor_clout(actor_did: &str, followers: i64, follows: i64) -> Result<()> {
     with_db(|conn| {
         conn.execute(
-            "UPDATE inbox_items SET actor_follower_count = ?1 WHERE actor_did = ?2",
-            params![count, actor_did],
+            "UPDATE inbox_items \
+             SET actor_follower_count = ?1, actor_follows_count = ?2 \
+             WHERE actor_did = ?3",
+            params![followers, follows, actor_did],
         )?;
         Ok(())
     })
@@ -484,7 +507,7 @@ pub fn list_active_paged(limit: i64, offset: i64) -> Result<Vec<InboxItem>> {
             SELECT item_id, source, actor_did, actor_handle, actor_display,
                    actor_avatar, subject_uri, preview, ts, directness,
                    read, archived, snoozed_until, device_id, synced_at,
-                   payload_json, actor_follower_count, ts_bucket
+                   payload_json, actor_follower_count, ts_bucket, actor_follows_count
             FROM inbox_items
             WHERE archived = 0
               AND (snoozed_until IS NULL OR snoozed_until <= ?1)
@@ -599,7 +622,7 @@ pub fn get(item_id: &str) -> Result<Option<InboxItem>> {
                 SELECT item_id, source, actor_did, actor_handle, actor_display,
                        actor_avatar, subject_uri, preview, ts, directness,
                        read, archived, snoozed_until, device_id, synced_at,
-                       payload_json, actor_follower_count, ts_bucket
+                       payload_json, actor_follower_count, ts_bucket, actor_follows_count
                 FROM inbox_items
                 WHERE item_id = ?1
                 "#,
@@ -669,6 +692,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<InboxItem> {
         synced_at,
         payload_json: row.get("payload_json")?,
         actor_follower_count: row.get("actor_follower_count")?,
+        actor_follows_count: row.get("actor_follows_count")?,
         ts_bucket: row.get("ts_bucket")?,
     })
 }
@@ -707,6 +731,7 @@ mod tests {
             synced_at: None,
             payload_json: "{}".into(),
             actor_follower_count: 0,
+            actor_follows_count: 0,
             ts_bucket: ts_bucket_for(now),
         };
         upsert(&item).expect("upsert");

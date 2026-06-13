@@ -4487,6 +4487,27 @@ a {
     font-size: var(--font-size-xs);
 }
 
+/* Clout badge: follower count + followers:following ratio. Pushed to
+   the right edge of the head row. The --low modifier flags likely
+   over-followers (lots of follows, ratio near parity). */
+.inbox-row__clout {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+    background: var(--color-surface-alt);
+    color: var(--color-fg);
+    font-size: calc(10px * var(--font-scale, 1));
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.inbox-row__clout--low {
+    color: var(--color-fg-muted);
+    opacity: 0.7;
+    font-style: italic;
+}
+
 .inbox-row__preview {
     margin-top: 4px;
     font-size: var(--font-size-xs);
