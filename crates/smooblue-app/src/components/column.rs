@@ -981,6 +981,11 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
     let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
     let mut messages_focus = use_context::<Signal<crate::state::MessagesFocus>>();
     let session_sig = use_context::<Signal<Option<smooblue_oauth::Session>>>();
+    // For the quick-reply "pop out" — hand the draft + reply target to
+    // the full composer so rich replies (images / facets / quote) can
+    // continue there.
+    let mut compose_ctx = use_context::<Signal<crate::state::ComposeContext>>();
+    let is_post_source = !matches!(item.source, InboxSource::Dm);
 
     // Optimistic hide: archive / snooze set this true; row disappears
     // immediately. The 15s column poll picks up the persisted state
@@ -1054,18 +1059,12 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         reply_open.set(false);
     };
 
-    let subject_for_reply_toggle = item.subject_uri.clone();
     let on_reply_toggle = move |e: MouseEvent| {
         e.stop_propagation();
-        // Posts: re-use the ThreadSheet → PostCard reply flow. An
-        // inline textarea here would lose facets / images / quote /
-        // threading; not worth the regression.
-        if !matches!(source_for_click, InboxSource::Dm) {
-            thread_focus.set(crate::state::ThreadFocus(Some(
-                subject_for_reply_toggle.clone(),
-            )));
-            return;
-        }
+        // Quick plain-text reply inline (posts and DMs alike). Rich
+        // replies — images / facets / quote — escalate via the "pop
+        // out" button (posts) which hands the draft to the full
+        // composer; row-click still opens the ThreadSheet.
         reply_open.with_mut(|v| *v = !*v);
         snooze_menu_open.set(false);
     };
@@ -1106,7 +1105,8 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         );
     };
 
-    let convo_id_for_send = item.subject_uri.clone();
+    let subject_for_send = item.subject_uri.clone();
+    let id_for_send = item.item_id.clone();
     let on_send = move |e: MouseEvent| {
         e.stop_propagation();
         let text = reply_draft.read().trim().to_string();
@@ -1115,26 +1115,101 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         }
         sending.set(true);
         send_error.set(None);
-        let convo_id = convo_id_for_send.clone();
+        let subject = subject_for_send.clone();
+        let src = source_for_click;
+        let item_id = id_for_send.clone();
         spawn(async move {
             let Some(client) = crate::auth_refresh::fresh_client(session_sig).await else {
                 send_error.set(Some("not signed in".into()));
                 sending.set(false);
                 return;
             };
-            let input = smooblue_atproto::MessageInput {
-                text,
-                facets: None,
-                embed: None,
+            let result: Result<(), String> = if matches!(src, InboxSource::Dm) {
+                let input = smooblue_atproto::MessageInput {
+                    text,
+                    facets: None,
+                    embed: None,
+                };
+                client
+                    .chat_send_message(&subject, &input)
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            } else {
+                // Plain-text reply to the subject post. We only need the
+                // post's cid; mirror the composer's root = parent = target
+                // simplification (see compose.rs / ReplyRef docs).
+                match client.get_posts(std::slice::from_ref(&subject)).await {
+                    Ok(posts) => match posts.into_iter().next() {
+                        Some(p) => {
+                            let r = smooblue_atproto::ReplyRef {
+                                root: smooblue_atproto::StrongRef {
+                                    uri: subject.clone(),
+                                    cid: p.cid.clone(),
+                                },
+                                parent: smooblue_atproto::StrongRef {
+                                    uri: subject.clone(),
+                                    cid: p.cid.clone(),
+                                },
+                            };
+                            client
+                                .create_post_full(&text, Some(&r), &[], &[], None, None)
+                                .await
+                                .map(|_| ())
+                                .map_err(|e| e.to_string())
+                        }
+                        None => Err("could not load the post to reply to".into()),
+                    },
+                    Err(e) => Err(e.to_string()),
+                }
             };
-            match client.chat_send_message(&convo_id, &input).await {
-                Ok(_) => {
+            match result {
+                Ok(()) => {
                     reply_draft.set(String::new());
                     reply_open.set(false);
+                    // Replying is triage-complete — mark read.
+                    read_now.set(true);
+                    let id = item_id.clone();
+                    let _ = tokio::task::spawn_blocking(move || crate::inbox::set_read(&id, true))
+                        .await;
                 }
-                Err(e) => send_error.set(Some(e.to_string())),
+                Err(e) => send_error.set(Some(e)),
             }
             sending.set(false);
+        });
+    };
+
+    // "Pop out" the in-progress reply to the full composer (rich
+    // replies — images / facets / quote). Needs the subject's cid, so
+    // a quick get_posts, then seed ComposeContext with the reply target
+    // + the draft prefill and open it.
+    let subject_for_popout = item.subject_uri.clone();
+    let handle_for_popout = item.actor_handle.clone().unwrap_or_default();
+    let on_reply_popout = move |e: MouseEvent| {
+        e.stop_propagation();
+        let draft = reply_draft.read().clone();
+        let subject = subject_for_popout.clone();
+        let handle = handle_for_popout.clone();
+        reply_open.set(false);
+        spawn(async move {
+            let Some(client) = crate::auth_refresh::fresh_client(session_sig).await else {
+                return;
+            };
+            if let Ok(posts) = client.get_posts(std::slice::from_ref(&subject)).await {
+                if let Some(p) = posts.into_iter().next() {
+                    compose_ctx.with_mut(|w| {
+                        w.reply_to = Some(crate::state::ReplyTarget {
+                            uri: subject.clone(),
+                            cid: p.cid.clone(),
+                            handle: handle.clone(),
+                            text: String::new(),
+                        });
+                        w.quote_to = None;
+                        w.prefill = (!draft.trim().is_empty()).then(|| draft.clone());
+                        w.open = true;
+                    });
+                }
+            }
         });
     };
 
@@ -1273,6 +1348,14 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         div { class: "inbox-row__reply-error", "Send failed: {err}" }
                     }
                     div { class: "inbox-row__reply-actions",
+                        if is_post_source {
+                            button {
+                                class: "btn btn--ghost inbox-row__reply-popout",
+                                title: "Open in the full composer — images, links, quote",
+                                onclick: on_reply_popout,
+                                "Pop out ↗"
+                            }
+                        }
                         button {
                             class: "btn btn--primary",
                             disabled: *sending.read() || reply_draft.read().trim().is_empty(),
