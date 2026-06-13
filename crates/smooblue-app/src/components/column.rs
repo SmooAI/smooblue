@@ -2172,6 +2172,7 @@ mod tests {
             reason_subject: subject.map(String::from),
             indexed_at: None,
             is_read: false,
+            record: None,
         }
     }
 
