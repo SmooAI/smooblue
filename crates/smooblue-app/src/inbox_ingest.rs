@@ -386,7 +386,12 @@ mod tests {
             },
             reason: reason.into(),
             reason_subject: Some("at://did:plc:me/app.bsky.feed.post/xyz".into()),
-            indexed_at: Some("2026-05-31T12:00:00Z".into()),
+            // Relative timestamp so the directness assertion below is time-invariant.
+            // A hardcoded date became a time-bomb: inbox::score() decays 1 point per
+            // 12h of age, so once the fixed ts aged past ~10 days the unread DirectReply
+            // score (60 + 20 unread) fell under the `>= 60` assertion and CI went red on
+            // every PR (and main). ~1h old keeps age_penalty at 0.
+            indexed_at: Some((Utc::now() - chrono::Duration::hours(1)).to_rfc3339()),
             is_read: false,
         }
     }
