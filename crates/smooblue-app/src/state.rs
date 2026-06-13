@@ -250,6 +250,11 @@ pub struct ComposeContext {
     pub open: bool,
     pub reply_to: Option<ReplyTarget>,
     pub quote_to: Option<QuoteTarget>,
+    /// One-shot draft text to seed the composer with when it opens —
+    /// handed off from another surface (e.g. the inbox quick-reply
+    /// "pop out" button so an in-progress reply isn't lost). The
+    /// composer consumes and clears it on open.
+    pub prefill: Option<String>,
 }
 
 /// Just enough of a parent post to render the quoted context in the
@@ -446,6 +451,7 @@ pub fn use_bootstrap() {
             open,
             reply_to: None,
             quote_to: None,
+            prefill: None,
         })
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));

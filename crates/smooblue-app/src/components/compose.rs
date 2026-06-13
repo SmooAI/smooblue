@@ -228,6 +228,19 @@ pub fn ComposeSheet() -> Element {
         }
         crate::persistence::load_draft().unwrap_or_default()
     });
+    // Consume a one-shot prefill handed off from another surface (the
+    // inbox quick-reply "pop out" button) so an in-progress reply isn't
+    // lost when escalating to the full composer. Runs whenever ctx
+    // changes; clearing prefill makes it idempotent.
+    use_effect(move || {
+        let pf = ctx.read().prefill.clone();
+        if let Some(t) = pf {
+            if !t.is_empty() {
+                text.set(t);
+            }
+            ctx.write().prefill = None;
+        }
+    });
     let attachments = use_signal::<Vec<AttachedImage>>(Vec::new);
     // Single video attachment (mutually exclusive with images per
     // the lexicon — bsky records carry one media slot). Holds raw
