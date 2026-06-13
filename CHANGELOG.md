@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.19.0
+
+### Minor Changes
+
+- [#49](https://github.com/SmooAI/smooblue/pull/49) [`19877fa`](https://github.com/SmooAI/smooblue/commit/19877faf2b582b3ad3566ccb4f093796cb2b8db6) Thanks [@brentrager](https://github.com/brentrager)! - Inbox rows now show a clout badge: the author's follower count plus a
+  followers:following ratio (e.g. `12.4k · 8.3×`). A big follower count built by
+  mass-following everyone reads as a low ratio and is dimmed, so you can tell real
+  reach from follow-back inflation at a glance. The follows count is fetched in the
+  same profile-enrichment pass that already powers the inbox's clout-aware sort.
+
 ## 1.18.2
 
 ### Patch Changes
