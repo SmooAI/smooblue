@@ -11,6 +11,8 @@ cssclasses:
 
 ![[smooblue-256.png|180]]
 
+**A native, multi-column Bluesky desktop client — part of the [Smoo AI](https://smoo.ai) platform.**
+
 </div>
 
 > [!smoo] About Smooblue
@@ -66,3 +68,11 @@ cssclasses:
 - **Releases**: managed by [release-plz](https://release-plz.dev/) — `publish = false` per crate (smooblue is an app, not a library)
 
 See [[Projects/_Projects-Index]] for the most recent status snapshot.
+
+---
+
+<div align="center">
+
+Built by <a href="https://smoo.ai"><strong>Smoo AI</strong></a> — AI built into every product.
+
+</div>

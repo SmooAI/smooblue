@@ -1,24 +1,33 @@
 <a name="readme-top"></a>
 
-<div align="center">
-  <a href="https://smoo.ai">
-    <img src="assets/icons/icon-256.png" alt="Smooblue" width="180" />
-  </a>
-</div>
+<p align="center">
+  <a href="https://smoo.ai"><img src="assets/icons/icon-256.png" alt="Smooblue" width="180" /></a>
+</p>
 
-## About SmooAI
+<h1 align="center">Smooblue</h1>
 
-SmooAI is an AI-powered platform for helping businesses multiply their customer, employee, and developer experience.
+<p align="center">
+  <strong>A native, multi-column Bluesky desktop client for macOS and Linux — Rust + Dioxus, real OAuth, single ~11 MB binary.</strong>
+</p>
 
-Learn more on [smoo.ai](https://smoo.ai).
+<p align="center">
+  <img src="https://img.shields.io/badge/Smoo_AI-platform-00A6A6?style=flat-square" alt="Smoo AI">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-F49F0A?style=flat-square" alt="license"></a>
+  <img src="https://img.shields.io/badge/Rust-Dioxus-FF6B6C?style=flat-square" alt="Rust + Dioxus">
+  <img src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-020618?style=flat-square" alt="macOS · Linux">
+</p>
 
-## SmooAI Open Source
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#what-it-is">Usage</a> ·
+  <a href="#security">Security</a> ·
+  <a href="#part-of-smoo-ai">Platform</a>
+</p>
 
-Check out other SmooAI open-source packages at [smoo.ai/open-source](https://smoo.ai/open-source).
+---
 
-## About Smooblue
-
-A native, multi-column [Bluesky](https://bsky.app) desktop client for macOS and Linux. Written in Rust + [Dioxus](https://dioxuslabs.com/), backed by Bluesky's official OAuth flow (PAR + PKCE + DPoP-bound tokens).
+> A TweetDeck-style desktop client for [Bluesky](https://bsky.app). Written in Rust + [Dioxus](https://dioxuslabs.com/), backed by Bluesky's official OAuth flow (PAR + PKCE + DPoP-bound tokens). No app passwords; sign in once and Smooblue holds DPoP-bound tokens on disk. It feels closer to a Finder window than an Electron browser tab.
 
 <p align="center">
   <img src="media/smooblue-demo.gif" alt="Smooblue demo" width="720" />
@@ -124,7 +133,7 @@ Built fast, single-binary, ~11 MB native app — feels closer to a Finder window
 - Optional system-level auto-updater (launchd job, hourly) that rebuilds + reinstalls from `main`
 - macOS app activation done right — Cmd+Up / BetterSnapTool / Raycast hotkeys reach Smooblue without clicking the menu bar first
 
-## Install
+## Build & advanced install
 
 ### macOS (supported)
 
@@ -256,6 +265,17 @@ smooblue/
 - Trending topics → live deep-link to bsky search
 - Cross-platform builds (Linux / Windows) — code is portable, just needs CI
 
+## Part of Smoo AI
+
+Smooblue is part of the [Smoo AI](https://smoo.ai) platform — an AI-powered
+business platform with AI built into every product. It shares design tokens and
+auth with the other Smoo AI clients via
+[@smooai/client-shared](https://github.com/SmooAI/client-shared), and sits
+alongside infrastructure packages like
+[@smooai/config](https://github.com/SmooAI/config) and
+[@smooai/logger](https://github.com/SmooAI/logger). Browse more at
+[smoo.ai/open-source](https://smoo.ai/open-source).
+
 ## Contributing
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -283,3 +303,9 @@ SmooAI on GitHub: [https://github.com/SmooAI](https://github.com/SmooAI)
 ---
 
 *Smooblue is not affiliated with Bluesky Social, PBC. "Bluesky" and the Bluesky butterfly are trademarks of Bluesky Social, PBC.*
+
+---
+
+<p align="center">
+  Built by <a href="https://smoo.ai"><strong>Smoo AI</strong></a> — AI built into every product.
+</p>
