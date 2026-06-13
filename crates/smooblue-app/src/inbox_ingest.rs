@@ -138,9 +138,10 @@ fn notification_to_item(n: &Notification) -> Option<InboxItem> {
         payload_json,
         // Follower count starts at 0; the enrichment pass after the
         // notifications ingest fills it via batched get_profiles +
-        // inbox::set_actor_followers. Items stay sorted by directness
+        // inbox::set_actor_clout. Items stay sorted by directness
         // within their bucket until the enrichment lands.
         actor_follower_count: 0,
+        actor_follows_count: 0,
         ts_bucket: inbox::ts_bucket_for(ts),
     })
 }
@@ -204,6 +205,7 @@ fn convo_to_item(c: &ConvoView, my_did: &str) -> Option<InboxItem> {
         synced_at: None,
         payload_json,
         actor_follower_count: 0,
+        actor_follows_count: 0,
         ts_bucket: inbox::ts_bucket_for(ts),
     })
 }
@@ -348,16 +350,17 @@ async fn run_cycle(session: Signal<Option<Session>>) {
             Ok(profiles) => {
                 let mut updated = 0usize;
                 for p in profiles {
-                    let count = p.followers_count.unwrap_or(0) as i64;
+                    let followers = p.followers_count.unwrap_or(0) as i64;
+                    let follows = p.follows_count.unwrap_or(0) as i64;
                     let did = p.did.clone();
                     let res = tokio::task::spawn_blocking(move || {
-                        inbox::set_actor_followers(&did, count)
+                        inbox::set_actor_clout(&did, followers, follows)
                     })
                     .await;
                     match res {
                         Ok(Ok(())) => updated += 1,
                         Ok(Err(e)) => {
-                            crate::diag!("[inbox_ingest] set_actor_followers failed: {e}")
+                            crate::diag!("[inbox_ingest] set_actor_clout failed: {e}")
                         }
                         Err(e) => crate::diag!("[inbox_ingest] enrich blocking task panicked: {e}"),
                     }

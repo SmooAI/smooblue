@@ -1161,6 +1161,31 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
         "inbox-row"
     };
 
+    // Clout signal: follower count + a followers:following ratio. A big
+    // follower count built by mass-following everyone (ratio ≈ 1) isn't
+    // the clout of a big count with few follows, so we surface both and
+    // flag the likely over-followers. None until the profile-enrichment
+    // pass fills the counts (both default 0).
+    let clout: Option<(String, bool)> = (item.actor_follower_count > 0).then(|| {
+        let followers = item.actor_follower_count;
+        let follows = item.actor_follows_count;
+        let label = if follows > 0 {
+            let ratio = followers as f64 / follows as f64;
+            let r = if ratio >= 10.0 {
+                format!("{ratio:.0}×")
+            } else {
+                format!("{ratio:.1}×")
+            };
+            format!("{} · {}", humanize_count(followers), r)
+        } else {
+            humanize_count(followers)
+        };
+        // Over-follower heuristic: follows a lot AND the ratio is near
+        // parity — a "big" account whose reach is mostly follow-back.
+        let low = follows >= 1000 && (followers as f64) < follows as f64 * 1.5;
+        (label, low)
+    });
+
     rsx! {
         div { class: "inbox-row__wrap",
             div { class: "{row_class}",
@@ -1178,6 +1203,13 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         span { class: "inbox-row__action", " {action_label}" }
                         span { class: "inbox-row__chip", "{source_chip}" }
                         span { class: "inbox-row__age", "· {age}" }
+                        if let Some((clout_label, low)) = clout.as_ref() {
+                            span {
+                                class: if *low { "inbox-row__clout inbox-row__clout--low" } else { "inbox-row__clout" },
+                                title: "Followers · followers-to-following ratio",
+                                "{clout_label}"
+                            }
+                        }
                     }
                     if let Some(p) = item.preview.as_ref() {
                         div { class: "inbox-row__preview", "{p}" }
@@ -1274,6 +1306,23 @@ fn schedule_snooze(
             tracing::warn!(error = %err, "inbox: snooze failed");
         }
     });
+}
+
+/// Compact follower-count formatting for the inbox clout badge:
+/// `850`, `12.4k`, `1.2M`. Trailing `.0` is dropped so round numbers
+/// read `12k` not `12.0k`.
+fn humanize_count(n: i64) -> String {
+    fn trim(v: f64) -> String {
+        let s = format!("{v:.1}");
+        s.strip_suffix(".0").map(str::to_string).unwrap_or(s)
+    }
+    if n >= 1_000_000 {
+        format!("{}M", trim(n as f64 / 1_000_000.0))
+    } else if n >= 1_000 {
+        format!("{}k", trim(n as f64 / 1_000.0))
+    } else {
+        n.to_string()
+    }
 }
 
 /// Render an absolute timestamp as a short relative age (e.g. "3m",
@@ -1947,6 +1996,17 @@ mod tests {
         assert_eq!(first_in_vp_after, first_in_vp_before + n);
         // The top spacer grew by exactly the prepended height → no shift.
         assert_eq!(top1 - top0, n as f64 * row_h);
+    }
+
+    #[test]
+    fn humanize_count_formats_compactly() {
+        assert_eq!(humanize_count(0), "0");
+        assert_eq!(humanize_count(850), "850");
+        assert_eq!(humanize_count(1_000), "1k");
+        assert_eq!(humanize_count(12_400), "12.4k");
+        assert_eq!(humanize_count(12_000), "12k");
+        assert_eq!(humanize_count(1_200_000), "1.2M");
+        assert_eq!(humanize_count(2_000_000), "2M");
     }
 
     #[test]
