@@ -4404,18 +4404,22 @@ a {
  * =========================================================== */
 .inbox-row__wrap {
     position: relative;
-    border-bottom: 1px solid var(--color-border);
+    /* Card spacing instead of a divider — each row is its own card. */
+    padding: var(--space-1) var(--space-2);
     /* Virtualized by the Rust render path — see .post. */
     contain: layout style paint;
 }
 
 .inbox-row {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: var(--space-3);
     width: 100%;
     padding: var(--space-3);
-    background: transparent;
+    background: var(--color-surface, transparent);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
     cursor: pointer;
     color: var(--color-fg);
     font: inherit;
@@ -4423,6 +4427,7 @@ a {
 
 .inbox-row:hover {
     background: var(--color-surface-alt);
+    border-color: var(--color-fg-muted);
 }
 
 .inbox-row--read {
@@ -4462,6 +4467,8 @@ a {
     gap: var(--space-1);
     font-size: var(--font-size-sm);
     line-height: 1.2;
+    /* Reserve the top-right corner for the (hover-revealed) actions. */
+    padding-right: 92px;
 }
 
 .inbox-row__actor {
@@ -4487,11 +4494,10 @@ a {
     font-size: var(--font-size-xs);
 }
 
-/* Clout badge: follower count + followers:following ratio. Pushed to
-   the right edge of the head row. The --low modifier flags likely
-   over-followers (lots of follows, ratio near parity). */
+/* Clout badge: follower count + followers:following ratio. Sits inline
+   in the head meta. The --low modifier flags likely over-followers
+   (lots of follows, ratio near parity). */
 .inbox-row__clout {
-    margin-left: auto;
     padding: 1px 6px;
     border-radius: 6px;
     border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
@@ -4511,10 +4517,15 @@ a {
 .inbox-row__preview {
     margin-top: 4px;
     font-size: var(--font-size-xs);
-    color: var(--color-fg-muted);
-    white-space: nowrap;
+    color: var(--color-fg);
+    /* Show some/all of the actual message — up to 3 lines, then clamp. */
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .inbox-row__unread-dot {
@@ -4530,11 +4541,15 @@ a {
  * Inbox style: actions surface only when the user is targeting
  * the row, keep the resting state clean. */
 .inbox-row__actions {
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-2);
     display: flex;
     gap: var(--space-1);
     opacity: 0;
     transition: opacity 80ms ease-out;
-    align-self: center;
+    /* Sit above the card content; clickable even over the head text. */
+    z-index: 1;
 }
 
 .inbox-row:hover .inbox-row__actions {

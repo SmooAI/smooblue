@@ -632,6 +632,7 @@ fn notif(
         reason_subject,
         indexed_at: Some(ts.to_string()),
         is_read,
+        record: None,
     }
 }
 

@@ -26,6 +26,23 @@ pub struct Notification {
     /// True until the user marks it read.
     #[serde(rename = "isRead", default)]
     pub is_read: bool,
+    /// The actor's post record (`app.bsky.feed.post`) for reply / quote /
+    /// mention notifications — carries the text they actually wrote, so
+    /// the inbox can preview the real message instead of a generic
+    /// caption. Defensive `Value` (same pattern as `FeedItem.reply`) so
+    /// a lexicon-shape change can't break deserialization. `None` for
+    /// reasons without a post record (follow, etc.).
+    #[serde(default)]
+    pub record: Option<serde_json::Value>,
+}
+
+impl Notification {
+    /// Extract the post text from the embedded record, if present and
+    /// non-empty. The lexicon stores it at `record.text`.
+    pub fn record_text(&self) -> Option<&str> {
+        let t = self.record.as_ref()?.get("text")?.as_str()?.trim();
+        (!t.is_empty()).then_some(t)
+    }
 }
 
 /// A group of notifications collapsed into one card. Matches bsky.app's
@@ -248,7 +265,21 @@ mod tests {
             reason_subject: subject.map(String::from),
             indexed_at: None,
             is_read: false,
+            record: None,
         }
+    }
+
+    #[test]
+    fn record_text_extracts_trims_and_guards_empty() {
+        let mut n = notif("reply", Some("at://x"), "alice");
+        n.record = Some(serde_json::json!({ "text": "  hello there  " }));
+        assert_eq!(n.record_text(), Some("hello there"));
+        n.record = Some(serde_json::json!({ "text": "   " }));
+        assert_eq!(n.record_text(), None);
+        n.record = Some(serde_json::json!({ "noText": 1 }));
+        assert_eq!(n.record_text(), None);
+        n.record = None;
+        assert_eq!(n.record_text(), None);
     }
 
     #[test]
@@ -365,6 +396,7 @@ mod tests {
                 reason_subject: None,
                 indexed_at: None,
                 is_read: false,
+                record: None,
             };
             assert_eq!(n.reason_phrase(), expected, "reason={reason}");
         }

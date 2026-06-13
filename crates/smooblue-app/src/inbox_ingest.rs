@@ -105,17 +105,22 @@ fn notification_to_item(n: &Notification) -> Option<InboxItem> {
     // multiple notifications from the same actor on the same post.
     let item_id = format!("notif:{}:{}:{}", n.reason, n.cid, ts.timestamp());
 
-    // Preview text: we don't have the reply body in the notification
-    // payload (would require a getPostThread fetch). For Phase B we
-    // construct a short caption — Phase C can hydrate the actual
-    // text via a side-fetch.
-    let preview = match source {
-        InboxSource::DirectReply => Some("Replied to your post".to_string()),
-        InboxSource::ReplyToReply => Some("Replied in your thread".to_string()),
-        InboxSource::Quote => Some("Quoted your post".to_string()),
-        InboxSource::Mention => Some("Mentioned you".to_string()),
-        InboxSource::Dm => None, // unreachable for notifications path
-    };
+    // Preview text: prefer the actual text the actor wrote (carried in
+    // the notification's own record) so the inbox previews the real
+    // message; fall back to a generic caption when the record has no
+    // text (or the lexicon shape shifts).
+    let preview = n.record_text().map(truncate_preview).or_else(|| {
+        Some(
+            match source {
+                InboxSource::DirectReply => "Replied to your post",
+                InboxSource::ReplyToReply => "Replied in your thread",
+                InboxSource::Quote => "Quoted your post",
+                InboxSource::Mention => "Mentioned you",
+                InboxSource::Dm => return None, // unreachable for notifications path
+            }
+            .to_string(),
+        )
+    });
 
     let payload_json = serde_json::to_string(n).ok().unwrap_or_default();
 
@@ -396,6 +401,7 @@ mod tests {
             // every PR (and main). ~1h old keeps age_penalty at 0.
             indexed_at: Some((Utc::now() - chrono::Duration::hours(1)).to_rfc3339()),
             is_read: false,
+            record: None,
         }
     }
 
@@ -429,6 +435,21 @@ mod tests {
         assert_eq!(item.subject_uri, "at://did:plc:me/app.bsky.feed.post/xyz");
         assert!(!item.read);
         assert!(item.directness >= 60);
+    }
+
+    #[test]
+    fn preview_uses_real_record_text_when_present() {
+        let mut n = fake_notif("reply");
+        n.record = Some(serde_json::json!({ "text": "great point about Rust!" }));
+        let item = notification_to_item(&n).expect("reply maps to item");
+        assert_eq!(item.preview.as_deref(), Some("great point about Rust!"));
+    }
+
+    #[test]
+    fn preview_falls_back_to_caption_without_record_text() {
+        // fake_notif has record: None → generic caption.
+        let item = notification_to_item(&fake_notif("reply")).unwrap();
+        assert_eq!(item.preview.as_deref(), Some("Replied to your post"));
     }
 
     #[test]
