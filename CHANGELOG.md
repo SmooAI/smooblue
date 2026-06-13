@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.18.2
+
+### Patch Changes
+
+- [#47](https://github.com/SmooAI/smooblue/pull/47) [`235b1f1`](https://github.com/SmooAI/smooblue/commit/235b1f1816d0b6f58b8c7a7187ec3db63f4c2e4c) Thanks [@brentrager](https://github.com/brentrager)! - Live feed no longer jumps while you're scrolled into it. When a column's
+  background poll pulls in new posts, the feed now grows upward into the
+  scrollback — the scrollbar lengthens at the top while your current read position
+  stays exactly where it is. At the very top, fresh posts still appear in view as
+  before.
+
 ## 1.18.1
 
 ### Patch Changes
