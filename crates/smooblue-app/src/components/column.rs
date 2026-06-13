@@ -51,6 +51,13 @@ pub const MAX_NOTIF_GROUPS_PER_COLUMN: usize = 1000;
 /// a fetch_more on every flick.
 const PAGE_SIZE: u32 = 30;
 
+/// Below this `scrollTop` (px) a column counts as "at the top", so a
+/// top-poll's freshly-prepended rows simply appear in view. Above it
+/// the user has scrolled into the feed and we anchor instead — growing
+/// the scrollbar upward so their read position doesn't move. A few px
+/// of slack absorbs sub-pixel scroll rounding at rest.
+const SCROLL_ANCHOR_MIN_PX: f64 = 8.0;
+
 /// How close to the bottom (in pixels) the user would have to scroll
 /// before an auto fetch_more would trigger. Currently unused —
 /// Dioxus 0.6's `ScrollData` doesn't expose scroll position, so we
@@ -152,6 +159,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // `true` when the server tells us the bottom-of-feed cursor is
     // None — we've hit the end and shouldn't keep firing fetches.
     let mut at_end = use_signal(|| false);
+    // Viewport geometry for the virtualized render path AND scroll
+    // anchoring: `(scroll_top, client_h, scroll_h)`. Declared up here
+    // (rather than beside the scroll handler) so the polling loop can
+    // read and adjust `scroll_top` when a top-poll prepends rows — see
+    // the scroll-anchor block in that loop. Updated on every scroll
+    // tick and once on mount via a `document::eval` round-trip.
+    let mut viewport = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64));
     // Per-column fuzzy filter input. Empty string = show everything.
     // Match is case-insensitive substring on (text, author handle,
     // author displayName, reposter displayName, parent handle). No
@@ -220,8 +234,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // The polling loop. Top-of-feed refresh on each tick: merges new
     // items at the head, preserves the user's scrollback below.
     let kind_for_poll = spec_kind.clone();
+    let spec_id_for_poll = spec_id.clone();
     use_future(move || {
         let kind = kind_for_poll.clone();
+        let col_id = spec_id_for_poll.clone();
         let session_sig = session;
         async move {
             let interval = poll_interval(&kind);
@@ -239,9 +255,19 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         // Merge the fresh page into whatever we already
                         // have. First-fetch: just install. Subsequent
                         // polls: prepend new items, preserve tail.
+                        // How many genuinely-new rows get prepended at the
+                        // head this poll (same dedupe key `merge_top_page`
+                        // uses) — drives the scroll-anchor adjustment below.
+                        let mut prepended_rows = 0usize;
                         let merged = match (data.peek().clone(), fresh.data) {
                             (_, ColumnData::Empty) => ColumnData::Empty,
                             (ColumnData::Posts(existing), ColumnData::Posts(new_page)) => {
+                                let existing_keys: std::collections::HashSet<String> =
+                                    existing.iter().map(feed_item_key).collect();
+                                prepended_rows = new_page
+                                    .iter()
+                                    .filter(|&it| !existing_keys.contains(&feed_item_key(it)))
+                                    .count();
                                 ColumnData::Posts(merge_top_page(
                                     existing,
                                     new_page,
@@ -283,7 +309,49 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             // local-DB read).
                             (_, other) => other,
                         };
-                        data.set(merged);
+                        // Scroll anchoring. When the user has scrolled down
+                        // into the feed, a top-poll that prepends N rows must
+                        // not shove their read position around. Grow the feed
+                        // *upward* instead: bump the virtual viewport and the
+                        // real `scrollTop` by the prepended rows' height, so
+                        // the scrollbar lengthens at the top while the visible
+                        // content stays put. Near the top (scroll_top within
+                        // SCROLL_ANCHOR_MIN_PX) we skip this so fresh posts
+                        // simply appear in view. Posts-only: notification
+                        // groups merge in-place (existing groups grow) so the
+                        // prepend count doesn't map cleanly to a row height.
+                        let cur_top = viewport.peek().0;
+                        if !first_fetch && prepended_rows > 0 && cur_top > SCROLL_ANCHOR_MIN_PX {
+                            let delta_px = prepended_rows as f64 * estimated_row_height_px(&kind);
+                            // Bump the virtual window first so the re-render
+                            // slices around the corrected position (no stale-
+                            // window flash) ...
+                            viewport.with_mut(|v| v.0 += delta_px);
+                            data.set(merged);
+                            // ... then nudge the real DOM scrollTop to match,
+                            // inside rAF so it lands after the new rows reflow
+                            // (avoids clamping against a not-yet-grown height).
+                            let sel = format!("[data-column-body=\"{col_id}\"]");
+                            spawn(async move {
+                                let mut eval = dioxus::document::eval(&format!(
+                                    r#"
+                                    const el = document.querySelector({sel});
+                                    if (el) {{
+                                        requestAnimationFrame(() => {{
+                                            el.scrollTop += {delta};
+                                            dioxus.send(true);
+                                        }});
+                                    }} else {{ dioxus.send(false); }}
+                                    "#,
+                                    sel = serde_json::to_string(&sel)
+                                        .unwrap_or_else(|_| "\"\"".to_string()),
+                                    delta = delta_px,
+                                ));
+                                let _: bool = eval.recv().await.unwrap_or(false);
+                            });
+                        } else {
+                            data.set(merged);
+                        }
                         // Save the cursor from the top page — the FIRST
                         // top-poll's cursor tells us where to start
                         // paginating downward from. We don't overwrite
@@ -418,12 +486,10 @@ pub fn Column(spec: ColumnSpec) -> Element {
     });
     let load_more = move |_| trigger_load_more.call(());
 
-    // Viewport state for the virtualized render path. Updated on
-    // every scroll tick + once on mount via a document::eval round-
-    // trip. `(scroll_top, client_h, scroll_h)`. Drives both the
-    // visible-slice computation AND the infinite-scroll trigger
-    // (within-600px-of-bottom heuristic).
-    let mut viewport = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64));
+    // Drives both the visible-slice computation AND the infinite-scroll
+    // trigger (within-600px-of-bottom heuristic). The `viewport` signal
+    // it updates is declared earlier (near the other column signals) so
+    // the polling loop can scroll-anchor against it.
     let mut scroll_check_pending = use_signal(|| false);
     let kind_for_scroll = spec_kind.clone();
     let body_selector = format!("[data-column-body=\"{}\"]", spec_id);
@@ -1853,6 +1919,47 @@ mod tests {
         let fresh = vec![mk("at://x/n1"), mk("at://x/n2")];
         let merged = merge_top_page(vec![], fresh, 100);
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn scroll_anchor_keeps_top_item_after_prepend() {
+        // The scroll-anchor fix relies on this invariant: prepending N
+        // rows and bumping scroll_top by N*row_h advances the first-in-
+        // viewport index by exactly N (so the same item stays at the top)
+        // and grows the top spacer by exactly N*row_h (so the visible
+        // content doesn't shift).
+        let row_h = 240.0;
+        let client_h = 800.0;
+        let total = 100;
+        // User scrolled so item index 10 sits at the top of the viewport.
+        let scroll_top = 10.0 * row_h;
+        let (_f0, _l0, top0, _b0) = virtual_range(total, scroll_top, client_h, row_h);
+
+        // Three genuinely-new rows arrive at the head; compensate by N*row_h.
+        let n = 3usize;
+        let scroll_top2 = scroll_top + n as f64 * row_h;
+        let (_f1, _l1, top1, _b1) = virtual_range(total + n, scroll_top2, client_h, row_h);
+
+        let first_in_vp_before = (scroll_top / row_h) as usize;
+        let first_in_vp_after = (scroll_top2 / row_h) as usize;
+        // What was index 10 is now index 13 — and that's what's at the top
+        // after compensation, so the user's read position is preserved.
+        assert_eq!(first_in_vp_after, first_in_vp_before + n);
+        // The top spacer grew by exactly the prepended height → no shift.
+        assert_eq!(top1 - top0, n as f64 * row_h);
+    }
+
+    #[test]
+    fn scroll_anchor_noop_at_top() {
+        // At the very top we deliberately skip the scroll bump so fresh
+        // posts appear in view: the newest item stays rendered first and
+        // the top spacer stays at zero before and after a prepend.
+        let row_h = 240.0;
+        let client_h = 800.0;
+        let (_f, _l, top_before, _b) = virtual_range(100, 0.0, client_h, row_h);
+        let (_f2, _l2, top_after, _b2) = virtual_range(103, 0.0, client_h, row_h);
+        assert_eq!(top_before, 0.0);
+        assert_eq!(top_after, 0.0);
     }
 
     #[test]
