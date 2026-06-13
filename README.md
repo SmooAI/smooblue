@@ -1,28 +1,22 @@
 <a name="readme-top"></a>
 
 <p align="center">
-  <a href="https://smoo.ai"><img src="assets/icons/icon-256.png" alt="Smooblue" width="180" /></a>
-</p>
-
-<h1 align="center">Smooblue</h1>
-
-<p align="center">
-  <strong>A native, multi-column Bluesky desktop client for macOS and Linux — Rust + Dioxus, real OAuth, single ~11 MB binary.</strong>
+  <a href="https://smoo.ai"><img src=".github/banner.png" alt="Smooblue — A native multi-column Bluesky desktop client" width="100%" /></a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Smoo_AI-platform-00A6A6?style=flat-square" alt="Smoo AI">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-F49F0A?style=flat-square" alt="license"></a>
+  <a href="https://smoo.ai/open-source"><img src="https://img.shields.io/badge/Smoo_AI-platform-00A6A6?style=for-the-badge&labelColor=020618" alt="Smoo AI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-F49F0A?style=for-the-badge&labelColor=020618" alt="license"></a>
+  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Linux-native-FF6B6C?style=for-the-badge&labelColor=020618" alt="macOS · Linux">
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Rust-Dioxus-FF6B6C?style=flat-square" alt="Rust + Dioxus">
-  <img src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-020618?style=flat-square" alt="macOS · Linux">
+  <img src="https://img.shields.io/badge/binary-~11%20MB-00A6A6?style=flat-square" alt="~11 MB binary">
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> ·
-  <a href="#install">Install</a> ·
-  <a href="#what-it-is">Usage</a> ·
-  <a href="#security">Security</a> ·
-  <a href="#part-of-smoo-ai">Platform</a>
+  <a href="#features"><b>Features</b></a> &nbsp;·&nbsp; <a href="#install"><b>Install</b></a> &nbsp;·&nbsp; <a href="#what-it-is"><b>Usage</b></a> &nbsp;·&nbsp; <a href="#security"><b>Security</b></a> &nbsp;·&nbsp; <a href="#part-of-smoo-ai"><b>Platform</b></a>
 </p>
 
 ---
@@ -267,14 +261,10 @@ smooblue/
 
 ## Part of Smoo AI
 
-Smooblue is part of the [Smoo AI](https://smoo.ai) platform — an AI-powered
-business platform with AI built into every product. It shares design tokens and
-auth with the other Smoo AI clients via
-[@smooai/client-shared](https://github.com/SmooAI/client-shared), and sits
-alongside infrastructure packages like
-[@smooai/config](https://github.com/SmooAI/config) and
-[@smooai/logger](https://github.com/SmooAI/logger). Browse more at
-[smoo.ai/open-source](https://smoo.ai/open-source).
+Smooblue is built and open-sourced by **[Smoo AI](https://smoo.ai)** — the AI-powered business platform with AI built into every product: CRM, customer support, campaigns, field service, observability, and developer tools.
+
+- 🧰 **More open source from Smoo AI** — [smoo.ai/open-source](https://smoo.ai/open-source)
+- 🧩 **Sibling repos** — [@smooai/client-shared](https://github.com/SmooAI/client-shared) (shared design tokens + auth), [@smooai/config](https://github.com/SmooAI/config), [@smooai/logger](https://github.com/SmooAI/logger)
 
 ## Contributing
 
