@@ -233,12 +233,15 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
                 .filter(|s| !s.is_empty())
                 .unwrap_or(&author.handle)
                 .to_string();
-            // Shallow-render any inner image embed (skip nested
-            // quotes / record-with-media to avoid infinite nesting).
-            let inner_images = embeds.into_iter().find_map(|k| match k {
-                EmbedKind::Images { images } => Some(images),
-                _ => None,
-            });
+            // Shallow-render the quoted post's own media — image grid,
+            // video player, or link card. A quoted *video* post (the
+            // common case that was rendering as just an author line)
+            // now shows its player. We take the first non-record embed
+            // so a nested quote doesn't spawn an unbounded quote chain;
+            // for record-with-media we show the media half only.
+            let inner_media = embeds
+                .into_iter()
+                .find(|k| !matches!(k, EmbedKind::Record { .. }));
 
             // Click-through plumbing.
             let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
@@ -291,8 +294,8 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
                     if !value.text.is_empty() {
                         p { class: "embed__quote-text", "{value.text}" }
                     }
-                    if let Some(images) = inner_images {
-                        ImageGrid { images }
+                    if let Some(kind) = inner_media {
+                        QuoteMedia { kind }
                     }
                 }
             }
@@ -313,6 +316,32 @@ fn QuoteCard(record: EmbedRecordView) -> Element {
             }
         },
         EmbedRecordView::Other => rsx! { Fragment {} },
+    }
+}
+
+/// Media rendered *inside* a quote card (the quoted post's own embed).
+/// Mirrors [`EmbedKindView`] minus the Record branch — a quoted post's
+/// nested quote is intentionally not chased so we never render a
+/// quote-of-a-quote-of-a-quote. RecordWithMedia falls through to its
+/// media half via [`MediaView`].
+#[component]
+fn QuoteMedia(kind: EmbedKind) -> Element {
+    match kind {
+        EmbedKind::Images { images } => rsx! { ImageGrid { images } },
+        EmbedKind::External { external } => rsx! { LinkCard { ext: external } },
+        EmbedKind::Video {
+            playlist,
+            thumbnail,
+            aspect_ratio,
+        } => rsx! {
+            VideoPlayer {
+                playlist,
+                thumb: thumbnail,
+                aspect_ratio: aspect_ratio.map(|a| (a.width, a.height)),
+            }
+        },
+        EmbedKind::RecordWithMedia { media, .. } => rsx! { MediaView { media: *media } },
+        EmbedKind::Record { .. } => rsx! { Fragment {} },
     }
 }
 

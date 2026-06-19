@@ -1818,9 +1818,12 @@ fn group_key(g: &NotificationGroup, idx: usize) -> String {
 
 /// Which AT-URIs do we need hydrated to give each notification context?
 ///
-/// - like / repost / quote: the user's post they engaged with → `reason_subject`
-/// - reply: the reply post itself (lives at `notif.uri`)
-/// - mention: the post that mentioned us (also `notif.uri`)
+/// - like / repost: the user's post they engaged with → `reason_subject`
+/// - reply / mention / quote: the *event* post itself (lives at
+///   `notif.uri`) — for a quote that's the post that quoted you,
+///   which carries your post as a nested record embed. Using
+///   `reason_subject` here would surface your own post instead of the
+///   quote, which is the bug this avoids.
 /// - follow / starterpack-joined: nothing
 ///
 /// Deduped — list_notifications often has many likes of the same post.
@@ -1835,9 +1838,12 @@ fn collect_subject_uris(items: &[Notification]) -> Vec<String> {
             // got engagement, or — for the -via-repost variants —
             // the post they reposted that someone else then liked
             // or re-reposted).
-            "like" | "like-via-repost" | "repost" | "repost-via-repost" | "quote"
-            | "subscribed-post" => n.reason_subject.clone(),
-            "reply" | "mention" => Some(n.uri.clone()),
+            "like" | "like-via-repost" | "repost" | "repost-via-repost" | "subscribed-post" => {
+                n.reason_subject.clone()
+            }
+            // Inbound conversation: show the post that quoted /
+            // replied / mentioned you (notif.uri), not your own.
+            "reply" | "mention" | "quote" => Some(n.uri.clone()),
             _ => None,
         };
         if let Some(uri) = want {
@@ -1857,9 +1863,10 @@ fn subject_for<'a>(
     subjects: &'a HashMap<String, PostView>,
 ) -> Option<&'a PostView> {
     let key = match n.reason.as_str() {
-        "like" | "like-via-repost" | "repost" | "repost-via-repost" | "quote"
-        | "subscribed-post" => n.reason_subject.as_deref()?,
-        "reply" | "mention" => &n.uri,
+        "like" | "like-via-repost" | "repost" | "repost-via-repost" | "subscribed-post" => {
+            n.reason_subject.as_deref()?
+        }
+        "reply" | "mention" | "quote" => &n.uri,
         _ => return None,
     };
     subjects.get(key)
