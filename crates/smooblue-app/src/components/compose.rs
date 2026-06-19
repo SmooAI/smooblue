@@ -118,6 +118,72 @@ pub fn replace_mention_prefix(text: &str, full_handle: &str) -> String {
     out
 }
 
+/// How many actors to pull from the typeahead before re-ranking. We
+/// fetch wider than we show (`MENTION_SHOWN`) so a mutual buried at
+/// position 15 by the server's ordering can still be promoted into
+/// the visible list by [`rank_mention_results`].
+const MENTION_FETCH: u32 = 25;
+/// How many ranked rows the popover shows.
+const MENTION_SHOWN: usize = 8;
+
+/// Re-rank @mention typeahead results. Bluesky's
+/// `searchActorsTypeahead` is only lightly personalized, so on its own
+/// it buries people you actually talk to under big strangers who
+/// happen to prefix-match. We re-sort by, in order:
+///
+/// 1. **Relationship** — mutuals first, then people you follow, then
+///    people who follow you, then strangers. This is the "followers /
+///    followed" bias.
+/// 2. **Match quality** — a prefix match on the handle or display name
+///    beats a mid-string match; handle ties beat display-name ties.
+/// 3. **Server order** — preserved for equal scores (it already
+///    factors in popularity), via a stable decorate-sort.
+///
+/// Case-insensitive. `query` is the text after the `@` (no leading
+/// `@`).
+pub fn rank_mention_results(results: Vec<ActorProfile>, query: &str) -> Vec<ActorProfile> {
+    let q = query.trim().to_lowercase();
+    let mut scored: Vec<(i32, usize, ActorProfile)> = results
+        .into_iter()
+        .enumerate()
+        .map(|(i, a)| (mention_score(&a, &q), i, a))
+        .collect();
+    // Descending score; ties fall back to the server's original index
+    // so the sort stays stable and predictable.
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, a)| a).collect()
+}
+
+/// Score one actor for the active query. Relationship is the dominant
+/// axis (×100) so someone you follow with a weaker textual match still
+/// outranks a stranger — that's the whole point of the follows bias.
+fn mention_score(a: &ActorProfile, q: &str) -> i32 {
+    let rel = a.viewer.as_ref().map_or(0, |v| {
+        match (v.following.is_some(), v.followed_by.is_some()) {
+            (true, true) => 3,   // mutual
+            (true, false) => 2,  // you follow them
+            (false, true) => 1,  // they follow you
+            (false, false) => 0, // stranger
+        }
+    });
+    let handle = a.handle.to_lowercase();
+    let name = a.display_name.as_deref().unwrap_or("").to_lowercase();
+    let m = if q.is_empty() {
+        0
+    } else if handle.starts_with(q) {
+        4
+    } else if name.starts_with(q) {
+        3
+    } else if handle.contains(q) {
+        2
+    } else if name.contains(q) {
+        1
+    } else {
+        0
+    };
+    rel * 100 + m * 10
+}
+
 /// Hard cap on dropped video file size before we accept it. Matches
 /// bsky's own `app.bsky.video.uploadVideo` ceiling — files above
 /// this would 413 at the AppView even if we managed to upload them,
@@ -302,10 +368,14 @@ pub fn ComposeSheet() -> Element {
             let Some(client) = fresh_client(session_for_search).await else {
                 return;
             };
-            match client.search_actors_typeahead(&q, 8).await {
+            match client.search_actors_typeahead(&q, MENTION_FETCH).await {
                 Ok(actors) => {
                     if *mention_search_seq.peek() == seq {
-                        mention_results.set(actors);
+                        // Bias toward people you follow / who follow
+                        // you, then trim to the visible row count.
+                        let mut ranked = rank_mention_results(actors, &q);
+                        ranked.truncate(MENTION_SHOWN);
+                        mention_results.set(ranked);
                         mention_selected.set(0);
                     }
                 }
@@ -1586,5 +1656,91 @@ mod mention_prefix_tests {
     fn replace_preserves_text_before_the_mention() {
         let out = replace_mention_prefix("thanks for the heads-up\n\n@a", "alice.bsky.social");
         assert_eq!(out, "thanks for the heads-up\n\n@alice.bsky.social ");
+    }
+}
+
+#[cfg(test)]
+mod mention_ranking_tests {
+    use super::rank_mention_results;
+    use smooblue_atproto::{ActorProfile, ActorViewerState};
+
+    fn actor(handle: &str, name: Option<&str>, following: bool, followed_by: bool) -> ActorProfile {
+        ActorProfile {
+            did: format!("did:plc:{handle}"),
+            handle: handle.into(),
+            display_name: name.map(String::from),
+            description: None,
+            avatar: None,
+            banner: None,
+            followers_count: None,
+            follows_count: None,
+            posts_count: None,
+            viewer: Some(ActorViewerState {
+                following: following.then(|| "at://follow".into()),
+                followed_by: followed_by.then(|| "at://followedby".into()),
+                muted: None,
+                blocked_by: None,
+                ..Default::default()
+            }),
+            pinned_post: None,
+        }
+    }
+
+    fn handles(v: &[ActorProfile]) -> Vec<&str> {
+        v.iter().map(|a| a.handle.as_str()).collect()
+    }
+
+    #[test]
+    fn follows_rank_above_strangers_even_with_weaker_match() {
+        // Stranger is a clean prefix match; the person you follow only
+        // matches mid-handle. Relationship still wins — that's the bias.
+        let stranger = actor("alex.bsky.social", Some("Alex"), false, false);
+        let you_follow = actor("dralice.bsky.social", Some("Dr Alice"), true, false);
+        let ranked = rank_mention_results(vec![stranger, you_follow], "al");
+        assert_eq!(
+            handles(&ranked),
+            vec!["dralice.bsky.social", "alex.bsky.social"]
+        );
+    }
+
+    #[test]
+    fn relationship_tiers_order_mutual_following_followed_stranger() {
+        let stranger = actor("s.bsky.social", Some("S"), false, false);
+        let follows_you = actor("fy.bsky.social", Some("FY"), false, true);
+        let you_follow = actor("yf.bsky.social", Some("YF"), true, false);
+        let mutual = actor("mu.bsky.social", Some("Mu"), true, true);
+        // Deliberately shuffled input.
+        let ranked = rank_mention_results(vec![stranger, follows_you, mutual, you_follow], "");
+        assert_eq!(
+            handles(&ranked),
+            vec![
+                "mu.bsky.social",
+                "yf.bsky.social",
+                "fy.bsky.social",
+                "s.bsky.social"
+            ]
+        );
+    }
+
+    #[test]
+    fn within_a_tier_handle_prefix_beats_display_name_substring() {
+        // Both strangers. One prefix-matches the handle, the other only
+        // matches inside the display name.
+        let handle_prefix = actor("bobby.bsky.social", Some("Z"), false, false);
+        let name_substr = actor("zzz.bsky.social", Some("Mr Bob"), false, false);
+        let ranked = rank_mention_results(vec![name_substr, handle_prefix], "bob");
+        assert_eq!(
+            handles(&ranked),
+            vec!["bobby.bsky.social", "zzz.bsky.social"]
+        );
+    }
+
+    #[test]
+    fn equal_scores_preserve_server_order() {
+        // Two strangers, identical match quality → server order kept.
+        let first = actor("aaa.bsky.social", Some("A"), false, false);
+        let second = actor("aab.bsky.social", Some("A"), false, false);
+        let ranked = rank_mention_results(vec![first, second], "aa");
+        assert_eq!(handles(&ranked), vec!["aaa.bsky.social", "aab.bsky.social"]);
     }
 }
