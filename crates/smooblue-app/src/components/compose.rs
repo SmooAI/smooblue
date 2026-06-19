@@ -26,7 +26,8 @@ use crate::ocr;
 use crate::state::ComposeContext;
 use dioxus::prelude::*;
 use smooblue_atproto::{
-    ActorProfile, AspectRatio, BlobRef, PostImage, PostVideo, ReplyRef, StrongRef,
+    ActorProfile, AspectRatio, BlobRef, FacetKind, LinkCard, PostExternal, PostImage, PostVideo,
+    ReplyRef, StrongRef,
 };
 use smooblue_oauth::Session;
 use std::path::PathBuf;
@@ -116,6 +117,19 @@ pub fn replace_mention_prefix(text: &str, full_handle: &str) -> String {
     out.push_str(full_handle);
     out.push(' ');
     out
+}
+
+/// First link URL in `text`, if any — drives the link-card preview.
+/// Reuses the same facet detector the post pipeline uses so the card
+/// we preview matches the link facet we'll actually publish (no
+/// second, divergent URL regex). Returns the first http(s) link.
+pub fn first_link_url(text: &str) -> Option<String> {
+    smooblue_atproto::detect_facet_candidates(text)
+        .into_iter()
+        .find_map(|c| match c.kind {
+            FacetKind::Link { uri } => Some(uri),
+            _ => None,
+        })
 }
 
 /// How many actors to pull from the typeahead before re-ranking. We
@@ -335,6 +349,18 @@ pub fn ComposeSheet() -> Element {
     // newer ones.
     let mut mention_search_seq = use_signal::<u64>(|| 0);
 
+    // Link-card preview state. When the post text contains a URL we
+    // fetch its OpenGraph card (via CardyB) and preview it under the
+    // textarea with a remove (×). The card is attached at post time
+    // only when no image/video is set — those own the single media
+    // slot. `link_card_dismissed` holds URLs the user removed so we
+    // don't immediately re-fetch them. `link_card_seq` is the same
+    // stale-response guard the mention search uses.
+    let mut link_card = use_signal::<Option<LinkCard>>(|| None);
+    let mut link_card_loading = use_signal(|| false);
+    let mut link_card_dismissed = use_signal::<std::collections::HashSet<String>>(Default::default);
+    let mut link_card_seq = use_signal::<u64>(|| 0);
+
     // Debounced typeahead. `mention_query` change → wait 150ms → if
     // the query is still the same (no further keystrokes have
     // superseded it), call the AppView. Failure silently empties the
@@ -381,6 +407,54 @@ pub fn ComposeSheet() -> Element {
                 }
                 Err(e) => {
                     tracing::debug!(error = %e, "compose: actor typeahead search failed");
+                }
+            }
+        });
+    });
+
+    // Debounced link-card fetch. Watches the post text for the first
+    // URL; when it changes (and isn't dismissed) we fetch the card
+    // after a short pause. Clears the card when the URL disappears.
+    // Failures are silent — a post with a bare link is still fine,
+    // it just won't get a card.
+    use_effect(move || {
+        let url = first_link_url(&text.read());
+        // Drop the card if the link is gone or the user dismissed it.
+        let Some(url) = url.filter(|u| !link_card_dismissed.read().contains(u)) else {
+            if link_card.peek().is_some() {
+                link_card.set(None);
+            }
+            return;
+        };
+        // Already have (or are loading) this exact card — nothing to do.
+        if link_card.peek().as_ref().map(|c| &c.uri) == Some(&url) {
+            return;
+        }
+        let session_for_card = session;
+        let seq = {
+            let mut s = link_card_seq.write();
+            *s = s.wrapping_add(1);
+            *s
+        };
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            // Superseded by a newer URL? bail.
+            if *link_card_seq.peek() != seq {
+                return;
+            }
+            if first_link_url(&text.peek()).as_deref() != Some(url.as_str()) {
+                return;
+            }
+            link_card_loading.set(true);
+            let card = match fresh_client(session_for_card).await {
+                Some(client) => client.fetch_link_card(&url).await.ok(),
+                None => None,
+            };
+            // Only commit if we're still the newest request.
+            if *link_card_seq.peek() == seq {
+                link_card_loading.set(false);
+                if let Some(card) = card {
+                    link_card.set(Some(card));
                 }
             }
         });
@@ -498,6 +572,7 @@ pub fn ComposeSheet() -> Element {
         let body = text.read().clone();
         let sess = session.read().clone();
         let video_snap = video_attachment.read().clone();
+        let card_snap = link_card.read().clone();
         let quote = ctx.read().quote_to.as_ref().map(|q| StrongRef {
             uri: q.uri.clone(),
             cid: q.cid.clone(),
@@ -538,6 +613,8 @@ pub fn ComposeSheet() -> Element {
                 let _ = crate::persistence::save_draft("");
                 attachments.set(Vec::new());
                 video_attachment.set(None);
+                link_card.set(None);
+                link_card_dismissed.write().clear();
                 let mut w = ctx.write();
                 w.reply_to = None;
                 w.quote_to = None;
@@ -603,6 +680,28 @@ pub fn ComposeSheet() -> Element {
                 .build_facets_from_text(&body)
                 .await
                 .unwrap_or_default();
+            // Build the link-card embed only when nothing else owns the
+            // media slot (images / video). Uploading the thumb is
+            // best-effort — a failed thumb still posts the card, just
+            // without the image.
+            let external: Option<PostExternal> = if images.is_empty() && video_post.is_none() {
+                if let Some(card) = card_snap {
+                    let thumb = match card.image_url.as_deref() {
+                        Some(u) => client.upload_link_card_thumb(u).await.ok(),
+                        None => None,
+                    };
+                    Some(PostExternal {
+                        uri: card.uri,
+                        title: card.title,
+                        description: card.description,
+                        thumb,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             let result = client
                 .create_post_full(
                     &body,
@@ -611,6 +710,7 @@ pub fn ComposeSheet() -> Element {
                     &facets,
                     quote.as_ref(),
                     video_post.as_ref(),
+                    external.as_ref(),
                 )
                 .await;
             let root_record = match result {
@@ -649,7 +749,15 @@ pub fn ComposeSheet() -> Element {
                     .await
                     .unwrap_or_default();
                 match client
-                    .create_post_full(chunk, Some(&reply_chain), &[], &chunk_facets, None, None)
+                    .create_post_full(
+                        chunk,
+                        Some(&reply_chain),
+                        &[],
+                        &chunk_facets,
+                        None,
+                        None,
+                        None,
+                    )
                     .await
                 {
                     Ok(rec) => {
@@ -678,6 +786,8 @@ pub fn ComposeSheet() -> Element {
                 let _ = crate::persistence::save_draft("");
                 attachments.set(Vec::new());
                 video_attachment.set(None);
+                link_card.set(None);
+                link_card_dismissed.write().clear();
                 let mut w = ctx.write();
                 w.reply_to = None;
                 w.quote_to = None;
@@ -1126,6 +1236,43 @@ pub fn ComposeSheet() -> Element {
                                     slot.alt = truncate_alt(e.value());
                                 }
                             },
+                        }
+                    }
+                }
+                // Link-card preview. Shows the OpenGraph card we'll
+                // attach for the first URL in the post. Hidden once
+                // images / a video are attached (they own the media
+                // slot, so the card won't be sent). The × dismisses it.
+                if attachments_snap.is_empty() && !has_video {
+                    if let Some(card) = link_card.read().clone() {
+                        div { class: "compose__link-card",
+                            if let Some(img) = card.image_url.as_ref() {
+                                div { class: "compose__link-card-thumb",
+                                    img { loading: "lazy", decoding: "async", src: "{img}", alt: "" }
+                                }
+                            }
+                            div { class: "compose__link-card-meta",
+                                span { class: "compose__link-card-title", "{card.title}" }
+                                if !card.description.is_empty() {
+                                    span { class: "compose__link-card-desc", "{card.description}" }
+                                }
+                                span { class: "compose__link-card-url", "{card.uri}" }
+                            }
+                            button { class: "compose__link-card-remove",
+                                title: "Remove link preview",
+                                onclick: move |_| {
+                                    if let Some(c) = link_card.peek().clone() {
+                                        link_card_dismissed.write().insert(c.uri);
+                                    }
+                                    link_card.set(None);
+                                },
+                                icons::X { size: icons::Size::Sm }
+                            }
+                        }
+                    } else if *link_card_loading.read() {
+                        div { class: "compose__link-card compose__link-card--loading",
+                            span { class: "compose__thumb-spinner" }
+                            span { "Fetching link preview…" }
                         }
                     }
                 }

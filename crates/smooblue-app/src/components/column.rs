@@ -1153,7 +1153,7 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                                 },
                             };
                             client
-                                .create_post_full(&text, Some(&r), &[], &[], None, None)
+                                .create_post_full(&text, Some(&r), &[], &[], None, None, None)
                                 .await
                                 .map(|_| ())
                                 .map_err(|e| e.to_string())
