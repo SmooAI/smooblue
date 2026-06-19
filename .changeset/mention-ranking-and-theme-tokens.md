@@ -1,5 +1,5 @@
 ---
-"smooblue-app": patch
+"smooblue": patch
 ---
 
 The @mention autocomplete now biases toward people you actually know. Bluesky's typeahead is only lightly personalized, so it buried mutuals under big strangers who happened to prefix-match. Results are now re-ranked: mutuals first, then people you follow, then people who follow you, then strangers — and within a tier a prefix match on the handle or display name beats a mid-string match. We fetch a wider candidate set and trim after ranking so a buried mutual can still surface.
