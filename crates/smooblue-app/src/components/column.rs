@@ -166,6 +166,14 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // the scroll-anchor block in that loop. Updated on every scroll
     // tick and once on mount via a `document::eval` round-trip.
     let mut viewport = use_signal(|| (0.0_f64, 0.0_f64, 0.0_f64));
+    // Measured per-row heights keyed by the row's stable key (post URI,
+    // notif group key, …). Feeds `measured_virtual_range` so the
+    // virtualized window + spacers track real content heights instead
+    // of one fixed estimate — that's what removes the scroll "wiggle"
+    // on mixed feeds. Rows the user hasn't scrolled past yet fall back
+    // to the per-kind estimate until measured. Updated from the same
+    // scroll/mount eval that reads viewport geometry.
+    let row_heights = use_signal::<HashMap<String, f64>>(HashMap::new);
     // Per-column fuzzy filter input. Empty string = show everything.
     // Match is case-insensitive substring on (text, author handle,
     // author displayName, reposter displayName, parent handle). No
@@ -502,20 +510,14 @@ pub fn Column(spec: ColumnSpec) -> Element {
         let kind = kind_for_scroll.clone();
         scroll_check_pending.set(true);
         spawn(async move {
-            let mut eval = dioxus::document::eval(&format!(
-                r#"
-                const el = document.querySelector({sel});
-                if (!el) {{ dioxus.send([-1, -1, -1]); }}
-                else {{ dioxus.send([el.scrollTop, el.clientHeight, el.scrollHeight]); }}
-                "#,
-                sel = serde_json::to_string(&sel).unwrap_or_else(|_| "\"\"".to_string()),
-            ));
-            let vals: Vec<f64> = eval.recv().await.unwrap_or_default();
+            let mut eval = dioxus::document::eval(&probe_js(&sel));
+            let v: serde_json::Value = eval.recv().await.unwrap_or(serde_json::Value::Null);
             scroll_check_pending.set(false);
-            if vals.len() == 3 && vals[0] >= 0.0 {
-                viewport.set((vals[0], vals[1], vals[2]));
+            if let Some((st, ch, sh)) = parse_probe_geometry(&v) {
+                viewport.set((st, ch, sh));
+                apply_measured_heights(&v, row_heights);
                 // Infinite-scroll trigger: within 600px of bottom.
-                let dist = vals[2] - vals[0] - vals[1];
+                let dist = sh - st - ch;
                 if is_paginated(&kind)
                     && !*loading_more.peek()
                     && !*at_end.peek()
@@ -534,20 +536,29 @@ pub fn Column(spec: ColumnSpec) -> Element {
     let on_body_mounted = move |_evt: Event<MountedData>| {
         let sel = body_selector_for_mount.clone();
         spawn(async move {
-            let mut eval = dioxus::document::eval(&format!(
-                r#"
-                const el = document.querySelector({sel});
-                if (!el) {{ dioxus.send([-1, -1, -1]); }}
-                else {{ dioxus.send([el.scrollTop, el.clientHeight, el.scrollHeight]); }}
-                "#,
-                sel = serde_json::to_string(&sel).unwrap_or_else(|_| "\"\"".to_string()),
-            ));
-            let vals: Vec<f64> = eval.recv().await.unwrap_or_default();
-            if vals.len() == 3 && vals[0] >= 0.0 {
-                viewport.set((vals[0], vals[1], vals[2]));
+            let mut eval = dioxus::document::eval(&probe_js(&sel));
+            let v: serde_json::Value = eval.recv().await.unwrap_or(serde_json::Value::Null);
+            if let Some((st, ch, sh)) = parse_probe_geometry(&v) {
+                viewport.set((st, ch, sh));
+                apply_measured_heights(&v, row_heights);
             }
         });
     };
+    // Re-measure rows whenever the data changes (new page, top-poll
+    // prepend, filter toggle) so freshly-rendered rows pick up real
+    // heights without waiting for the next scroll tick. Runs after the
+    // render commits; diff-guarded inside apply_measured_heights so it
+    // can't spin a render→measure loop.
+    let body_selector_for_remeasure = body_selector.clone();
+    use_effect(move || {
+        let _ = data.read().is_empty(); // subscribe to data changes
+        let sel = body_selector_for_remeasure.clone();
+        spawn(async move {
+            let mut eval = dioxus::document::eval(&probe_js(&sel));
+            let v: serde_json::Value = eval.recv().await.unwrap_or(serde_json::Value::Null);
+            apply_measured_heights(&v, row_heights);
+        });
+    });
     // "Mark all as read" callback — wired into the header's Inbox-only
     // action. Updates the DB then re-reads list_active so the column
     // reflects the change immediately (the 15s poll would otherwise
@@ -685,9 +696,12 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             }
                         } else {
                             let (vp_top, vp_h, _) = *viewport.read();
-                            let row_h = estimated_row_height_px(&spec.kind);
+                            let est = estimated_row_height_px(&spec.kind);
+                            let keys: Vec<String> =
+                                filtered.iter().map(|it| feed_item_key(it)).collect();
+                            let heights = heights_for(&keys, &row_heights.read(), est);
                             let (first, last, top_spacer, bot_spacer) =
-                                virtual_range(filtered.len(), vp_top, vp_h, row_h);
+                                measured_virtual_range(&heights, vp_top, vp_h);
                             let slice: Vec<&FeedItem> = filtered[first..last].to_vec();
                             rsx! {
                                 div { class: "deck-column__virtual-spacer",
@@ -698,12 +712,20 @@ pub fn Column(spec: ColumnSpec) -> Element {
                                     // feed (e.g. two reposters surfaced it).
                                     // Disambiguate the key with the reposter
                                     // DID when present so Dioxus's keyed-diff
-                                    // assertion holds.
-                                    PostCard {
+                                    // assertion holds. The wrapper carries
+                                    // data-row-key so the scroll probe can
+                                    // measure this row's real height; it's a
+                                    // transparent block box (no margin/border)
+                                    // so it doesn't change layout.
+                                    div {
+                                        class: "deck-column__vrow",
                                         key: "{feed_item_key(item)}",
-                                        post: item.post.clone(),
-                                        reposter: feed_item_reposter(item),
-                                        reply_parent_handle: feed_item_parent_handle(item),
+                                        "data-row-key": "{feed_item_key(item)}",
+                                        PostCard {
+                                            post: item.post.clone(),
+                                            reposter: feed_item_reposter(item),
+                                            reply_parent_handle: feed_item_parent_handle(item),
+                                        }
                                     }
                                 }
                                 div { class: "deck-column__virtual-spacer",
@@ -714,18 +736,28 @@ pub fn Column(spec: ColumnSpec) -> Element {
                     }
                     (ColumnData::Notifications { groups, subjects }, _, _) => {
                         let (vp_top, vp_h, _) = *viewport.read();
-                        let row_h = estimated_row_height_px(&spec.kind);
+                        let est = estimated_row_height_px(&spec.kind);
+                        let keys: Vec<String> = groups
+                            .iter()
+                            .enumerate()
+                            .map(|(i, g)| group_key(g, i))
+                            .collect();
+                        let heights = heights_for(&keys, &row_heights.read(), est);
                         let (first, last, top_spacer, bot_spacer) =
-                            virtual_range(groups.len(), vp_top, vp_h, row_h);
+                            measured_virtual_range(&heights, vp_top, vp_h);
                         rsx! {
                             div { class: "deck-column__virtual-spacer",
                                 style: "height: {top_spacer}px",
                             }
                             for (i, g) in groups[first..last].iter().enumerate() {
-                                NotificationCard {
+                                div {
+                                    class: "deck-column__vrow",
                                     key: "{group_key(g, first + i)}",
-                                    group: g.clone(),
-                                    subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
+                                    "data-row-key": "{group_key(g, first + i)}",
+                                    NotificationCard {
+                                        group: g.clone(),
+                                        subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
+                                    }
                                 }
                             }
                             div { class: "deck-column__virtual-spacer",
@@ -872,6 +904,157 @@ pub fn virtual_range(
     let top = first as f64 * row_h;
     let bot = total.saturating_sub(last) as f64 * row_h;
     (first, last, top, bot)
+}
+
+/// Measured-height variant of [`virtual_range`]. Instead of assuming a
+/// single `row_h` for every row, it walks per-row `heights` (real
+/// measured pixels where the row has been rendered + measured, an
+/// estimate otherwise) to place the visible window exactly.
+///
+/// This is what kills the scroll "wiggle": with one fixed row height a
+/// mixed feed (text ~120px vs a 4-image grid + quote ~500px+) makes
+/// `scroll_top / row_h` drift from the true pixel position, so the
+/// spacers don't match the rendered rows and the browser re-corrects
+/// the scroll position every few rows. Walking real heights keeps the
+/// spacers pixel-accurate, so the content stays put.
+///
+/// Returns `(first, last, top_spacer_px, bot_spacer_px)` — same
+/// contract as [`virtual_range`]: render `[first..last]`, pad with the
+/// two spacers. A `~1.5` viewport buffer is kept above and below the
+/// strictly-visible window so a scroll-flick doesn't expose a blank.
+pub fn measured_virtual_range(
+    heights: &[f64],
+    scroll_top: f64,
+    client_h: f64,
+) -> (usize, usize, f64, f64) {
+    let total = heights.len();
+    if total == 0 {
+        return (0, 0, 0.0, 0.0);
+    }
+    let effective_h = if client_h <= 0.0 { 800.0 } else { client_h };
+    let scroll_top = scroll_top.max(0.0);
+
+    // First row whose bottom edge is past scroll_top — the first row at
+    // least partly in the viewport.
+    let mut acc = 0.0;
+    let mut first_visible = total - 1;
+    for (i, h) in heights.iter().enumerate() {
+        if acc + h > scroll_top {
+            first_visible = i;
+            break;
+        }
+        acc += h;
+    }
+
+    // Last row needed to cover the viewport height downward.
+    let mut covered = 0.0;
+    let mut last_visible = first_visible + 1;
+    for h in heights.iter().skip(first_visible) {
+        covered += h;
+        if covered >= effective_h {
+            break;
+        }
+        last_visible += 1;
+    }
+    last_visible = last_visible.min(total);
+
+    // Expand by ~1.5 viewports of buffer on each side (in px, since
+    // rows vary in height).
+    let buffer_px = effective_h * 1.5;
+    let mut first = first_visible;
+    let mut up = 0.0;
+    while first > 0 && up < buffer_px {
+        first -= 1;
+        up += heights[first];
+    }
+    let mut last = last_visible;
+    let mut down = 0.0;
+    while last < total && down < buffer_px {
+        down += heights[last];
+        last += 1;
+    }
+
+    let top_spacer: f64 = heights[..first].iter().sum();
+    let bot_spacer: f64 = heights[last..].iter().sum();
+    (first, last, top_spacer, bot_spacer)
+}
+
+/// JS for the scroll/mount probe: returns `[scrollTop, clientHeight,
+/// scrollHeight, {rowKey: offsetHeight, …}]`, or `null` if the body
+/// isn't in the DOM. The row map drives [`measured_virtual_range`];
+/// only rows tagged with `data-row-key` (the virtualized lists) are
+/// measured. `offsetHeight` is an int so it forces a layout flush once
+/// per probe — cheap, and the probe is already throttled by
+/// `scroll_check_pending`.
+fn probe_js(sel: &str) -> String {
+    format!(
+        r#"
+        const el = document.querySelector({sel});
+        if (!el) {{ dioxus.send(null); }}
+        else {{
+            const rows = {{}};
+            el.querySelectorAll('[data-row-key]').forEach(function(r) {{
+                rows[r.getAttribute('data-row-key')] = r.offsetHeight;
+            }});
+            dioxus.send([el.scrollTop, el.clientHeight, el.scrollHeight, rows]);
+        }}
+        "#,
+        sel = serde_json::to_string(sel).unwrap_or_else(|_| "\"\"".to_string()),
+    )
+}
+
+/// Pull `(scroll_top, client_h, scroll_h)` out of a [`probe_js`]
+/// response. `None` for a missing body / malformed payload.
+fn parse_probe_geometry(v: &serde_json::Value) -> Option<(f64, f64, f64)> {
+    let arr = v.as_array()?;
+    let st = arr.first()?.as_f64()?;
+    let ch = arr.get(1)?.as_f64()?;
+    let sh = arr.get(2)?.as_f64()?;
+    if st < 0.0 {
+        return None;
+    }
+    Some((st, ch, sh))
+}
+
+/// Fold measured row heights from a [`probe_js`] response into the
+/// per-column height map. Diff-guarded: only writes when a height
+/// actually changed by >0.5px, so it can't spin a render→measure→
+/// render loop (a write would re-render, re-probe, and—if nothing
+/// moved—find no change and stop).
+fn apply_measured_heights(v: &serde_json::Value, mut row_heights: Signal<HashMap<String, f64>>) {
+    let Some(rows) = v
+        .as_array()
+        .and_then(|a| a.get(3))
+        .and_then(|r| r.as_object())
+    else {
+        return;
+    };
+    let changed = {
+        let cur = row_heights.peek();
+        rows.iter().any(|(k, val)| {
+            val.as_f64()
+                .filter(|h| *h > 0.0)
+                .is_some_and(|h| cur.get(k).is_none_or(|old| (old - h).abs() > 0.5))
+        })
+    };
+    if !changed {
+        return;
+    }
+    let mut w = row_heights.write();
+    for (k, val) in rows {
+        if let Some(h) = val.as_f64().filter(|h| *h > 0.0) {
+            w.insert(k.clone(), h);
+        }
+    }
+}
+
+/// Build the per-row height vector for a list of stable keys, using the
+/// measured height where known and `estimate` otherwise. This is the
+/// input to [`measured_virtual_range`].
+fn heights_for(keys: &[String], measured: &HashMap<String, f64>, estimate: f64) -> Vec<f64> {
+    keys.iter()
+        .map(|k| measured.get(k).copied().unwrap_or(estimate))
+        .collect()
 }
 
 /// True when the column supports cursor-based fetch_more on scroll.
@@ -2380,6 +2563,76 @@ mod tests {
         assert!(first <= last);
         // No items past the end, so bottom spacer is zero.
         assert_eq!(bot, (20 - last) as f64 * 240.0);
+    }
+
+    #[test]
+    fn measured_range_empty_is_empty() {
+        assert_eq!(measured_virtual_range(&[], 0.0, 800.0), (0, 0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn measured_range_spacers_account_for_all_offscreen_height() {
+        // Mixed heights; the two spacers plus the rendered slice must
+        // sum to the full content height regardless of where we are.
+        let heights = vec![
+            120.0, 500.0, 90.0, 300.0, 450.0, 80.0, 220.0, 600.0, 130.0, 400.0,
+        ];
+        let total_h: f64 = heights.iter().sum();
+        for &st in &[0.0, 350.0, 900.0, 1500.0, 5000.0] {
+            let (first, last, top, bot) = measured_virtual_range(&heights, st, 400.0);
+            assert!(first <= last && last <= heights.len());
+            let rendered: f64 = heights[first..last].iter().sum();
+            assert!(
+                (top + rendered + bot - total_h).abs() < 1e-6,
+                "spacers+slice must equal total at scroll_top={st}"
+            );
+            // top spacer is exactly the height above `first`.
+            assert!((top - heights[..first].iter().sum::<f64>()).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn measured_range_first_tracks_real_heights_not_an_average() {
+        // Row 0 is a tall 1000px video; everything else is short. A
+        // fixed-height model would mis-place the window, but the
+        // measured walk must keep row 0 in view until we scroll past
+        // its real height.
+        let mut heights = vec![1000.0];
+        heights.extend(std::iter::repeat_n(100.0, 20));
+        // Scrolled 200px in — still inside row 0, so row 0 stays in the
+        // window (with buffer, first is 0).
+        let (first, _last, top, _bot) = measured_virtual_range(&heights, 200.0, 400.0);
+        assert_eq!(first, 0);
+        assert_eq!(top, 0.0);
+        // Scrolled 2000px — well past row 0 plus the 600px (1.5×400)
+        // buffer, so the tall first row falls out of the window and
+        // lands in the top spacer.
+        let (first2, _l2, top2, _b2) = measured_virtual_range(&heights, 2000.0, 400.0);
+        assert!(first2 >= 1, "expected to scroll past the tall first row");
+        assert!(
+            top2 >= 1000.0 - 1.0,
+            "top spacer should include the tall row"
+        );
+    }
+
+    #[test]
+    fn measured_range_clamps_past_end() {
+        let heights = vec![200.0; 10];
+        let (first, last, _top, bot) = measured_virtual_range(&heights, 100_000.0, 800.0);
+        assert!(last <= 10 && first <= last);
+        assert_eq!(bot, 0.0); // nothing below the rendered window
+    }
+
+    #[test]
+    fn measured_range_matches_uniform_heights_roughly() {
+        // With uniform heights the measured walk should land on the
+        // same neighbourhood as the legacy fixed-height computation.
+        let heights = vec![240.0; 50];
+        let (mf, ml, _, _) = measured_virtual_range(&heights, 2400.0, 800.0);
+        let (vf, vl, _, _) = virtual_range(50, 2400.0, 800.0, 240.0);
+        // Same ballpark window (buffers differ slightly: px vs items).
+        assert!((mf as i64 - vf as i64).abs() <= 3);
+        assert!((ml as i64 - vl as i64).abs() <= 3);
     }
 
     #[test]

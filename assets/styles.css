@@ -237,6 +237,16 @@ a {
     pointer-events: none;
 }
 
+/* Transparent measurement wrapper around each virtualized row. It has
+ * no box of its own (no margin/border/padding) so it doesn't alter
+ * layout — its only job is to be a block whose offsetHeight the scroll
+ * probe reads (via data-row-key) to feed measured-height virtualization.
+ * overflow-anchor stays at the default `auto` so WebKit can anchor on
+ * it during top-poll inserts. */
+.deck-column__vrow {
+    display: block;
+}
+
 .deck-column__empty,
 .deck-column__loading {
     padding: 24px 16px;
