@@ -4,6 +4,7 @@
 
 pub mod alt_text;
 pub mod auth_refresh;
+pub mod automation;
 pub mod components;
 pub mod demo;
 pub mod diag_log;
@@ -197,11 +198,70 @@ pub fn App() -> Element {
         crate::inbox_ingest::spawn_ingestion_task(session);
     });
 
+    // Opt-in UI-automation bridge (SMOOBLUE_AUTOMATION=<port>). Off by
+    // default. When set, a local socket accepts lines of JS and runs
+    // them against the live webview via document::eval — the closest
+    // thing to Playwright for a wry app (which can't be driven over
+    // CDP). The TCP listener runs on a plain tokio task; the eval drain
+    // loop runs via dioxus `spawn` so it's inside the runtime that
+    // `document::eval` requires.
+    //
+    // `automation_kick` exists only to wake the event loop. On macOS a
+    // fully-parked Cocoa run loop won't process the eval IPC from a
+    // background thread (request_redraw cross-thread is unreliable
+    // there), but a Signal write goes through the dioxus scheduler's
+    // EventLoopProxy waker — the same path the inbox poll uses to update
+    // the idle UI — which reliably wakes the loop. App reads it below so
+    // the write actually schedules a re-render.
+    let mut automation_kick = use_signal(|| 0u64);
+    use_hook(move || {
+        if let Some(port) = crate::automation::automation_port() {
+            let (tx, mut rx) =
+                tokio::sync::mpsc::unbounded_channel::<crate::automation::EvalRequest>();
+            tokio::spawn(crate::automation::serve(port, tx));
+            spawn(async move {
+                while let Some(req) = rx.recv().await {
+                    let mut eval = dioxus::document::eval(&crate::automation::wrap_eval(&req.code));
+                    // The tao event loop parks when the app is idle and
+                    // won't pump the eval IPC round-trip without input
+                    // (confirmed: a pending eval only resolved once the
+                    // window was focused/scrolled). Poke a redraw every
+                    // frame until the result lands, with a hard timeout
+                    // so a wedged eval can't spin forever.
+                    let recv_fut = eval.recv::<String>();
+                    tokio::pin!(recv_fut);
+                    let deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
+                    tokio::pin!(deadline);
+                    let result = loop {
+                        tokio::select! {
+                            r = &mut recv_fut => {
+                                break r.unwrap_or_else(|e| format!("ERR:eval failed: {e}"));
+                            }
+                            _ = &mut deadline => break "ERR:eval timed out".to_string(),
+                            _ = tokio::time::sleep(std::time::Duration::from_millis(16)) => {
+                                // Bump the kick signal → scheduler wakes
+                                // the event loop → poll_vdom pumps the
+                                // eval IPC round-trip.
+                                automation_kick.with_mut(|k| *k = k.wrapping_add(1));
+                            }
+                        }
+                    };
+                    let _ = req.reply.send(result);
+                }
+            });
+        }
+    });
+
     rsx! {
         style { "{STYLES}" }
         script { "{INLINE_VIDEO_AUTOPAUSE_JS}" }
         div {
             id: "main",
+            // Subscribes App to the automation kick signal so its writes
+            // from the eval drain loop schedule a re-render (and thus
+            // wake the event loop). No-op visually. `0` when the bridge
+            // is disabled.
+            "data-automation-kick": "{automation_kick}",
             if session.read().is_some() {
                 components::deck::DeckShell {}
             } else {

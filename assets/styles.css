@@ -237,6 +237,16 @@ a {
     pointer-events: none;
 }
 
+/* Transparent measurement wrapper around each virtualized row. It has
+ * no box of its own (no margin/border/padding) so it doesn't alter
+ * layout — its only job is to be a block whose offsetHeight the scroll
+ * probe reads (via data-row-key) to feed measured-height virtualization.
+ * overflow-anchor stays at the default `auto` so WebKit can anchor on
+ * it during top-poll inserts. */
+.deck-column__vrow {
+    display: block;
+}
+
 .deck-column__empty,
 .deck-column__loading {
     padding: 24px 16px;
@@ -1282,9 +1292,18 @@ a {
     bottom: calc(100% + 4px);
     left: 0;
     right: 0;
-    z-index: 50;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    /* Above the compose sheet's own stacking. The sheet is
+     * `overflow: visible` so this popover can paint past the sheet
+     * edge; the high z-index keeps it over the textarea + action bar
+     * rather than tucking behind them. */
+    z-index: 60;
+    /* Opaque panel — was `var(--color-surface)`, a token this theme
+     * never defines, so the background resolved to transparent and
+     * you could read the post text straight through the dropdown.
+     * `--card` is the same elevated-surface token `.modal__sheet`
+     * uses. */
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.32);
     max-height: 240px;
@@ -1303,7 +1322,7 @@ a {
     border: none;
     border-radius: calc(var(--radius-md) - 4px);
     background: transparent;
-    color: var(--color-fg);
+    color: var(--foreground);
     text-align: left;
     cursor: pointer;
     width: 100%;
@@ -1312,7 +1331,7 @@ a {
 
 .compose__mention-row:hover,
 .compose__mention-row--selected {
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .compose__mention-avatar {
@@ -1348,8 +1367,106 @@ a {
     text-overflow: ellipsis;
 }
 
+/* ===========================================================
+ *  Link-card preview (composer)
+ * =========================================================== */
+.compose__link-card {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    position: relative;
+}
+
+.compose__link-card--loading {
+    align-items: center;
+    gap: 8px;
+    color: var(--muted-foreground);
+    font-size: calc(13px * var(--font-scale, 1));
+}
+
+.compose__link-card-thumb {
+    flex: 0 0 72px;
+    width: 72px;
+    height: 72px;
+    border-radius: calc(var(--radius-md) - 4px);
+    overflow: hidden;
+    background: var(--muted);
+}
+
+.compose__link-card-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.compose__link-card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1 1 auto;
+    /* Room for the absolute-positioned × so long titles don't slide
+     * under it. */
+    padding-right: 24px;
+}
+
+.compose__link-card-title {
+    font-weight: 600;
+    font-size: calc(14px * var(--font-scale, 1));
+    line-height: 1.25;
+    color: var(--foreground);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.compose__link-card-desc {
+    font-size: calc(12px * var(--font-scale, 1));
+    line-height: 1.3;
+    color: var(--muted-foreground);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.compose__link-card-url {
+    font-size: calc(11px * var(--font-scale, 1));
+    color: var(--muted-foreground);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.compose__link-card-remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 50%;
+    background: var(--muted);
+    color: var(--foreground);
+    cursor: pointer;
+}
+
+.compose__link-card-remove:hover {
+    background: var(--border);
+}
+
 .compose__mention-handle {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-size: calc(12px * var(--font-scale, 1));
     line-height: 1.2;
     white-space: nowrap;
@@ -3995,17 +4112,17 @@ a {
     padding: var(--space-3);
     background: transparent;
     border: none;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--border);
     text-align: left;
     cursor: pointer;
-    color: var(--color-fg);
+    color: var(--foreground);
     font: inherit;
     /* Virtualized by the Rust render path — see .post. */
     contain: layout style paint;
 }
 
 .convo-row:hover {
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .convo-row__avatar {
@@ -4014,7 +4131,7 @@ a {
     height: 40px;
     border-radius: 50%;
     overflow: hidden;
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .convo-row__avatar img {
@@ -4026,7 +4143,7 @@ a {
 .convo-row__avatar-placeholder {
     width: 100%;
     height: 100%;
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .convo-row__body {
@@ -4051,14 +4168,14 @@ a {
 
 .convo-row__handle,
 .convo-row__others {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-size: var(--font-size-xs);
 }
 
 .convo-row__preview {
     margin-top: 2px;
     font-size: var(--font-size-xs);
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4351,7 +4468,7 @@ a {
 .a11y__label {
     flex: 0 0 110px;
     font-size: var(--font-size-sm);
-    color: var(--color-fg);
+    color: var(--foreground);
 }
 
 .a11y__slider {
@@ -4362,7 +4479,7 @@ a {
 .a11y__value {
     flex: 0 0 56px;
     text-align: right;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-size: var(--font-size-xs);
     font-variant-numeric: tabular-nums;
 }
@@ -4417,17 +4534,17 @@ a {
     gap: var(--space-3);
     width: 100%;
     padding: var(--space-3);
-    background: var(--color-surface, transparent);
-    border: 1px solid var(--color-border);
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: 10px;
     cursor: pointer;
-    color: var(--color-fg);
+    color: var(--foreground);
     font: inherit;
 }
 
 .inbox-row:hover {
-    background: var(--color-surface-alt);
-    border-color: var(--color-fg-muted);
+    background: var(--muted);
+    border-color: var(--muted-foreground);
 }
 
 .inbox-row--read {
@@ -4440,7 +4557,7 @@ a {
     height: 36px;
     border-radius: 50%;
     overflow: hidden;
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .inbox-row__avatar img {
@@ -4452,7 +4569,7 @@ a {
 .inbox-row__avatar-placeholder {
     width: 100%;
     height: 100%;
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 .inbox-row__body {
@@ -4476,21 +4593,21 @@ a {
 }
 
 .inbox-row__action {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
 }
 
 .inbox-row__chip {
     padding: 1px 6px;
     border-radius: 6px;
-    background: var(--color-surface-alt);
-    color: var(--color-fg-muted);
+    background: var(--muted);
+    color: var(--muted-foreground);
     font-size: calc(10px * var(--font-scale, 1));
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
 
 .inbox-row__age {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     font-size: var(--font-size-xs);
 }
 
@@ -4500,16 +4617,16 @@ a {
 .inbox-row__clout {
     padding: 1px 6px;
     border-radius: 6px;
-    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
-    background: var(--color-surface-alt);
-    color: var(--color-fg);
+    border: 1px solid var(--border);
+    background: var(--muted);
+    color: var(--foreground);
     font-size: calc(10px * var(--font-scale, 1));
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 
 .inbox-row__clout--low {
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     opacity: 0.7;
     font-style: italic;
 }
@@ -4517,7 +4634,7 @@ a {
 .inbox-row__preview {
     margin-top: 4px;
     font-size: var(--font-size-xs);
-    color: var(--color-fg);
+    color: var(--foreground);
     /* Show some/all of the actual message — up to 3 lines, then clamp. */
     white-space: normal;
     display: -webkit-box;
@@ -4561,7 +4678,7 @@ a {
     border: none;
     padding: 4px;
     border-radius: 4px;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -4569,8 +4686,8 @@ a {
 }
 
 .inbox-row__action-btn:hover {
-    background: var(--color-border);
-    color: var(--color-fg);
+    background: var(--border);
+    color: var(--foreground);
 }
 
 /* "Already read" state for the per-row mark-as-read button. Stays
@@ -4583,7 +4700,7 @@ a {
 
 .inbox-row__action-btn--done:hover {
     background: transparent;
-    color: var(--color-fg-muted);
+    color: var(--muted-foreground);
 }
 
 /* Snooze dropdown — pinned under the row's right edge. */
@@ -4595,8 +4712,8 @@ a {
     display: flex;
     flex-direction: column;
     min-width: 140px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
     padding: 4px 0;
@@ -4607,20 +4724,20 @@ a {
     border: none;
     padding: 8px 12px;
     text-align: left;
-    color: var(--color-fg);
+    color: var(--foreground);
     cursor: pointer;
     font: inherit;
 }
 
 .inbox-row__snooze-item:hover {
-    background: var(--color-surface-alt);
+    background: var(--muted);
 }
 
 /* Inline reply (DM only) — expands below the row when reply_open. */
 .inbox-row__reply {
     padding: var(--space-3);
-    background: var(--color-surface-alt);
-    border-top: 1px solid var(--color-border);
+    background: var(--muted);
+    border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);

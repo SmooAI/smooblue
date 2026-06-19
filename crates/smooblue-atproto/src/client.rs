@@ -111,6 +111,30 @@ pub struct AspectRatio {
     pub height: u32,
 }
 
+/// External link-card embed (`app.bsky.embed.external#external`). This
+/// is the record-side shape attached to a post; the `thumb` blob is
+/// minted via [`AtClient::upload_blob`] from the card image (optional —
+/// some pages have no OpenGraph image).
+#[derive(Clone, Debug, Serialize)]
+pub struct PostExternal {
+    pub uri: String,
+    pub title: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<BlobRef>,
+}
+
+/// Resolved OpenGraph metadata for a URL, used to preview + build a
+/// link card in the composer. `image_url` is a remote thumbnail still
+/// to be downloaded + uploaded as a blob at post time.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkCard {
+    pub uri: String,
+    pub title: String,
+    pub description: String,
+    pub image_url: Option<String>,
+}
+
 /// Lightweight AT-URI breakdown: `at://<did>/<collection>/<rkey>`.
 pub(crate) struct AtUriParts<'a> {
     pub did: &'a str,
@@ -659,7 +683,7 @@ impl AtClient {
     /// `com.atproto.repo.createRecord`). Returns the new record's
     /// AT-URI + CID so callers can immediately wire likes/reposts/replies.
     pub async fn create_post(&self, text: &str) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, None, &[], &[], None, None)
+        self.create_post_full(text, None, &[], &[], None, None, None)
             .await
     }
 
@@ -671,7 +695,7 @@ impl AtClient {
         text: &str,
         reply: Option<&ReplyRef>,
     ) -> Result<CreatedRecord, AtError> {
-        self.create_post_full(text, reply, &[], &[], None, None)
+        self.create_post_full(text, reply, &[], &[], None, None, None)
             .await
     }
 
@@ -689,6 +713,7 @@ impl AtClient {
     ///
     /// Mutually exclusive on the wire — `recordWithMedia` is bsky's
     /// "quote AND image" carrier.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_post_full(
         &self,
         text: &str,
@@ -697,6 +722,7 @@ impl AtClient {
         facets: &[crate::richtext::Facet],
         quote: Option<&StrongRef>,
         video: Option<&PostVideo>,
+        external: Option<&PostExternal>,
     ) -> Result<CreatedRecord, AtError> {
         let did = self.session.lock().did.clone();
         let created_at = chrono::Utc::now().to_rfc3339();
@@ -756,10 +782,28 @@ impl AtClient {
                 });
             }
             (Some(qr), None, None) => {
-                record["embed"] = serde_json::json!({
-                    "$type": "app.bsky.embed.record",
-                    "record": { "uri": qr.uri, "cid": qr.cid },
-                });
+                // Quote + link card → recordWithMedia (external is the
+                // media half). Bare quote → plain record embed.
+                if let Some(ext) = external {
+                    let media =
+                        serde_json::to_value(ext).map_err(|e| AtError::Decode(e.to_string()))?;
+                    record["embed"] = serde_json::json!({
+                        "$type": "app.bsky.embed.recordWithMedia",
+                        "record": {
+                            "$type": "app.bsky.embed.record",
+                            "record": { "uri": qr.uri, "cid": qr.cid }
+                        },
+                        "media": {
+                            "$type": "app.bsky.embed.external",
+                            "external": media,
+                        }
+                    });
+                } else {
+                    record["embed"] = serde_json::json!({
+                        "$type": "app.bsky.embed.record",
+                        "record": { "uri": qr.uri, "cid": qr.cid },
+                    });
+                }
             }
             (None, None, Some(imgs)) => {
                 record["embed"] = serde_json::json!({
@@ -767,7 +811,17 @@ impl AtClient {
                     "images": imgs,
                 });
             }
-            (None, None, None) => {}
+            (None, None, None) => {
+                // No media, no quote — a bare URL becomes a link card.
+                if let Some(ext) = external {
+                    let external =
+                        serde_json::to_value(ext).map_err(|e| AtError::Decode(e.to_string()))?;
+                    record["embed"] = serde_json::json!({
+                        "$type": "app.bsky.embed.external",
+                        "external": external,
+                    });
+                }
+            }
         }
         if !facets.is_empty() {
             record["facets"] = serde_json::to_value(facets)
@@ -873,6 +927,65 @@ impl AtClient {
         }
         let r: R = self.post_bytes(&url, bytes, mime).await?;
         Ok(r.blob)
+    }
+
+    /// Resolve OpenGraph metadata for a URL via CardyB
+    /// (`cardyb.bsky.app`) — the same card-extraction service the
+    /// official Bluesky app uses. Doing it server-side sidesteps
+    /// HTML parsing + the CORS wall a webview fetch would hit. Returns
+    /// a [`LinkCard`] whose `image_url` (if any) still needs
+    /// downloading + uploading as a blob at post time.
+    pub async fn fetch_link_card(&self, url: &str) -> Result<LinkCard, AtError> {
+        let mut endpoint = Url::parse("https://cardyb.bsky.app/v1/extract")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        endpoint.query_pairs_mut().append_pair("url", url);
+        #[derive(Deserialize)]
+        struct CardyResp {
+            #[serde(default)]
+            error: String,
+            #[serde(default)]
+            title: String,
+            #[serde(default)]
+            description: String,
+            #[serde(default)]
+            image: String,
+            #[serde(default)]
+            url: String,
+        }
+        let resp: CardyResp = self.http.get(endpoint).send().await?.json().await?;
+        if !resp.error.is_empty() {
+            return Err(AtError::Decode(format!(
+                "link card extract: {}",
+                resp.error
+            )));
+        }
+        Ok(LinkCard {
+            uri: if resp.url.is_empty() {
+                url.to_string()
+            } else {
+                resp.url
+            },
+            title: resp.title,
+            description: resp.description,
+            image_url: Some(resp.image).filter(|s| !s.is_empty()),
+        })
+    }
+
+    /// Download a link-card thumbnail and upload it as a blob, returning
+    /// the [`BlobRef`] to drop into a [`PostExternal`]. Best-effort: a
+    /// fetch/upload failure returns `Err` and the caller posts the card
+    /// without a thumb rather than failing the whole post.
+    pub async fn upload_link_card_thumb(&self, image_url: &str) -> Result<BlobRef, AtError> {
+        let resp = self.http.get(image_url).send().await?;
+        let mime = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
+            .filter(|s| s.starts_with("image/"))
+            .unwrap_or_else(|| "image/jpeg".to_string());
+        let bytes = resp.bytes().await?.to_vec();
+        self.upload_blob(bytes, &mime).await
     }
 
     /// Create a like (`app.bsky.feed.like`). Returns the new record's URI so
@@ -1625,6 +1738,7 @@ mod tests {
                 &[],
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1670,7 +1784,7 @@ mod tests {
             img,
         ];
         client
-            .create_post_full("six images", None, &many, &[], None, None)
+            .create_post_full("six images", None, &many, &[], None, None, None)
             .await
             .unwrap();
     }
@@ -1831,7 +1945,7 @@ mod tests {
             aspect_ratio: None,
         };
         let rec = client
-            .create_post_full("look at this", None, &[], &[], None, Some(&video))
+            .create_post_full("look at this", None, &[], &[], None, Some(&video), None)
             .await
             .unwrap();
         assert_eq!(rec.uri, "at://did:plc:test/app.bsky.feed.post/v1");
@@ -1881,7 +1995,15 @@ mod tests {
             cid: "qcid".into(),
         };
         client
-            .create_post_full("with quote", None, &[], &[], Some(&quote), Some(&video))
+            .create_post_full(
+                "with quote",
+                None,
+                &[],
+                &[],
+                Some(&quote),
+                Some(&video),
+                None,
+            )
             .await
             .unwrap();
     }
@@ -1946,6 +2068,130 @@ mod tests {
                 &[],
                 None,
                 Some(&video),
+                None,
+            )
+            .await
+            .unwrap();
+    }
+
+    // ── External link-card embed ───────────────────────────────────
+
+    #[tokio::test]
+    async fn create_post_with_external_embeds_app_bsky_embed_external() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.external");
+                assert_eq!(embed["external"]["uri"], "https://smoo.ai/blog");
+                assert_eq!(embed["external"]["title"], "Smoo AI");
+                assert_eq!(embed["external"]["thumb"]["$type"], "blob");
+                assert_eq!(embed["external"]["thumb"]["ref"]["$link"], "bafyThumb");
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "uri": "at://x", "cid": "y"
+                }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let ext = PostExternal {
+            uri: "https://smoo.ai/blog".into(),
+            title: "Smoo AI".into(),
+            description: "the post".into(),
+            thumb: Some(BlobRef {
+                kind: "blob".into(),
+                link: BlobLink {
+                    cid: "bafyThumb".into(),
+                },
+                mime_type: "image/jpeg".into(),
+                size: 1234,
+            }),
+        };
+        client
+            .create_post_full("read this", None, &[], &[], None, None, Some(&ext))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_post_external_without_thumb_omits_the_field() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let ext = &body["record"]["embed"]["external"];
+                // thumb is Option::None → `skip_serializing_if` drops it.
+                assert!(ext.get("thumb").is_none());
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "uri": "at://x", "cid": "y" }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let ext = PostExternal {
+            uri: "https://example.com".into(),
+            title: "No image here".into(),
+            description: String::new(),
+            thumb: None,
+        };
+        client
+            .create_post_full("link", None, &[], &[], None, None, Some(&ext))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_post_quote_plus_external_uses_record_with_media() {
+        let pds = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(|req: &Request| {
+                let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let embed = &body["record"]["embed"];
+                assert_eq!(embed["$type"], "app.bsky.embed.recordWithMedia");
+                assert_eq!(embed["record"]["record"]["uri"], "at://did:quoted/post/abc");
+                assert_eq!(embed["media"]["$type"], "app.bsky.embed.external");
+                assert_eq!(embed["media"]["external"]["uri"], "https://smoo.ai");
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "uri": "at://x", "cid": "y" }))
+            })
+            .mount(&pds)
+            .await;
+        let appview = MockServer::start().await;
+        let client = AtClient::new(
+            fake_session(&pds.uri()),
+            Url::parse(&appview.uri()).unwrap(),
+        );
+        let ext = PostExternal {
+            uri: "https://smoo.ai".into(),
+            title: "Smoo".into(),
+            description: String::new(),
+            thumb: None,
+        };
+        let quote = StrongRef {
+            uri: "at://did:quoted/post/abc".into(),
+            cid: "qcid".into(),
+        };
+        client
+            .create_post_full(
+                "quote + link",
+                None,
+                &[],
+                &[],
+                Some(&quote),
+                None,
+                Some(&ext),
             )
             .await
             .unwrap();

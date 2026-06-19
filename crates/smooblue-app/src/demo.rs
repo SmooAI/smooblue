@@ -298,7 +298,14 @@ fn curated_home_feed() -> Vec<FeedItem> {
                         facets: None,
                     },
                     indexed_at: Some(m(240)),
-                    embeds: Vec::new(),
+                    // The quoted post has its own video — exercises the
+                    // quote-card inner-media renderer (quoted videos used
+                    // to render as just an author line).
+                    embeds: vec![EmbedKind::Video {
+                        playlist: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8".to_string(),
+                        thumbnail: Some(img("quoted-vid-thumb")),
+                        aspect_ratio: Some(smooblue_atproto::EmbedAspectRatio { width: 16, height: 9 }),
+                    }],
                 },
             }),
         ),

@@ -22,8 +22,8 @@ pub use chat::{
     ListConvosResponse, Message, MessageInput, MessageSender, MessageView,
 };
 pub use client::{
-    AspectRatio, AtClient, BlobLink, BlobRef, CreatedRecord, PostImage, PostVideo, ReplyRef,
-    StrongRef,
+    AspectRatio, AtClient, BlobLink, BlobRef, CreatedRecord, LinkCard, PostExternal, PostImage,
+    PostVideo, ReplyRef, StrongRef,
 };
 pub use error::AtError;
 pub use feed::{
