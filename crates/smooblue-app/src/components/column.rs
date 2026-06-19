@@ -2012,6 +2012,10 @@ mod tests {
         }
     }
 
+    fn mk_post(uri: &str) -> PostView {
+        mk(uri).post
+    }
+
     #[test]
     fn merge_top_prepends_new_and_keeps_existing_tail() {
         let existing = vec![mk("at://x/a"), mk("at://x/b"), mk("at://x/c")];
@@ -2264,6 +2268,64 @@ mod tests {
         let out = append_bottom_notif_groups(existing, more, 3);
         assert_eq!(out.len(), 3);
         assert!(out.iter().all(|g| g.reason == "follow"));
+    }
+
+    #[test]
+    fn collect_subject_uris_quote_hydrates_quoting_post_not_your_own() {
+        // The bug: a quote notification used to hydrate `reason_subject`
+        // (your own quoted post) instead of `uri` (the post that quoted
+        // you, which carries your post as a nested record embed). The
+        // user then never saw the quote itself. Quote must behave like
+        // reply/mention and surface the inbound post at `uri`.
+        let items = vec![
+            mk_notif("quote", Some("at://you/original"), "at://them/quoting"),
+            mk_notif("reply", Some("at://you/thread"), "at://them/replyrec"),
+            mk_notif("mention", None, "at://them/mentionrec"),
+            mk_notif("like", Some("at://you/liked"), "at://them/likerec"),
+            mk_notif("repost", Some("at://you/reposted"), "at://them/repostrec"),
+            mk_notif("follow", None, "at://them/followrec"),
+        ];
+        let uris = collect_subject_uris(&items);
+
+        // Inbound conversation → the event post (notif.uri).
+        assert!(uris.contains(&"at://them/quoting".to_string()));
+        assert!(uris.contains(&"at://them/replyrec".to_string()));
+        assert!(uris.contains(&"at://them/mentionrec".to_string()));
+        // ...never your own quoted/replied-to post.
+        assert!(!uris.contains(&"at://you/original".to_string()));
+
+        // Engagement-on-your-post → reason_subject (your post).
+        assert!(uris.contains(&"at://you/liked".to_string()));
+        assert!(uris.contains(&"at://you/reposted".to_string()));
+
+        // Follow has no subject to hydrate.
+        assert!(!uris.contains(&"at://them/followrec".to_string()));
+    }
+
+    #[test]
+    fn subject_for_quote_keys_on_notif_uri() {
+        // subject_for mirrors collect_subject_uris' arm selection — the
+        // map is keyed by the URI we chose to hydrate. For a quote that
+        // is notif.uri, so a subjects map keyed by reason_subject must
+        // miss while one keyed by uri hits.
+        let n = mk_notif("quote", Some("at://you/original"), "at://them/quoting");
+
+        let mut wrong = HashMap::new();
+        wrong.insert(
+            "at://you/original".to_string(),
+            mk_post("at://you/original"),
+        );
+        assert!(subject_for(&n, &wrong).is_none());
+
+        let mut right = HashMap::new();
+        right.insert(
+            "at://them/quoting".to_string(),
+            mk_post("at://them/quoting"),
+        );
+        assert_eq!(
+            subject_for(&n, &right).map(|p| p.uri.as_str()),
+            Some("at://them/quoting")
+        );
     }
 
     #[test]
