@@ -35,6 +35,7 @@ pub fn PostCard(
     let mut thread_focus = use_context::<Signal<ThreadFocus>>();
     let mut profile_focus = use_context::<Signal<ProfileFocus>>();
     let mut engagement_focus = use_context::<Signal<EngagementFocus>>();
+    let mut report_focus = use_context::<Signal<crate::state::ReportFocus>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
@@ -90,6 +91,19 @@ pub fn PostCard(
     };
     let mut content_revealed = use_signal(|| false);
     let show_warning = needs_warning && !*content_revealed.read();
+
+    // Overflow ("…") action menu + optimistic delete. `menu_open`
+    // toggles the popover; `deleted` hides the card immediately after a
+    // successful delete (the feed still holds the item until the next
+    // poll drops it server-side).
+    let mut menu_open = use_signal(|| false);
+    let mut deleted = use_signal(|| false);
+    // Is this the signed-in user's own post? Gates the Delete action.
+    let is_mine = session
+        .read()
+        .as_ref()
+        .map(|s| s.did == post.author.did)
+        .unwrap_or(false);
 
     let name = post.display_name().to_string();
     let handle = post.author.handle.clone();
@@ -323,6 +337,104 @@ pub fn PostCard(
         "post__action post__action--clickable"
     };
 
+    // Optimistically removed after a successful delete — render nothing.
+    // (All hooks above have already run, so this early return is safe.)
+    if *deleted.read() {
+        return rsx! { Fragment {} };
+    }
+
+    // ── Overflow-menu actions ──────────────────────────────────────
+    let bsky_url = post_uri.rsplit('/').next().map(|rkey| {
+        format!(
+            "https://bsky.app/profile/{}/post/{rkey}",
+            post.author.handle
+        )
+    });
+
+    let copy_link = {
+        let url = bsky_url.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            if let Some(url) = url.clone() {
+                // arboard is already a dependency (compose paste) and is
+                // cross-platform, unlike the previous pbcopy shell-out.
+                if let Ok(mut cb) = arboard::Clipboard::new() {
+                    let _ = cb.set_text(url);
+                }
+            }
+        }
+    };
+    let open_in_browser = {
+        let url = bsky_url.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            if let Some(url) = url.clone() {
+                let _ = crate::safe_open::open_in_browser(&url);
+            }
+        }
+    };
+    let delete_post = {
+        let uri = post_uri.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            let uri = uri.clone();
+            spawn(async move {
+                if crate::demo::is_active() {
+                    deleted.set(true);
+                    return;
+                }
+                if let Some(client) = fresh_client(session).await {
+                    if client.delete_record(&uri).await.is_ok() {
+                        deleted.set(true);
+                    }
+                }
+            });
+        }
+    };
+    let mute_author = {
+        let did = post.author.did.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            let did = did.clone();
+            spawn(async move {
+                if let Some(client) = fresh_client(session).await {
+                    let _ = client.mute_actor(&did).await;
+                }
+            });
+        }
+    };
+    let block_author = {
+        let did = post.author.did.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            let did = did.clone();
+            spawn(async move {
+                if let Some(client) = fresh_client(session).await {
+                    let _ = client.create_block(&did).await;
+                }
+            });
+        }
+    };
+    let report_post = {
+        let uri = post_uri.clone();
+        let cid = post_cid.clone();
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            menu_open.set(false);
+            report_focus.set(crate::state::ReportFocus(Some(
+                crate::components::report_sheet::ReportTarget::Post {
+                    uri: uri.clone(),
+                    cid: cid.clone(),
+                },
+            )));
+        }
+    };
+
     rsx! {
         article { class: "post",
             // Context chips above the card — repost attribution and
@@ -488,35 +600,64 @@ pub fn PostCard(
                             span { class: "post__action-count post__action-count--zero", "0" }
                         }
                     }
-                    // Copy the bsky.app permalink for this post.
-                    // Builds the URL from the at-uri rkey rather than
-                    // hard-coding it, so reposts / quoted posts get
-                    // the right destination too. Falls through silently
-                    // when the at-uri can't be parsed.
-                    button {
-                        class: "post__action post__action--right",
-                        title: "Copy link",
-                        onclick: {
-                            let uri = post_uri.clone();
-                            let handle = post.author.handle.clone();
-                            move |e: MouseEvent| {
+                    // Overflow menu — "…" opens a list of actions. On
+                    // your own post that includes Delete; on others'
+                    // posts, Mute / Block / Report. Replaces the old
+                    // single-action copy-link button.
+                    div { class: "post__more",
+                        button {
+                            class: "post__action post__action--right",
+                            title: "More",
+                            onclick: move |e: MouseEvent| {
                                 e.stop_propagation();
-                                if let Some(rkey) = uri.rsplit('/').next() {
-                                    let url = format!("https://bsky.app/profile/{handle}/post/{rkey}");
-                                    let _ = std::process::Command::new("pbcopy")
-                                        .stdin(std::process::Stdio::piped())
-                                        .spawn()
-                                        .and_then(|mut child| {
-                                            if let Some(stdin) = child.stdin.as_mut() {
-                                                use std::io::Write;
-                                                let _ = stdin.write_all(url.as_bytes());
-                                            }
-                                            child.wait()
-                                        });
+                                let now = *menu_open.peek();
+                                menu_open.set(!now);
+                            },
+                            icons::MoreHorizontal { size: icons::Size::Sm }
+                        }
+                        if *menu_open.read() {
+                            // Transparent backdrop: any click outside the
+                            // menu closes it. Sits below the menu, above
+                            // the rest of the card.
+                            div {
+                                class: "post__menu-backdrop",
+                                onclick: move |e: MouseEvent| {
+                                    e.stop_propagation();
+                                    menu_open.set(false);
+                                },
+                            }
+                            div { class: "post__menu", onclick: move |e: MouseEvent| e.stop_propagation(),
+                                button { class: "post__menu-item", onclick: copy_link,
+                                    icons::Link { size: icons::Size::Sm }
+                                    "Copy link"
+                                }
+                                button { class: "post__menu-item", onclick: open_in_browser,
+                                    icons::ExternalLink { size: icons::Size::Sm }
+                                    "Open in browser"
+                                }
+                                if is_mine {
+                                    button { class: "post__menu-item post__menu-item--danger",
+                                        onclick: delete_post,
+                                        icons::Trash2 { size: icons::Size::Sm }
+                                        "Delete post"
+                                    }
+                                } else {
+                                    button { class: "post__menu-item", onclick: mute_author,
+                                        icons::VolumeOff { size: icons::Size::Sm }
+                                        "Mute @{post.author.handle}"
+                                    }
+                                    button { class: "post__menu-item", onclick: block_author,
+                                        icons::Ban { size: icons::Size::Sm }
+                                        "Block @{post.author.handle}"
+                                    }
+                                    button { class: "post__menu-item post__menu-item--danger",
+                                        onclick: report_post,
+                                        icons::Flag { size: icons::Size::Sm }
+                                        "Report post"
+                                    }
                                 }
                             }
-                        },
-                        icons::MoreHorizontal { size: icons::Size::Sm }
+                        }
                     }
                 }
             }

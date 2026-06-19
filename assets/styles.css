@@ -851,6 +851,66 @@ a {
     margin-left: auto;
 }
 
+/* Overflow ("…") menu. The wrapper anchors the popover; the backdrop
+ * is a full-viewport transparent layer that closes the menu on any
+ * outside click. */
+.post__more {
+    position: relative;
+    margin-left: auto;
+    display: inline-flex;
+}
+
+.post__menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.post__menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    z-index: 50;
+    min-width: 180px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+}
+
+.post__menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    border: none;
+    border-radius: calc(var(--radius-md) - 4px);
+    background: transparent;
+    color: var(--foreground);
+    font: inherit;
+    font-size: calc(14px * var(--font-scale, 1));
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.post__menu-item svg {
+    flex: 0 0 auto;
+    opacity: 0.85;
+}
+
+.post__menu-item:hover {
+    background: var(--muted);
+}
+
+.post__menu-item--danger {
+    color: var(--color-smooai-red);
+}
+
 /* Clickable post actions (currently just like; repost/reply land later). */
 .post__action--clickable {
     background: none;
