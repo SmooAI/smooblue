@@ -81,10 +81,14 @@ pub fn detect_facet_candidates(text: &str) -> Vec<FacetCandidate> {
     let mut out = Vec::new();
     out.extend(detect_mentions(text));
     out.extend(detect_links(text));
+    out.extend(detect_bare_domains(text));
     out.extend(detect_tags(text));
     out.sort_by_key(|c| c.byte_start);
     // Drop overlaps — if a URL contains a `#anchor`, we don't also
-    // want a Tag facet for it. Keep the earlier (link) candidate.
+    // want a Tag facet for it. Keep the earlier (link) candidate. This
+    // also drops a bare-domain match that sits inside a scheme'd URL
+    // (`https://google.com` — the http candidate starts earlier) or
+    // right after an `@` mention.
     let mut deduped: Vec<FacetCandidate> = Vec::with_capacity(out.len());
     for c in out {
         let overlaps_last = deduped
@@ -214,6 +218,106 @@ fn detect_links(text: &str) -> Vec<FacetCandidate> {
         } else {
             i += 1;
         }
+    }
+    out
+}
+
+/// Common TLDs for bare-domain detection. Curated rather than the full
+/// IANA list so that "e.g", "etc.", "U.S.A" and decimals don't turn
+/// into links — full `http(s)://` URLs are always caught by
+/// [`detect_links`] regardless of TLD, so an exotic-TLD domain just
+/// needs its scheme typed.
+const COMMON_TLDS: &[&str] = &[
+    "com", "org", "net", "io", "ai", "dev", "co", "app", "xyz", "me", "gg", "sh", "social", "tech",
+    "tv", "fm", "gov", "edu", "info", "biz", "news", "blog", "live", "cloud", "page", "link",
+    "site", "online", "store", "design", "wtf", "us", "uk", "ca", "de", "fr", "jp", "au", "nz",
+    "eu", "in", "it", "es", "nl", "ru", "br", "mx", "cn", "ch", "se", "no", "fi", "dk", "pl", "be",
+    "at", "ie",
+];
+
+/// Bare-domain links — `google.com`, `smoo.ai`, `sub.example.io/path` —
+/// without a typed scheme. Matches bsky.app, which auto-linkifies bare
+/// domains. The detected span covers just the text the user wrote; the
+/// facet `uri` gets an `https://` prefix since the lexicon's link
+/// feature needs an absolute URL.
+///
+/// Conservative to avoid false positives: the token must be
+/// `label(.label)+` with each label alphanumeric/hyphen, the final
+/// label (TLD) must be in [`COMMON_TLDS`], and it must start at a word
+/// boundary that isn't `@` (that's a mention) or part of a longer
+/// token. An optional `/path` (and query/fragment) is included.
+fn detect_bare_domains(text: &str) -> Vec<FacetCandidate> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    let is_label = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
+    while i < bytes.len() {
+        // Must begin at a boundary — start-of-text or after whitespace /
+        // opening bracket / quote. Critically NOT after '@' (mention),
+        // '.', '/', or an alphanumeric (mid-token).
+        let prev_ok = i == 0
+            || matches!(
+                bytes[i - 1],
+                b' ' | b'\n' | b'\t' | b'(' | b'[' | b'{' | b'<' | b'"'
+            );
+        if !prev_ok || !bytes[i].is_ascii_alphanumeric() {
+            i += 1;
+            continue;
+        }
+        // Scan the host: labels joined by single dots. Track the byte
+        // offset where the last label starts so we can check the TLD.
+        let start = i;
+        let mut j = i;
+        let mut last_label_start = i;
+        let mut dots = 0usize;
+        loop {
+            while j < bytes.len() && is_label(bytes[j]) {
+                j += 1;
+            }
+            // A dot continues the host only if a label byte follows.
+            if j < bytes.len() && bytes[j] == b'.' && j + 1 < bytes.len() && is_label(bytes[j + 1])
+            {
+                dots += 1;
+                j += 1;
+                last_label_start = j;
+            } else {
+                break;
+            }
+        }
+        let host_end = j;
+        let tld = &text[last_label_start..host_end];
+        let tld_ok = dots >= 1 && COMMON_TLDS.iter().any(|t| t.eq_ignore_ascii_case(tld));
+        if !tld_ok {
+            // Not a domain — skip past this token so we don't rescan its
+            // interior and spuriously match a trailing `.tld`.
+            i = host_end.max(i + 1);
+            continue;
+        }
+        // Optionally consume a path/query/fragment: `/...` until
+        // whitespace. Trailing sentence punctuation is trimmed below.
+        let mut end = host_end;
+        if end < bytes.len() && bytes[end] == b'/' {
+            while end < bytes.len() && !matches!(bytes[end], b' ' | b'\n' | b'\t') {
+                end += 1;
+            }
+        }
+        // Trim trailing sentence punctuation (same rule as detect_links).
+        while end > host_end
+            && matches!(
+                bytes[end - 1],
+                b'.' | b',' | b';' | b':' | b'!' | b'?' | b')' | b']' | b'}' | b'"' | b'\''
+            )
+        {
+            end -= 1;
+        }
+        out.push(FacetCandidate {
+            byte_start: start,
+            byte_end: end,
+            kind: FacetKind::Link {
+                uri: format!("https://{}", &text[start..end]),
+            },
+        });
+        i = end.max(i + 1);
     }
     out
 }
@@ -410,5 +514,90 @@ mod tests {
     #[test]
     fn plain_text_yields_no_facets() {
         assert!(detect_facet_candidates("just a regular post with no markup").is_empty());
+    }
+
+    fn links(out: &[FacetCandidate]) -> Vec<String> {
+        out.iter()
+            .filter_map(|c| match &c.kind {
+                FacetKind::Link { uri } => Some(uri.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn detects_bare_domain_as_https_link() {
+        let text = "check google.com today";
+        let out = detect_facet_candidates(text);
+        assert_eq!(out.len(), 1);
+        let FacetKind::Link { uri } = &out[0].kind else {
+            panic!("expected link, got {:?}", out[0].kind)
+        };
+        assert_eq!(uri, "https://google.com");
+        // Span covers just the visible text "google.com".
+        assert_eq!(&text[out[0].byte_start..out[0].byte_end], "google.com");
+    }
+
+    #[test]
+    fn detects_two_bare_domains_the_screenshot_case() {
+        // The exact post that shipped with no card before this fix.
+        let out = detect_facet_candidates("smoo.ai google.com embedded url test");
+        let uris: Vec<&str> = out
+            .iter()
+            .filter_map(|c| match &c.kind {
+                FacetKind::Link { uri } => Some(uri.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(uris, vec!["https://smoo.ai", "https://google.com"]);
+    }
+
+    #[test]
+    fn detects_bare_domain_with_subdomain_and_path() {
+        let out = detect_facet_candidates("read docs.example.io/guide/intro now");
+        assert_eq!(out.len(), 1);
+        let FacetKind::Link { uri } = &out[0].kind else {
+            panic!("expected link")
+        };
+        assert_eq!(uri, "https://docs.example.io/guide/intro");
+    }
+
+    #[test]
+    fn scheme_url_not_double_matched_by_bare_detector() {
+        let out = detect_facet_candidates("at https://google.com/x done");
+        assert_eq!(
+            out.len(),
+            1,
+            "should be one link, not scheme + bare: {out:?}"
+        );
+        let FacetKind::Link { uri } = &out[0].kind else {
+            panic!("expected link")
+        };
+        assert_eq!(uri, "https://google.com/x");
+    }
+
+    #[test]
+    fn bare_domain_skips_non_tlds_and_abbreviations() {
+        // None of these end in a known TLD, so none should linkify.
+        for t in [
+            "e.g. this works",
+            "etc. and so on",
+            "version 3.14 ok",
+            "edited file.rs today",
+        ] {
+            assert!(
+                links(&detect_facet_candidates(t)).is_empty(),
+                "false-positive link in: {t:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_domain_after_mention_is_not_relinked() {
+        // `@alice.bsky.social` is one mention — the host part must not
+        // also surface as a bare-domain link.
+        let out = detect_facet_candidates("yo @alice.bsky.social hi");
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0].kind, FacetKind::Mention { .. }));
     }
 }
