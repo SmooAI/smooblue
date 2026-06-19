@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.22.0
+
+### Minor Changes
+
+- [#58](https://github.com/SmooAI/smooblue/pull/58) [`5a44f85`](https://github.com/SmooAI/smooblue/commit/5a44f856ce7b836e96f89d6e765a0ca229659c44) Thanks [@brentrager](https://github.com/brentrager)! - Added an opt-in UI-automation bridge for scripted/headless testing. Set `SMOOBLUE_AUTOMATION=<port>` and the app opens a local (127.0.0.1-only) socket: send a line of JavaScript, get the JSON result back. It runs against the live webview via Dioxus' `document::eval`, so a test script can query elements, click them, read text, and assert state — the primitives UI tests are built from. This is the realistic equivalent of Playwright for a wry app, which can't be driven over Chrome's CDP (WKWebView / WebKitGTK don't speak it). Off by default; bound to localhost; never touches a normal user's run. Note: on macOS the idle Cocoa event loop only services requests when the window receives input — see the module docs for the focus-nudge workaround and the Linux/CI (Xvfb) note.
+
+- [#58](https://github.com/SmooAI/smooblue/pull/58) [`5a44f85`](https://github.com/SmooAI/smooblue/commit/5a44f856ce7b836e96f89d6e765a0ca229659c44) Thanks [@brentrager](https://github.com/brentrager)! - Posting a URL now attaches a link card. When the composer text contains a link, smooblue fetches its OpenGraph metadata (title, description, thumbnail) via CardyB — the same extractor the official Bluesky app uses — and shows a preview card under the textarea with a remove (×). On post it's published as an `app.bsky.embed.external` embed (or `recordWithMedia` when you're also quoting a post), so your followers see a real card instead of a bare URL. The card is skipped automatically when you've attached an image or video, since those own the post's single media slot.
+
+### Patch Changes
+
+- [#58](https://github.com/SmooAI/smooblue/pull/58) [`5a44f85`](https://github.com/SmooAI/smooblue/commit/5a44f856ce7b836e96f89d6e765a0ca229659c44) Thanks [@brentrager](https://github.com/brentrager)! - Smoother column scrolling — fixed the "wiggle" when scrolling a feed, especially while new posts stream in. The virtualized lists (feeds + notifications) assumed every row was one fixed height, so on a mixed feed (a text post ~120px next to a 4-image grid + quote ~500px+) the scrollbar math drifted from the real layout and the browser re-corrected the scroll position every few rows. They now measure each row's real height and place the virtual window + spacers from those measurements, so the content stays put. Rows fall back to the per-kind estimate until they've been measured once.
+
+- [#58](https://github.com/SmooAI/smooblue/pull/58) [`5a44f85`](https://github.com/SmooAI/smooblue/commit/5a44f856ce7b836e96f89d6e765a0ca229659c44) Thanks [@brentrager](https://github.com/brentrager)! - The @mention autocomplete now biases toward people you actually know. Bluesky's typeahead is only lightly personalized, so it buried mutuals under big strangers who happened to prefix-match. Results are now re-ranked: mutuals first, then people you follow, then people who follow you, then strangers — and within a tier a prefix match on the handle or display name beats a mid-string match. We fetch a wider candidate set and trim after ranking so a buried mutual can still surface.
+
+  Fixed transparent backgrounds across the compose @mention dropdown, the DM/messages sheet, and inbox rows. These used CSS custom properties (`--color-surface`, `--color-fg`, etc.) that this theme never defines, so they resolved to transparent/inherited — you could read content straight through the mention popover. They now use the real theme tokens (`--card`, `--foreground`, `--muted`, `--muted-foreground`, `--border`).
+
+- [#58](https://github.com/SmooAI/smooblue/pull/58) [`5a44f85`](https://github.com/SmooAI/smooblue/commit/5a44f856ce7b836e96f89d6e765a0ca229659c44) Thanks [@brentrager](https://github.com/brentrager)! - Quote posts now show the quoted post's media. A quoted **video** (or link card / record-with-media) used to render as just the author's name with no content — the quote card only knew how to draw nested _images_. It now renders video players, link cards, and record-with-media the same way a top-level embed does.
+
+  Quote **notifications** now show the post that quoted you. "X quoted your post" was hydrating your own original post instead of X's quoting post, so the actual quote (with your post nested inside it) never appeared. Reply/mention/quote now consistently surface the inbound post.
+
 ## 1.21.0
 
 ### Minor Changes
