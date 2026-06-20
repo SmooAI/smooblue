@@ -345,6 +345,7 @@ mod tests {
                 query: "rust".into(),
             },
             title: "rust".into(),
+            settings: crate::state::ColumnSettings::default(),
         };
         let json = serde_json::to_string(&c).unwrap();
         let back: ColumnSpec = serde_json::from_str(&json).unwrap();

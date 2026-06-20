@@ -227,6 +227,7 @@ fn ProfileBody(data: ProfileData, on_add_column: EventHandler<ColumnSpec>) -> El
             id: format!("search:{}", q),
             title: format!("Search · @{}", name_for_search),
             kind: crate::state::ColumnKind::Search { query: q },
+            settings: crate::state::ColumnSettings::default(),
         });
     };
 

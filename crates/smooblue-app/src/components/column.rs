@@ -22,7 +22,7 @@ use crate::auth_refresh::fresh_client;
 use crate::components::notification_card::NotificationCard;
 use crate::components::post::PostCard;
 use crate::icons;
-use crate::state::{ColumnDrag, ColumnKind, ColumnSpec, FocusColumn};
+use crate::state::{ColumnDrag, ColumnKind, ColumnSettings, ColumnSpec, FocusColumn, NotifFilter};
 use dioxus::prelude::*;
 use smooblue_atproto::{
     group_notifications, ActorProfile, FeedItem, Notification, NotificationGroup, PostView,
@@ -140,6 +140,11 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
 pub fn Column(spec: ColumnSpec) -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let drag_ctx = use_context::<Signal<ColumnDrag>>();
+    // Deck spec signal — the poll loop reads this for the live refresh
+    // cadence, and the settings panel mutates this column's settings.
+    let cols = use_context::<Signal<Vec<ColumnSpec>>>();
+    // Per-column settings panel (gear) open state.
+    let settings_open = use_signal(|| false);
     let spec_kind = spec.kind.clone();
     let spec_id = spec.id.clone();
 
@@ -247,8 +252,8 @@ pub fn Column(spec: ColumnSpec) -> Element {
         let kind = kind_for_poll.clone();
         let col_id = spec_id_for_poll.clone();
         let session_sig = session;
+        let cols_sig = cols;
         async move {
-            let interval = poll_interval(&kind);
             let mut first_fetch = true;
             // Persistent across polls — used by the Notifications fetch
             // path to avoid re-hydrating subject posts that are already
@@ -256,6 +261,25 @@ pub fn Column(spec: ColumnSpec) -> Element {
             // doesn't grow this unboundedly.
             let mut subjects_cache: HashMap<String, PostView> = HashMap::new();
             loop {
+                // Resolve the live refresh cadence from this column's
+                // settings each tick. `Default` → the per-kind interval;
+                // `Off` → paused. While paused (after the initial load)
+                // we idle, re-checking the setting every 2s so resuming
+                // takes effect promptly.
+                let fallback = poll_interval(&kind);
+                let refresh = {
+                    let list = cols_sig.read();
+                    list.iter()
+                        .find(|c| c.id == col_id)
+                        .map(|c| c.settings.refresh)
+                        .unwrap_or_default()
+                };
+                let effective = refresh.duration(fallback);
+                if effective.is_none() && !first_fetch {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+                let interval = effective.unwrap_or(fallback);
                 match fetch_page(&kind, session_sig, None, &mut subjects_cache).await {
                     Ok(fresh) => {
                         error.set(None);
@@ -641,7 +665,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 title: spec.title.clone(),
                 kind: spec.kind.clone(),
                 filter_open,
+                settings_open,
                 mark_all_read: mark_all_inbox_read,
+            }
+            // Per-column settings panel — slides in below the header when
+            // the gear is tapped. Filters + refresh cadence, persisted.
+            if *settings_open.read() {
+                ColumnSettingsPanel { id: spec.id.clone(), kind: spec.kind.clone(), settings: spec.settings.clone(), cols }
             }
             // Floating "jump to top" pill — appears once the column is
             // scrolled down. Tapping it smooth-scrolls to the top and
@@ -713,6 +743,7 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         let filtered: Vec<&FeedItem> = items
                             .iter()
                             .filter(|it| !has_filter || feed_item_matches(it, &filter_lower))
+                            .filter(|it| passes_feed_settings(it, &spec.settings))
                             .collect();
                         if filtered.is_empty() {
                             rsx! {
@@ -763,7 +794,14 @@ pub fn Column(spec: ColumnSpec) -> Element {
                     (ColumnData::Notifications { groups, subjects }, _, _) => {
                         let (vp_top, vp_h, _) = *viewport.read();
                         let est = estimated_row_height_px(&spec.kind);
-                        let keys: Vec<String> = groups
+                        // Apply the column's notification-type filter
+                        // (All / Mentions / Reactions) before virtualizing.
+                        let nf = spec.settings.notif_filter;
+                        let filtered: Vec<&NotificationGroup> = groups
+                            .iter()
+                            .filter(|g| passes_notif_filter(&g.reason, nf))
+                            .collect();
+                        let keys: Vec<String> = filtered
                             .iter()
                             .enumerate()
                             .map(|(i, g)| group_key(g, i))
@@ -775,13 +813,13 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             div { class: "deck-column__virtual-spacer",
                                 style: "height: {top_spacer}px",
                             }
-                            for (i, g) in groups[first..last].iter().enumerate() {
+                            for (i, g) in filtered[first..last].iter().enumerate() {
                                 div {
                                     class: "deck-column__vrow",
                                     key: "{group_key(g, first + i)}",
                                     "data-row-key": "{group_key(g, first + i)}",
                                     NotificationCard {
-                                        group: g.clone(),
+                                        group: (*g).clone(),
                                         subject: g.items.first().and_then(|n| subject_for(n, subjects)).cloned(),
                                     }
                                 }
@@ -1989,6 +2027,55 @@ fn feed_item_reposter(item: &smooblue_atproto::FeedItem) -> Option<String> {
 /// filter substring. Checks post text, author handle, author display
 /// name, reposter display name, and reply-parent handle so the
 /// user's mental model of "filter to anything with X in it" works.
+/// True if a feed item carries real media — an image grid, a video, an
+/// external link card, or record-with-media. A bare quote (record-only)
+/// embed does NOT count as media. Drives the media-only / text-only
+/// column filters.
+pub fn item_has_media(item: &smooblue_atproto::FeedItem) -> bool {
+    use smooblue_atproto::{Embed, EmbedKind};
+    matches!(
+        &item.post.embed,
+        Some(Embed::Known(
+            EmbedKind::Images { .. }
+                | EmbedKind::Video { .. }
+                | EmbedKind::External { .. }
+                | EmbedKind::RecordWithMedia { .. }
+        ))
+    )
+}
+
+/// Apply a column's structured feed filters (hide reposts / replies,
+/// media-only / text-only) to one item. Returns true to keep it.
+pub fn passes_feed_settings(item: &smooblue_atproto::FeedItem, s: &ColumnSettings) -> bool {
+    if s.hide_reposts && item.reposter_did().is_some() {
+        return false;
+    }
+    if s.hide_replies && item.reply.is_some() {
+        return false;
+    }
+    let media = item_has_media(item);
+    if s.media_only && !media {
+        return false;
+    }
+    if s.text_only && media {
+        return false;
+    }
+    true
+}
+
+/// Whether a notification group passes the column's notification-type
+/// filter, keyed off the group's reason.
+pub fn passes_notif_filter(reason: &str, f: NotifFilter) -> bool {
+    match f {
+        NotifFilter::All => true,
+        NotifFilter::Mentions => matches!(reason, "reply" | "mention" | "quote"),
+        NotifFilter::Reactions => matches!(
+            reason,
+            "like" | "like-via-repost" | "repost" | "repost-via-repost" | "follow"
+        ),
+    }
+}
+
 pub fn feed_item_matches(item: &smooblue_atproto::FeedItem, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
@@ -2087,6 +2174,7 @@ fn ColumnHeader(
     title: String,
     kind: ColumnKind,
     filter_open: Signal<bool>,
+    settings_open: Signal<bool>,
     /// Inbox-only: invoked by the "Mark all as read" header button.
     /// `None` for other kinds — the button just doesn't render.
     mark_all_read: Option<Callback<()>>,
@@ -2101,6 +2189,11 @@ fn ColumnHeader(
     let toggle_filter = move |_| {
         let now = !*filter_open_w.read();
         filter_open_w.set(now);
+    };
+    let mut settings_open_w = settings_open;
+    let toggle_settings = move |_| {
+        let now = !*settings_open_w.read();
+        settings_open_w.set(now);
     };
 
     // Drag-and-drop handlers — header is the drag handle (grip icon),
@@ -2179,8 +2272,129 @@ fn ColumnHeader(
                 onclick: toggle_filter,
                 icons::ListFilter { size: icons::Size::Sm }
             }
+            button { class: "deck-column__action",
+                title: if *settings_open.read() { "Hide column settings" } else { "Column settings" },
+                onclick: toggle_settings,
+                icons::Settings2 { size: icons::Size::Sm }
+            }
             button { class: "deck-column__action", title: "Close column", onclick: close,
                 icons::X { size: icons::Size::Sm }
+            }
+        }
+    }
+}
+
+/// Per-column settings panel that slides in under the header (gear).
+/// Shows feed filters for post columns, a notification-type selector
+/// for Notifications, and a refresh-cadence selector for all. Each
+/// control mutates this column's persisted settings immediately.
+#[component]
+fn ColumnSettingsPanel(
+    id: String,
+    kind: ColumnKind,
+    settings: ColumnSettings,
+    cols: Signal<Vec<ColumnSpec>>,
+) -> Element {
+    let is_feed = matches!(
+        kind,
+        ColumnKind::Home
+            | ColumnKind::Feed { .. }
+            | ColumnKind::List { .. }
+            | ColumnKind::AuthorFeed { .. }
+            | ColumnKind::Search { .. }
+    );
+    let is_notif = matches!(kind, ColumnKind::Notifications);
+
+    rsx! {
+        div { class: "deck-column__settings",
+            if is_feed {
+                div { class: "deck-column__settings-row",
+                    span { class: "deck-column__settings-label", "Show" }
+                    button {
+                        class: if settings.hide_reposts { "chip chip--on" } else { "chip" },
+                        onclick: {
+                            let id = id.clone();
+                            let mut cols = cols;
+                            move |_| crate::state::update_column_settings(&mut cols, &id, |s| s.hide_reposts = !s.hide_reposts)
+                        },
+                        "Hide reposts"
+                    }
+                    button {
+                        class: if settings.hide_replies { "chip chip--on" } else { "chip" },
+                        onclick: {
+                            let id = id.clone();
+                            let mut cols = cols;
+                            move |_| crate::state::update_column_settings(&mut cols, &id, |s| s.hide_replies = !s.hide_replies)
+                        },
+                        "Hide replies"
+                    }
+                    button {
+                        class: if settings.media_only { "chip chip--on" } else { "chip" },
+                        onclick: {
+                            let id = id.clone();
+                            let mut cols = cols;
+                            move |_| crate::state::update_column_settings(&mut cols, &id, |s| {
+                                s.media_only = !s.media_only;
+                                if s.media_only { s.text_only = false; }
+                            })
+                        },
+                        "Media only"
+                    }
+                    button {
+                        class: if settings.text_only { "chip chip--on" } else { "chip" },
+                        onclick: {
+                            let id = id.clone();
+                            let mut cols = cols;
+                            move |_| crate::state::update_column_settings(&mut cols, &id, |s| {
+                                s.text_only = !s.text_only;
+                                if s.text_only { s.media_only = false; }
+                            })
+                        },
+                        "Text only"
+                    }
+                }
+            }
+            if is_notif {
+                div { class: "deck-column__settings-row",
+                    span { class: "deck-column__settings-label", "Show" }
+                    for (label, val) in [
+                        ("All", NotifFilter::All),
+                        ("Mentions", NotifFilter::Mentions),
+                        ("Reactions", NotifFilter::Reactions),
+                    ] {
+                        button {
+                            key: "{label}",
+                            class: if settings.notif_filter == val { "chip chip--on" } else { "chip" },
+                            onclick: {
+                                let id = id.clone();
+                                let mut cols = cols;
+                                move |_| crate::state::update_column_settings(&mut cols, &id, |s| s.notif_filter = val)
+                            },
+                            "{label}"
+                        }
+                    }
+                }
+            }
+            div { class: "deck-column__settings-row",
+                span { class: "deck-column__settings-label", "Refresh" }
+                for (label, val) in [
+                    ("Auto", crate::state::RefreshInterval::Default),
+                    ("15s", crate::state::RefreshInterval::S15),
+                    ("30s", crate::state::RefreshInterval::S30),
+                    ("60s", crate::state::RefreshInterval::S60),
+                    ("Off", crate::state::RefreshInterval::Off),
+                ] {
+                    button {
+                        key: "{label}",
+                        class: if settings.refresh == val { "chip chip--on" } else { "chip" },
+                        onclick: {
+                            let id = id.clone();
+                            let mut cols = cols;
+                            move |_| crate::state::update_column_settings(&mut cols, &id, |s| s.refresh = val)
+                        },
+                        "{label}"
+                    }
+                }
             }
         }
     }
@@ -2219,6 +2433,98 @@ mod tests {
             reply: None,
             reason: None,
         }
+    }
+
+    fn mk_repost(uri: &str) -> FeedItem {
+        let mut it = mk(uri);
+        it.reason = Some(serde_json::json!({
+            "$type": "app.bsky.feed.defs#reasonRepost",
+            "by": { "did": "did:plc:reposter", "handle": "rp.test" }
+        }));
+        it
+    }
+
+    fn mk_reply(uri: &str) -> FeedItem {
+        let mut it = mk(uri);
+        it.reply = Some(serde_json::json!({ "parent": { "uri": "at://parent" } }));
+        it
+    }
+
+    fn mk_with_image(uri: &str) -> FeedItem {
+        use smooblue_atproto::{Embed, EmbedImage, EmbedKind};
+        let mut it = mk(uri);
+        it.post.embed = Some(Embed::Known(EmbedKind::Images {
+            images: vec![EmbedImage {
+                thumb: "t".into(),
+                fullsize: "f".into(),
+                alt: String::new(),
+                aspect_ratio: None,
+            }],
+        }));
+        it
+    }
+
+    #[test]
+    fn feed_settings_hide_reposts_and_replies() {
+        let s = ColumnSettings {
+            hide_reposts: true,
+            ..Default::default()
+        };
+        assert!(passes_feed_settings(&mk("at://x/1"), &s));
+        assert!(!passes_feed_settings(&mk_repost("at://x/2"), &s));
+
+        let s2 = ColumnSettings {
+            hide_replies: true,
+            ..Default::default()
+        };
+        assert!(passes_feed_settings(&mk("at://x/3"), &s2));
+        assert!(!passes_feed_settings(&mk_reply("at://x/4"), &s2));
+    }
+
+    #[test]
+    fn feed_settings_media_and_text_only() {
+        let img = mk_with_image("at://x/5");
+        let txt = mk("at://x/6");
+
+        let media = ColumnSettings {
+            media_only: true,
+            ..Default::default()
+        };
+        assert!(passes_feed_settings(&img, &media));
+        assert!(!passes_feed_settings(&txt, &media));
+
+        let text = ColumnSettings {
+            text_only: true,
+            ..Default::default()
+        };
+        assert!(!passes_feed_settings(&img, &text));
+        assert!(passes_feed_settings(&txt, &text));
+    }
+
+    #[test]
+    fn notif_filter_buckets() {
+        assert!(passes_notif_filter("like", NotifFilter::All));
+        // Mentions bucket = conversational.
+        assert!(passes_notif_filter("reply", NotifFilter::Mentions));
+        assert!(passes_notif_filter("quote", NotifFilter::Mentions));
+        assert!(!passes_notif_filter("like", NotifFilter::Mentions));
+        // Reactions bucket = likes / reposts / follows.
+        assert!(passes_notif_filter("like", NotifFilter::Reactions));
+        assert!(passes_notif_filter("follow", NotifFilter::Reactions));
+        assert!(!passes_notif_filter("reply", NotifFilter::Reactions));
+    }
+
+    #[test]
+    fn refresh_interval_resolves() {
+        use crate::state::RefreshInterval;
+        use std::time::Duration;
+        let fallback = Duration::from_secs(25);
+        assert_eq!(RefreshInterval::Default.duration(fallback), Some(fallback));
+        assert_eq!(RefreshInterval::Off.duration(fallback), None);
+        assert_eq!(
+            RefreshInterval::S15.duration(fallback),
+            Some(Duration::from_secs(15))
+        );
     }
 
     fn mk_post(uri: &str) -> PostView {

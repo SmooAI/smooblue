@@ -9,12 +9,80 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use smooblue_oauth::Session;
 
+/// Per-column user settings. Persisted with the column. All fields
+/// default to "off"/"default" so a column deserialized from an older
+/// save (without this block) behaves exactly as before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ColumnSettings {
+    /// Hide reposts (only first-hand posts).
+    #[serde(default)]
+    pub hide_reposts: bool,
+    /// Hide replies (only top-level posts).
+    #[serde(default)]
+    pub hide_replies: bool,
+    /// Only show posts that carry media (image / video / external card).
+    #[serde(default)]
+    pub media_only: bool,
+    /// Only show text-only posts (no media embed).
+    #[serde(default)]
+    pub text_only: bool,
+    /// Which notifications to show (Notifications columns only).
+    #[serde(default)]
+    pub notif_filter: NotifFilter,
+    /// Auto-refresh cadence override.
+    #[serde(default)]
+    pub refresh: RefreshInterval,
+}
+
+/// Notification-type filter for a Notifications column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum NotifFilter {
+    /// Everything.
+    #[default]
+    All,
+    /// Conversational: replies, mentions, quotes.
+    Mentions,
+    /// Reactions + graph: likes, reposts, follows.
+    Reactions,
+}
+
+/// Per-column auto-refresh cadence. `Default` uses the per-kind
+/// built-in interval; `Off` pauses live polling entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum RefreshInterval {
+    #[default]
+    Default,
+    Off,
+    S15,
+    S30,
+    S60,
+}
+
+impl RefreshInterval {
+    /// Resolve to a concrete poll duration. `None` means "paused".
+    /// `Default` falls back to `fallback` (the per-kind interval).
+    pub fn duration(self, fallback: std::time::Duration) -> Option<std::time::Duration> {
+        use std::time::Duration;
+        match self {
+            RefreshInterval::Default => Some(fallback),
+            RefreshInterval::Off => None,
+            RefreshInterval::S15 => Some(Duration::from_secs(15)),
+            RefreshInterval::S30 => Some(Duration::from_secs(30)),
+            RefreshInterval::S60 => Some(Duration::from_secs(60)),
+        }
+    }
+}
+
 /// What a single deck column shows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ColumnSpec {
     pub id: String,
     pub kind: ColumnKind,
     pub title: String,
+    /// Per-column user settings (filters, refresh cadence). Defaulted
+    /// when absent so older saves load unchanged.
+    #[serde(default)]
+    pub settings: ColumnSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +130,7 @@ impl ColumnSpec {
             id: "home".into(),
             kind: ColumnKind::Home,
             title: "Home".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -70,6 +139,7 @@ impl ColumnSpec {
             id: "notifications".into(),
             kind: ColumnKind::Notifications,
             title: "Notifications".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -83,6 +153,7 @@ impl ColumnSpec {
                     .into(),
             },
             title: "Discover".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -92,6 +163,7 @@ impl ColumnSpec {
             id: format!("search:{}", q),
             kind: ColumnKind::Search { query: q.clone() },
             title: format!("Search · {q}"),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -100,6 +172,7 @@ impl ColumnSpec {
             id: "suggestions".into(),
             kind: ColumnKind::Suggestions,
             title: "Suggested follows".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -108,6 +181,7 @@ impl ColumnSpec {
             id: "messages".into(),
             kind: ColumnKind::Messages,
             title: "Messages".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -116,6 +190,7 @@ impl ColumnSpec {
             id: "inbox".into(),
             kind: ColumnKind::Inbox,
             title: "Inbox".into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -125,6 +200,7 @@ impl ColumnSpec {
             id: format!("list:{uri}"),
             kind: ColumnKind::List { uri },
             title: title.into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -134,6 +210,7 @@ impl ColumnSpec {
             id: format!("feed:{uri}"),
             kind: ColumnKind::Feed { uri },
             title: title.into(),
+            settings: ColumnSettings::default(),
         }
     }
 
@@ -143,8 +220,23 @@ impl ColumnSpec {
             id: format!("author:{}", a),
             kind: ColumnKind::AuthorFeed { actor: a.clone() },
             title: title.into(),
+            settings: ColumnSettings::default(),
         }
     }
+}
+
+/// Mutate one column's settings in place and persist the deck. No-op if
+/// the id isn't found. Used by the per-column settings panel.
+pub fn update_column_settings(
+    cols: &mut Signal<Vec<ColumnSpec>>,
+    id: &str,
+    f: impl FnOnce(&mut ColumnSettings),
+) {
+    let mut list = cols.write();
+    if let Some(c) = list.iter_mut().find(|c| c.id == id) {
+        f(&mut c.settings);
+    }
+    let _ = crate::persistence::save_columns(&list);
 }
 
 /// Append a column to the deck if no column with the same id is already
@@ -597,21 +689,25 @@ pub fn use_bootstrap() {
                     id: "home".into(),
                     kind: ColumnKind::Home,
                     title: "Home".into(),
+                    settings: ColumnSettings::default(),
                 },
                 ColumnSpec {
                     id: "notifs".into(),
                     kind: ColumnKind::Notifications,
                     title: "Notifications".into(),
+                    settings: ColumnSettings::default(),
                 },
                 ColumnSpec {
                     id: "discover".into(),
                     kind: ColumnKind::Home,
                     title: "Discover".into(),
+                    settings: ColumnSettings::default(),
                 },
                 ColumnSpec {
                     id: "rust".into(),
                     kind: ColumnKind::Home,
                     title: "Rust".into(),
+                    settings: ColumnSettings::default(),
                 },
             ]
         } else {
@@ -666,6 +762,7 @@ mod tests {
                 id: "notifs".into(),
                 kind: ColumnKind::Notifications,
                 title: "Notifications".into(),
+                settings: ColumnSettings::default(),
             },
             ColumnSpec {
                 id: "alice".into(),
@@ -673,6 +770,7 @@ mod tests {
                     actor: "alice.bsky.social".into(),
                 },
                 title: "Alice".into(),
+                settings: ColumnSettings::default(),
             },
         ];
         let json = serde_json::to_string(&cols).unwrap();

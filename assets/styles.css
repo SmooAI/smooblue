@@ -711,6 +711,56 @@ a {
     background: var(--card);
 }
 
+/* Per-column settings panel (gear). Slides in under the header like
+ * the filter row; each row is a label + a wrap of toggle chips. */
+.deck-column__settings {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+}
+
+.deck-column__settings-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.deck-column__settings-label {
+    flex: 0 0 auto;
+    width: 52px;
+    font-size: calc(11px * var(--font-scale, 1));
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.chip {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--foreground);
+    font: inherit;
+    font-size: calc(12px * var(--font-scale, 1));
+    padding: 3px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.chip:hover {
+    background: var(--muted);
+}
+
+.chip--on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 .deck-column__filter-input {
     flex: 1 1 auto;
     font-size: calc(12px * var(--font-scale, 1));
