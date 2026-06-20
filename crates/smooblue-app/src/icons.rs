@@ -250,6 +250,12 @@ pub fn Trash2(size: Size) -> Element {
 }
 
 #[component]
+pub fn ArrowUp(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdArrowUp } }
+}
+
+#[component]
 pub fn Link(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdLink } }

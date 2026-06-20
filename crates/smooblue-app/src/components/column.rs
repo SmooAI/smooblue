@@ -643,6 +643,32 @@ pub fn Column(spec: ColumnSpec) -> Element {
                 filter_open,
                 mark_all_read: mark_all_inbox_read,
             }
+            // Floating "jump to top" pill — appears once the column is
+            // scrolled down. Tapping it smooth-scrolls to the top and
+            // resets the virtual viewport to 0, so freshly-polled posts
+            // (which prepend above the read position while you're
+            // scrolled down) become visible live again.
+            if viewport.read().0 > 600.0 {
+                button {
+                    class: "deck-column__to-top",
+                    title: "Jump to top — resume live updates",
+                    onclick: {
+                        let sel = body_selector.clone();
+                        move |_| {
+                            viewport.with_mut(|v| v.0 = 0.0);
+                            let sel = serde_json::to_string(&sel)
+                                .unwrap_or_else(|_| "\"\"".to_string());
+                            spawn(async move {
+                                let _ = dioxus::document::eval(&format!(
+                                    "var el=document.querySelector({sel}); if(el) el.scrollTo({{top:0,behavior:'smooth'}});"
+                                ));
+                            });
+                        }
+                    },
+                    icons::ArrowUp { size: icons::Size::Sm }
+                    "Top"
+                }
+            }
             // Filter input — slides in below the header when the
             // funnel button on the header is clicked or when the
             // user has anything typed (so a non-empty filter is

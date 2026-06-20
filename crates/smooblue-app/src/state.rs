@@ -374,6 +374,30 @@ pub enum LightboxItem {
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ReportFocus(pub Option<crate::components::report_sheet::ReportTarget>);
 
+/// Target + anchor for the post overflow ("…") menu. Rendered at the
+/// deck level (PostMenu) rather than inside the card, so the popover
+/// escapes the column's `overflow` and the post's `contain: paint`
+/// clip box — otherwise it gets cut off at the card edge. `x`/`y` are
+/// the click's viewport coordinates; the menu anchors there.
+#[derive(Clone, PartialEq)]
+pub struct PostMenuState {
+    pub uri: String,
+    pub cid: String,
+    pub author_did: String,
+    pub author_handle: String,
+    pub is_mine: bool,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Default, PartialEq)]
+pub struct PostMenuFocus(pub Option<PostMenuState>);
+
+/// URIs the user deleted this session. PostCard renders nothing for
+/// these immediately; the feed drops them for real on the next poll.
+#[derive(Clone, Default, PartialEq)]
+pub struct DeletedPosts(pub std::collections::HashSet<String>);
+
 /// Tracks an in-flight key chord. Vim has two-key chords like `gg`
 /// (top), `gh` (home column), `gd` (discover), `gp` (profile). When
 /// the user types `g`, we set this to `Some(now)`; the next key
@@ -476,6 +500,8 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<KeyboardHelp>>(|| Signal::new(KeyboardHelp(false)));
     use_context_provider::<Signal<UpdateBanner>>(|| Signal::new(UpdateBanner::default()));
     use_context_provider::<Signal<ReportFocus>>(|| Signal::new(ReportFocus::default()));
+    use_context_provider::<Signal<PostMenuFocus>>(|| Signal::new(PostMenuFocus::default()));
+    use_context_provider::<Signal<DeletedPosts>>(|| Signal::new(DeletedPosts::default()));
     use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
     use_context_provider::<Signal<FocusColumn>>(|| Signal::new(FocusColumn::default()));
     use_context_provider::<Signal<LightboxFocus>>(|| Signal::new(LightboxFocus::default()));

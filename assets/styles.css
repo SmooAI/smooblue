@@ -119,6 +119,8 @@ a {
     flex: 0 0 var(--column-width, 320px);
     display: flex;
     flex-direction: column;
+    /* Anchor for the floating "jump to top" pill. */
+    position: relative;
     background: var(--card);
     border-radius: var(--radius);
     overflow: hidden;
@@ -194,6 +196,36 @@ a {
 .deck-column__action:hover {
     background: var(--muted);
     color: var(--foreground);
+}
+
+/* Floating "jump to top" pill — sits over the top of the column body,
+ * below the header, appears only when scrolled down. */
+.deck-column__to-top {
+    position: absolute;
+    top: 52px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px 5px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: calc(12px * var(--font-scale, 1));
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.deck-column__to-top:hover {
+    filter: brightness(1.07);
+}
+
+.deck-column__to-top svg {
+    flex: 0 0 auto;
 }
 
 .deck-column__body {
@@ -851,26 +883,21 @@ a {
     margin-left: auto;
 }
 
-/* Overflow ("…") menu. The wrapper anchors the popover; the backdrop
- * is a full-viewport transparent layer that closes the menu on any
- * outside click. */
-.post__more {
-    position: relative;
-    margin-left: auto;
-    display: inline-flex;
-}
-
+/* Overflow ("…") menu. Rendered at the deck root (not inside the card)
+ * and positioned `fixed`, so the column's `overflow` and the post's
+ * `contain: paint` can't clip it. The backdrop is a full-viewport
+ * transparent layer that closes the menu on any outside click; both
+ * sit above every column. Inline `style` supplies the right/bottom
+ * anchor computed from the click point. */
 .post__menu-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: 199;
 }
 
 .post__menu {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    right: 0;
-    z-index: 50;
+    position: fixed;
+    z-index: 200;
     min-width: 180px;
     padding: 4px;
     display: flex;
