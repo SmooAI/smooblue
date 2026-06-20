@@ -35,7 +35,8 @@ pub fn PostCard(
     let mut thread_focus = use_context::<Signal<ThreadFocus>>();
     let mut profile_focus = use_context::<Signal<ProfileFocus>>();
     let mut engagement_focus = use_context::<Signal<EngagementFocus>>();
-    let mut report_focus = use_context::<Signal<crate::state::ReportFocus>>();
+    let mut post_menu_focus = use_context::<Signal<crate::state::PostMenuFocus>>();
+    let deleted_posts = use_context::<Signal<crate::state::DeletedPosts>>();
     let session = use_context::<Signal<Option<Session>>>();
 
     let post_uri = post.uri.clone();
@@ -92,13 +93,8 @@ pub fn PostCard(
     let mut content_revealed = use_signal(|| false);
     let show_warning = needs_warning && !*content_revealed.read();
 
-    // Overflow ("…") action menu + optimistic delete. `menu_open`
-    // toggles the popover; `deleted` hides the card immediately after a
-    // successful delete (the feed still holds the item until the next
-    // poll drops it server-side).
-    let mut menu_open = use_signal(|| false);
-    let mut deleted = use_signal(|| false);
-    // Is this the signed-in user's own post? Gates the Delete action.
+    // Is this the signed-in user's own post? Gates the Delete action
+    // in the overflow menu (rendered at the deck level — see PostMenu).
     let is_mine = session
         .read()
         .as_ref()
@@ -339,97 +335,30 @@ pub fn PostCard(
 
     // Optimistically removed after a successful delete — render nothing.
     // (All hooks above have already run, so this early return is safe.)
-    if *deleted.read() {
+    if deleted_posts.read().0.contains(&post_uri) {
         return rsx! { Fragment {} };
     }
 
-    // ── Overflow-menu actions ──────────────────────────────────────
-    let bsky_url = post_uri.rsplit('/').next().map(|rkey| {
-        format!(
-            "https://bsky.app/profile/{}/post/{rkey}",
-            post.author.handle
-        )
-    });
-
-    let copy_link = {
-        let url = bsky_url.clone();
-        move |e: MouseEvent| {
-            e.stop_propagation();
-            menu_open.set(false);
-            if let Some(url) = url.clone() {
-                // arboard is already a dependency (compose paste) and is
-                // cross-platform, unlike the previous pbcopy shell-out.
-                if let Ok(mut cb) = arboard::Clipboard::new() {
-                    let _ = cb.set_text(url);
-                }
-            }
-        }
-    };
-    let open_in_browser = {
-        let url = bsky_url.clone();
-        move |e: MouseEvent| {
-            e.stop_propagation();
-            menu_open.set(false);
-            if let Some(url) = url.clone() {
-                let _ = crate::safe_open::open_in_browser(&url);
-            }
-        }
-    };
-    let delete_post = {
-        let uri = post_uri.clone();
-        move |e: MouseEvent| {
-            e.stop_propagation();
-            menu_open.set(false);
-            let uri = uri.clone();
-            spawn(async move {
-                if crate::demo::is_active() {
-                    deleted.set(true);
-                    return;
-                }
-                if let Some(client) = fresh_client(session).await {
-                    if client.delete_record(&uri).await.is_ok() {
-                        deleted.set(true);
-                    }
-                }
-            });
-        }
-    };
-    let mute_author = {
-        let did = post.author.did.clone();
-        move |e: MouseEvent| {
-            e.stop_propagation();
-            menu_open.set(false);
-            let did = did.clone();
-            spawn(async move {
-                if let Some(client) = fresh_client(session).await {
-                    let _ = client.mute_actor(&did).await;
-                }
-            });
-        }
-    };
-    let block_author = {
-        let did = post.author.did.clone();
-        move |e: MouseEvent| {
-            e.stop_propagation();
-            menu_open.set(false);
-            let did = did.clone();
-            spawn(async move {
-                if let Some(client) = fresh_client(session).await {
-                    let _ = client.create_block(&did).await;
-                }
-            });
-        }
-    };
-    let report_post = {
+    // Open the deck-level overflow menu, anchored at the click point and
+    // carrying this post's identity. Rendered up at the deck so it
+    // escapes the column overflow + the card's `contain: paint` clip.
+    let open_post_menu = {
         let uri = post_uri.clone();
         let cid = post_cid.clone();
+        let did = post.author.did.clone();
+        let author_handle = post.author.handle.clone();
         move |e: MouseEvent| {
             e.stop_propagation();
-            menu_open.set(false);
-            report_focus.set(crate::state::ReportFocus(Some(
-                crate::components::report_sheet::ReportTarget::Post {
+            let c = e.client_coordinates();
+            post_menu_focus.set(crate::state::PostMenuFocus(Some(
+                crate::state::PostMenuState {
                     uri: uri.clone(),
                     cid: cid.clone(),
+                    author_did: did.clone(),
+                    author_handle: author_handle.clone(),
+                    is_mine,
+                    x: c.x,
+                    y: c.y,
                 },
             )));
         }
@@ -600,65 +529,183 @@ pub fn PostCard(
                             span { class: "post__action-count post__action-count--zero", "0" }
                         }
                     }
-                    // Overflow menu — "…" opens a list of actions. On
-                    // your own post that includes Delete; on others'
-                    // posts, Mute / Block / Report. Replaces the old
-                    // single-action copy-link button.
-                    div { class: "post__more",
-                        button {
-                            class: "post__action post__action--right",
-                            title: "More",
-                            onclick: move |e: MouseEvent| {
-                                e.stop_propagation();
-                                let now = *menu_open.peek();
-                                menu_open.set(!now);
-                            },
-                            icons::MoreHorizontal { size: icons::Size::Sm }
-                        }
-                        if *menu_open.read() {
-                            // Transparent backdrop: any click outside the
-                            // menu closes it. Sits below the menu, above
-                            // the rest of the card.
-                            div {
-                                class: "post__menu-backdrop",
-                                onclick: move |e: MouseEvent| {
-                                    e.stop_propagation();
-                                    menu_open.set(false);
-                                },
-                            }
-                            div { class: "post__menu", onclick: move |e: MouseEvent| e.stop_propagation(),
-                                button { class: "post__menu-item", onclick: copy_link,
-                                    icons::Link { size: icons::Size::Sm }
-                                    "Copy link"
-                                }
-                                button { class: "post__menu-item", onclick: open_in_browser,
-                                    icons::ExternalLink { size: icons::Size::Sm }
-                                    "Open in browser"
-                                }
-                                if is_mine {
-                                    button { class: "post__menu-item post__menu-item--danger",
-                                        onclick: delete_post,
-                                        icons::Trash2 { size: icons::Size::Sm }
-                                        "Delete post"
-                                    }
-                                } else {
-                                    button { class: "post__menu-item", onclick: mute_author,
-                                        icons::VolumeOff { size: icons::Size::Sm }
-                                        "Mute @{post.author.handle}"
-                                    }
-                                    button { class: "post__menu-item", onclick: block_author,
-                                        icons::Ban { size: icons::Size::Sm }
-                                        "Block @{post.author.handle}"
-                                    }
-                                    button { class: "post__menu-item post__menu-item--danger",
-                                        onclick: report_post,
-                                        icons::Flag { size: icons::Size::Sm }
-                                        "Report post"
-                                    }
-                                }
-                            }
-                        }
+                    // Overflow ("…") button — opens the deck-level
+                    // PostMenu anchored at the click. Rendered up there
+                    // (not inline) so the menu isn't clipped by the
+                    // card's `contain: paint` or the column's overflow.
+                    button {
+                        class: "post__action post__action--right",
+                        title: "More",
+                        onclick: open_post_menu,
+                        icons::MoreHorizontal { size: icons::Size::Sm }
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Deck-level overflow menu for a post. Driven by [`PostMenuFocus`];
+/// rendered once near the app root (see deck) so it floats above every
+/// column with `position: fixed` and can't be clipped. Anchors its
+/// bottom-right corner at the click point so it opens up-and-left from
+/// the "…" button.
+#[component]
+pub fn PostMenu() -> Element {
+    let mut focus = use_context::<Signal<crate::state::PostMenuFocus>>();
+    let mut deleted_posts = use_context::<Signal<crate::state::DeletedPosts>>();
+    let mut report_focus = use_context::<Signal<crate::state::ReportFocus>>();
+    let session = use_context::<Signal<Option<Session>>>();
+
+    let Some(state) = focus.read().0.clone() else {
+        return rsx! { Fragment {} };
+    };
+
+    let close = move || focus.set(crate::state::PostMenuFocus(None));
+
+    // Anchor: pin the menu's bottom-right at the click, opening up-left
+    // (the "…" sits at the bottom-right of the action bar). Clamp into
+    // the viewport with min().
+    let right = format!("max(8px, calc(100vw - {}px))", state.x);
+    let bottom = format!("max(8px, calc(100vh - {}px))", state.y);
+    let anchor = format!("right: {right}; bottom: {bottom};");
+
+    let bsky_url = state.uri.rsplit('/').next().map(|rkey| {
+        format!(
+            "https://bsky.app/profile/{}/post/{rkey}",
+            state.author_handle
+        )
+    });
+
+    let copy_link = {
+        let url = bsky_url.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            if let Some(url) = url.clone() {
+                if let Ok(mut cb) = arboard::Clipboard::new() {
+                    let _ = cb.set_text(url);
+                }
+            }
+            close();
+        }
+    };
+    let open_in_browser = {
+        let url = bsky_url.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            if let Some(url) = url.clone() {
+                let _ = crate::safe_open::open_in_browser(&url);
+            }
+            close();
+        }
+    };
+    let delete_post = {
+        let uri = state.uri.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            let uri = uri.clone();
+            close();
+            spawn(async move {
+                if crate::demo::is_active() {
+                    deleted_posts.write().0.insert(uri);
+                    return;
+                }
+                if let Some(client) = fresh_client(session).await {
+                    if client.delete_record(&uri).await.is_ok() {
+                        deleted_posts.write().0.insert(uri);
+                    }
+                }
+            });
+        }
+    };
+    let mute_author = {
+        let did = state.author_did.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            let did = did.clone();
+            close();
+            spawn(async move {
+                if let Some(client) = fresh_client(session).await {
+                    let _ = client.mute_actor(&did).await;
+                }
+            });
+        }
+    };
+    let block_author = {
+        let did = state.author_did.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            let did = did.clone();
+            close();
+            spawn(async move {
+                if let Some(client) = fresh_client(session).await {
+                    let _ = client.create_block(&did).await;
+                }
+            });
+        }
+    };
+    let report_post = {
+        let uri = state.uri.clone();
+        let cid = state.cid.clone();
+        let mut close = close;
+        move |e: MouseEvent| {
+            e.stop_propagation();
+            report_focus.set(crate::state::ReportFocus(Some(
+                crate::components::report_sheet::ReportTarget::Post {
+                    uri: uri.clone(),
+                    cid: cid.clone(),
+                },
+            )));
+            close();
+        }
+    };
+
+    rsx! {
+        // Full-viewport backdrop — any outside click closes the menu.
+        div {
+            class: "post__menu-backdrop",
+            onclick: move |e: MouseEvent| {
+                e.stop_propagation();
+                let mut close = close;
+                close();
+            },
+        }
+        div {
+            class: "post__menu",
+            style: "{anchor}",
+            onclick: move |e: MouseEvent| e.stop_propagation(),
+            button { class: "post__menu-item", onclick: copy_link,
+                icons::Link { size: icons::Size::Sm }
+                "Copy link"
+            }
+            button { class: "post__menu-item", onclick: open_in_browser,
+                icons::ExternalLink { size: icons::Size::Sm }
+                "Open in browser"
+            }
+            if state.is_mine {
+                button { class: "post__menu-item post__menu-item--danger",
+                    onclick: delete_post,
+                    icons::Trash2 { size: icons::Size::Sm }
+                    "Delete post"
+                }
+            } else {
+                button { class: "post__menu-item", onclick: mute_author,
+                    icons::VolumeOff { size: icons::Size::Sm }
+                    "Mute @{state.author_handle}"
+                }
+                button { class: "post__menu-item", onclick: block_author,
+                    icons::Ban { size: icons::Size::Sm }
+                    "Block @{state.author_handle}"
+                }
+                button { class: "post__menu-item post__menu-item--danger",
+                    onclick: report_post,
+                    icons::Flag { size: icons::Size::Sm }
+                    "Report post"
                 }
             }
         }
