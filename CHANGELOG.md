@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.25.0
+
+### Minor Changes
+
+- [#67](https://github.com/SmooAI/smooblue/pull/67) [`8bca850`](https://github.com/SmooAI/smooblue/commit/8bca8502a530880111786be675e5919fd4d6876e) Thanks [@brentrager](https://github.com/brentrager)! - Columns now have a settings panel (gear in the header). It slides in below the header and persists per column:
+
+  - **Feed filters** (post columns): Hide reposts, Hide replies, Media only, Text only — applied client-side to the feed.
+  - **Notification filter** (Notifications columns): show All, just Mentions (replies/mentions/quotes), or just Reactions (likes/reposts/follows).
+  - **Refresh cadence**: Auto (the per-kind default), 15s, 30s, 60s, or Off to pause live polling for that column.
+
 ## 1.24.0
 
 ### Minor Changes
