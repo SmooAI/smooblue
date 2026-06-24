@@ -3624,6 +3624,20 @@ a {
     flex-direction: column;
     padding: 0;
     position: relative;
+    /* Clip the inner scroller to the sheet's rounded corners; the
+     * scroll happens on .profile__scroll, not here. */
+    overflow: hidden;
+}
+
+/* The whole profile (banner → header → bio → stats → feed) scrolls as
+ * one unit. Previously only .profile__feed scrolled, so on a short
+ * viewport the fixed header dominated and left a tiny feed window. */
+.profile__scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 .profile__close {
@@ -3879,9 +3893,10 @@ a {
 }
 
 .profile__feed {
-    overflow-y: auto;
+    /* No longer its own scroll region — the parent .profile__scroll
+     * owns scrolling for the whole profile. Just flow naturally. */
     padding: 8px 12px 16px;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
 }
 
 .profile__feed-empty {
