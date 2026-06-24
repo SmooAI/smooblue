@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.26.0
+
+### Minor Changes
+
+- [#69](https://github.com/SmooAI/smooblue/pull/69) [`742868b`](https://github.com/SmooAI/smooblue/commit/742868be358e07fb8fb5d664909e9881b87846bb) Thanks [@brentrager](https://github.com/brentrager)! - Columns now have a settings panel (gear in the header). It slides in below the header and persists per column:
+
+  - **Feed filters** (post columns): Hide reposts, Hide replies, Media only, Text only — applied client-side to the feed.
+  - **Notification filter** (Notifications columns): show All, just Mentions (replies/mentions/quotes), or just Reactions (likes/reposts/follows).
+  - **Refresh cadence**: Auto (the per-kind default), 15s, 30s, 60s, or Off to pause live polling for that column.
+
+### Patch Changes
+
+- [#69](https://github.com/SmooAI/smooblue/pull/69) [`742868b`](https://github.com/SmooAI/smooblue/commit/742868be358e07fb8fb5d664909e9881b87846bb) Thanks [@brentrager](https://github.com/brentrager)! - Fix the column filter input swallowing letters. Keystrokes typed into a column's filter no longer leak into the deck's vim hotkey dispatcher, so letters that are also shortcuts (`j`, `k`, `h`, `l`, `n`, `g`, `G`, `?`, space) now type normally — you can finally filter for "jank" or "night". Escape in the filter clears it and closes the bar.
+
 ## 1.25.0
 
 ### Minor Changes
