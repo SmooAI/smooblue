@@ -97,31 +97,39 @@ pub fn ProfileSheet() -> Element {
                     onclick: close,
                     icons::X { size: icons::Size::Sm }
                 }
-                match &*data.read_unchecked() {
-                    Some(Ok(d)) => rsx! {
-                        ProfileBody {
-                            data: d.clone(),
-                            on_add_column: move |spec: ColumnSpec| {
-                                add_column_unique(&mut cols, spec);
-                                focus.set(ProfileFocus(None));
-                            },
-                        }
-                    },
-                    Some(Err(e)) => {
-                        // Stale "no focus" Err from a prior render is
-                        // not a user-visible error — it just means the
-                        // sheet was re-opened on a new actor and the
-                        // new fetch hasn't resolved yet. Show the
-                        // loader instead of a scary red banner.
-                        if e == "no focus" {
-                            rsx! { div { class: "profile__loading", "Loading profile…" } }
-                        } else {
-                            rsx! { div { class: "profile__error", "Couldn't load profile: {e}" } }
-                        }
-                    },
-                    None => rsx! {
-                        div { class: "profile__loading", "Loading profile…" }
-                    },
+                // Single scroll container for the ENTIRE profile (banner,
+                // header, bio, stats, feed) so the whole page scrolls as
+                // one. On a short viewport the header scrolls away instead
+                // of pinning and starving the feed of its scroll area. The
+                // close button above stays pinned (it's a sibling, not
+                // inside this scroller).
+                div { class: "profile__scroll",
+                    match &*data.read_unchecked() {
+                        Some(Ok(d)) => rsx! {
+                            ProfileBody {
+                                data: d.clone(),
+                                on_add_column: move |spec: ColumnSpec| {
+                                    add_column_unique(&mut cols, spec);
+                                    focus.set(ProfileFocus(None));
+                                },
+                            }
+                        },
+                        Some(Err(e)) => {
+                            // Stale "no focus" Err from a prior render is
+                            // not a user-visible error — it just means the
+                            // sheet was re-opened on a new actor and the
+                            // new fetch hasn't resolved yet. Show the
+                            // loader instead of a scary red banner.
+                            if e == "no focus" {
+                                rsx! { div { class: "profile__loading", "Loading profile…" } }
+                            } else {
+                                rsx! { div { class: "profile__error", "Couldn't load profile: {e}" } }
+                            }
+                        },
+                        None => rsx! {
+                            div { class: "profile__loading", "Loading profile…" }
+                        },
+                    }
                 }
             }
         }
