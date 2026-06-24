@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.26.1
+
+### Patch Changes
+
+- [#71](https://github.com/SmooAI/smooblue/pull/71) [`cd5e260`](https://github.com/SmooAI/smooblue/commit/cd5e260cd77db81cec3b424af6e22ff14c2580f0) Thanks [@brentrager](https://github.com/brentrager)! - The profile sheet now scrolls as a single page. Previously only the recent-posts feed scrolled while the banner, header, bio, and stats stayed pinned — on a short viewport that fixed header dominated and left only a sliver of scrollable feed. Now the whole profile scrolls together (the header scrolls away), and the close button stays pinned.
+
 ## 1.26.0
 
 ### Minor Changes
