@@ -711,6 +711,21 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         autofocus: true,
                         value: "{filter_snap}",
                         oninput: move |e| filter_text.set(e.value()),
+                        // The deck shell's root onkeydown runs the vim
+                        // hotkey dispatcher and prevent_default()s any key
+                        // it consumes (j/k/h/l/n/g/G/?/space). Without this
+                        // guard those letters never reach the input — you
+                        // can't filter for "jank" or "night". Stop every
+                        // keystroke from bubbling so typing works normally;
+                        // handle Escape ourselves to clear + close the bar.
+                        onkeydown: move |e| {
+                            if e.key() == Key::Escape {
+                                filter_text.set(String::new());
+                                filter_applied.set(String::new());
+                                filter_open.set(false);
+                            }
+                            e.stop_propagation();
+                        },
                     }
                     if has_filter {
                         button { class: "deck-column__filter-clear",

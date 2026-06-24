@@ -29,3 +29,6 @@ docs/.obsidian/cache
 
 # pnpm + changesets workspace
 node_modules/
+
+# Pearl Dolt store — beads model: synced via refs/dolt/data, not tracked.
+.smooth/dolt/
