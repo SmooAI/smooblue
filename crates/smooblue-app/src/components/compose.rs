@@ -577,10 +577,14 @@ pub fn ComposeSheet() -> Element {
             uri: q.uri.clone(),
             cid: q.cid.clone(),
         });
+        // root = the thread root carried on the ReplyTarget (the
+        // ancestor root for a deep reply, or the parent itself for a
+        // top-level one); parent = the post being replied to. Setting
+        // root = parent here orphaned deep replies — see th-f603e2.
         let reply = ctx.read().reply_to.as_ref().map(|p| ReplyRef {
             root: StrongRef {
-                uri: p.uri.clone(),
-                cid: p.cid.clone(),
+                uri: p.root_uri.clone(),
+                cid: p.root_cid.clone(),
             },
             parent: StrongRef {
                 uri: p.uri.clone(),
