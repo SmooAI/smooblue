@@ -81,6 +81,35 @@ impl NotificationGroup {
         self.items.len()
     }
 
+    /// Canonical identity for merging/deduping groups across polls.
+    ///
+    /// MUST mirror [`group_notifications`]'s bucketing or replies get
+    /// lost: groupable reasons (like/repost/follow) fold by
+    /// `(reason, reason_subject)` so re-fetches and new reactions
+    /// collapse into one row; non-groupable reasons (reply/mention/
+    /// quote) are unique per notification (`reason` + the item's
+    /// `uri`/`cid`) so two distinct replies — including the common
+    /// null-`reason_subject` case — never merge into each other. A
+    /// re-fetch of the *same* reply still matches (same uri/cid) and
+    /// dedupes. Without this, poll-merge keyed by `(reason, subject)`
+    /// silently swallowed new replies as sub-items (th-e932f7).
+    pub fn merge_key(&self) -> String {
+        if groupable(&self.reason) {
+            format!(
+                "g\u{0}{}\u{0}{}",
+                self.reason,
+                self.reason_subject.as_deref().unwrap_or("")
+            )
+        } else {
+            let id = self
+                .items
+                .first()
+                .map(|n| format!("{}\u{0}{}", n.uri, n.cid))
+                .unwrap_or_default();
+            format!("s\u{0}{}\u{0}{}", self.reason, id)
+        }
+    }
+
     /// `true` once at least one item in the group is unread. Used
     /// to drive the unread highlight on the card.
     pub fn any_unread(&self) -> bool {
