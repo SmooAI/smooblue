@@ -355,6 +355,13 @@ pub struct ComposeContext {
 pub struct ReplyTarget {
     pub uri: String,
     pub cid: String,
+    /// Thread-root strong ref (`uri`, `cid`) that the new reply must
+    /// carry as its own `reply.root`. For a reply to a top-level post
+    /// this equals (`uri`, `cid`); for a reply to a deeper post it's
+    /// the ancestor thread root, propagated so bsky threads the reply
+    /// under the real conversation instead of orphaning it.
+    pub root_uri: String,
+    pub root_cid: String,
     pub handle: String,
     pub text: String,
 }

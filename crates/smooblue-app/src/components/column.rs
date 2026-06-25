@@ -1459,10 +1459,18 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
             };
             if let Ok(posts) = client.get_posts(std::slice::from_ref(&subject)).await {
                 if let Some(p) = posts.into_iter().next() {
+                    // Inherit the thread root if the replied-to post is
+                    // itself a reply; else it's the root. See th-f603e2.
+                    let (root_uri, root_cid) = p
+                        .record
+                        .reply_root_ref()
+                        .unwrap_or_else(|| (subject.clone(), p.cid.clone()));
                     compose_ctx.with_mut(|w| {
                         w.reply_to = Some(crate::state::ReplyTarget {
                             uri: subject.clone(),
                             cid: p.cid.clone(),
+                            root_uri,
+                            root_cid,
                             handle: handle.clone(),
                             text: String::new(),
                         });
@@ -2435,6 +2443,7 @@ mod tests {
                     text: String::new(),
                     created_at: None,
                     facets: None,
+                    reply: None,
                 },
                 embed: None,
                 indexed_at: None,

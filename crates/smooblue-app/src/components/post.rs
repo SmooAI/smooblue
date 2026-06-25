@@ -311,11 +311,21 @@ pub fn PostCard(
     let post_cid_reply = post_cid.clone();
     let handle_reply = handle.clone();
     let text_reply = text.clone();
+    // Thread root for the new reply: if this post is itself a reply,
+    // inherit its `reply.root`; otherwise this post IS the root. Using
+    // the immediate parent as root would orphan the reply (bsky threads
+    // by root — a mid-thread post is not a valid root). See th-f603e2.
+    let (reply_root_uri, reply_root_cid) = post
+        .record
+        .reply_root_ref()
+        .unwrap_or_else(|| (post_uri.clone(), post_cid.clone()));
     let mut open_reply = move |_evt: MouseEvent| {
         let mut w = compose_ctx.write();
         w.reply_to = Some(ReplyTarget {
             uri: post_uri_reply.clone(),
             cid: post_cid_reply.clone(),
+            root_uri: reply_root_uri.clone(),
+            root_cid: reply_root_cid.clone(),
             handle: handle_reply.clone(),
             text: text_reply.clone(),
         });

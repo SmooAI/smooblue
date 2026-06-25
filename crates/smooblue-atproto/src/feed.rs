@@ -287,6 +287,18 @@ pub struct PostRecord {
     /// with [`PostRecord::resolved_facets`] for rendering.
     #[serde(default)]
     pub facets: Option<serde_json::Value>,
+    /// The post's own `reply` ref (`{ root, parent }`) when this post
+    /// is itself a reply; absent on top-level posts. Kept untyped for
+    /// the same defensive reason as [`FeedItem::reply`] — a malformed
+    /// shape on one post must not blow up the whole feed. Read the
+    /// thread root via [`PostRecord::reply_root_ref`].
+    ///
+    /// Boxed so it costs one pointer (8 bytes) on the stack instead of
+    /// a full `serde_json::Value` (24 bytes) on every post — at 2000
+    /// posts/column that footprint matters (see the FeedItem memory
+    /// budget test). The heap `Value` only allocates for actual replies.
+    #[serde(default)]
+    pub reply: Option<Box<serde_json::Value>>,
 }
 
 /// One styled segment of post text — the renderer walks an ordered
@@ -308,6 +320,23 @@ pub enum FacetSegment {
 }
 
 impl PostRecord {
+    /// The thread root this post belongs to, as `(uri, cid)`, pulled
+    /// from the post's own `reply.root` strong ref.
+    ///
+    /// Returns `None` for a top-level post (no `reply`), in which case
+    /// the post *is* the root and callers should fall back to the
+    /// post's own `(uri, cid)`. This is the value a NEW reply must
+    /// propagate as its own `reply.root` — using the immediate parent
+    /// instead orphans the reply, because bsky groups a thread by its
+    /// root and a mid-thread post is not a valid root. Defensive:
+    /// `reply` is untyped, so a malformed shape just yields `None`.
+    pub fn reply_root_ref(&self) -> Option<(String, String)> {
+        let root = self.reply.as_ref()?.get("root")?;
+        let uri = root.get("uri")?.as_str()?.to_string();
+        let cid = root.get("cid")?.as_str()?.to_string();
+        Some((uri, cid))
+    }
+
     /// Walk `text` byte-by-byte, slicing it into [`FacetSegment`]s
     /// at the byteStart / byteEnd offsets the lexicon ships. Out-of-
     /// bound or overlapping facets fall through to plain text — we
@@ -1364,7 +1393,50 @@ mod tests {
             text: text.into(),
             created_at: None,
             facets: Some(facets),
+            reply: None,
         }
+    }
+
+    #[test]
+    fn reply_root_ref_none_for_top_level_post() {
+        // A top-level post has no `reply` — callers fall back to the
+        // post's own (uri, cid) as the root.
+        let r: PostRecord = serde_json::from_value(serde_json::json!({
+            "text": "hello"
+        }))
+        .unwrap();
+        assert_eq!(r.reply_root_ref(), None);
+    }
+
+    #[test]
+    fn reply_root_ref_returns_thread_root_not_parent() {
+        // The post is a reply deep in a thread: its `reply.root` differs
+        // from `reply.parent`. A new reply must inherit ROOT, not parent
+        // — this is the th-f603e2 regression guard.
+        let r: PostRecord = serde_json::from_value(serde_json::json!({
+            "text": "a reply",
+            "reply": {
+                "root":   { "uri": "at://root", "cid": "rootcid" },
+                "parent": { "uri": "at://parent", "cid": "parentcid" }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            r.reply_root_ref(),
+            Some(("at://root".to_string(), "rootcid".to_string()))
+        );
+    }
+
+    #[test]
+    fn reply_root_ref_none_for_malformed_reply() {
+        // Defensive: a `reply` missing root.uri/cid yields None rather
+        // than panicking, so one weird post can't break compose.
+        let r: PostRecord = serde_json::from_value(serde_json::json!({
+            "text": "x",
+            "reply": { "root": { "cid": "only-cid" } }
+        }))
+        .unwrap();
+        assert_eq!(r.reply_root_ref(), None);
     }
 
     #[test]
@@ -1373,6 +1445,7 @@ mod tests {
             text: "hello world".into(),
             created_at: None,
             facets: None,
+            reply: None,
         };
         let s = r.resolved_facets();
         assert_eq!(s.len(), 1);
