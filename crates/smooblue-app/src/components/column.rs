@@ -810,11 +810,22 @@ pub fn Column(spec: ColumnSpec) -> Element {
                         let (vp_top, vp_h, _) = *viewport.read();
                         let est = estimated_row_height_px(&spec.kind);
                         // Apply the column's notification-type filter
-                        // (All / Mentions / Reactions) before virtualizing.
+                        // (All / Mentions / Reactions) AND the text
+                        // filter from the header input before
+                        // virtualizing. The text filter previously did
+                        // nothing on Notifications columns (th-e932f7).
                         let nf = spec.settings.notif_filter;
                         let filtered: Vec<&NotificationGroup> = groups
                             .iter()
                             .filter(|g| passes_notif_filter(&g.reason, nf))
+                            .filter(|g| {
+                                !has_filter
+                                    || notif_group_matches(
+                                        g,
+                                        g.items.first().and_then(|n| subject_for(n, subjects)),
+                                        &filter_lower,
+                                    )
+                            })
                             .collect();
                         let keys: Vec<String> = filtered
                             .iter()
@@ -1911,22 +1922,21 @@ fn merge_top_notif_groups(
 ) -> Vec<NotificationGroup> {
     use std::collections::{HashMap, HashSet};
 
-    fn key(g: &NotificationGroup) -> (String, Option<String>) {
-        (g.reason.clone(), g.reason_subject.clone())
-    }
-
-    // Index existing groups by key for O(1) merge lookup.
+    // Index existing groups by their canonical identity for O(1) merge
+    // lookup. merge_key() keeps non-groupable reasons (reply/mention/
+    // quote) unique per notification so distinct replies never collapse
+    // into one another — see NotificationGroup::merge_key (th-e932f7).
     let mut existing: Vec<NotificationGroup> = existing;
-    let mut existing_idx: HashMap<(String, Option<String>), usize> = existing
+    let mut existing_idx: HashMap<String, usize> = existing
         .iter()
         .enumerate()
-        .map(|(i, g)| (key(g), i))
+        .map(|(i, g)| (g.merge_key(), i))
         .collect();
 
     // Split fresh into "merge into existing" vs "new groups to prepend."
     let mut to_prepend: Vec<NotificationGroup> = Vec::new();
     for fresh_group in fresh {
-        let k = key(&fresh_group);
+        let k = fresh_group.merge_key();
         if let Some(&idx) = existing_idx.get(&k) {
             // Merge: prepend fresh items (newest-first), dedupe by uri+cid.
             let mut seen: HashSet<(String, String)> = existing[idx]
@@ -1993,19 +2003,17 @@ fn append_bottom_notif_groups(
 ) -> Vec<NotificationGroup> {
     use std::collections::HashSet;
 
-    fn group_key_pair(g: &NotificationGroup) -> (String, Option<String>) {
-        (g.reason.clone(), g.reason_subject.clone())
-    }
-
-    // Index existing groups by their dedup key for O(1) lookup.
-    let mut existing_idx: std::collections::HashMap<(String, Option<String>), usize> =
+    // Index existing groups by their canonical identity for O(1)
+    // lookup. Same merge_key() as the top-merge so reply/mention/quote
+    // groups stay distinct across pagination (th-e932f7).
+    let mut existing_idx: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     for (i, g) in existing.iter().enumerate() {
-        existing_idx.insert(group_key_pair(g), i);
+        existing_idx.insert(g.merge_key(), i);
     }
 
     for new_group in more {
-        let key = group_key_pair(&new_group);
+        let key = new_group.merge_key();
         if let Some(&idx) = existing_idx.get(&key) {
             // Merge new items into the existing group, deduping by
             // the item's own uri+cid (a single notification can show
@@ -2115,6 +2123,53 @@ pub fn feed_item_matches(item: &smooblue_atproto::FeedItem, needle: &str) -> boo
         parent.as_deref().unwrap_or(""),
     ];
     haystacks.iter().any(|h| h.to_lowercase().contains(needle))
+}
+
+/// Case-insensitive substring match for a notification group against
+/// the column filter — the Notifications-column analogue of
+/// [`feed_item_matches`]. Matches on every actor's handle + display
+/// name in the group, the text the actor wrote (reply/mention/quote),
+/// and the subject post's text + author (so filtering by the original
+/// poster's name works on a "liked your post" row). Empty needle =
+/// matches everything.
+pub fn notif_group_matches(
+    group: &NotificationGroup,
+    subject: Option<&PostView>,
+    needle: &str,
+) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    for n in &group.items {
+        if n.author.handle.to_lowercase().contains(needle)
+            || n.author
+                .display_name
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(needle)
+            || n.record_text()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(needle)
+        {
+            return true;
+        }
+    }
+    if let Some(s) = subject {
+        if s.record.text.to_lowercase().contains(needle)
+            || s.author.handle.to_lowercase().contains(needle)
+            || s.author
+                .display_name
+                .as_deref()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(needle)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn feed_item_parent_handle(item: &smooblue_atproto::FeedItem) -> Option<String> {
@@ -2784,6 +2839,59 @@ mod tests {
         assert_eq!(out[1].reason, "like");
         assert_eq!(out[1].items.len(), 2);
         assert_eq!(out[2].reason, "repost");
+    }
+
+    #[test]
+    fn merge_top_notif_keeps_distinct_replies_separate() {
+        // Regression th-e932f7: two different replies share
+        // (reason, reason_subject) = (reply, None). Keyed by that pair
+        // they collapsed and the newer reply vanished as a sub-item.
+        // merge_key keeps non-groupable reasons unique per notification.
+        let existing = vec![mk_group("reply", None, &["reply_old"])];
+        let fresh = vec![mk_group("reply", None, &["reply_new"])];
+        let merged = merge_top_notif_groups(existing, fresh, 100);
+        assert_eq!(merged.len(), 2, "distinct replies must not merge");
+        assert_eq!(merged[0].items[0].uri, "reply_new"); // prepended (newest)
+        assert_eq!(merged[1].items[0].uri, "reply_old");
+        assert!(
+            merged.iter().all(|g| g.items.len() == 1),
+            "neither reply was swallowed into the other"
+        );
+    }
+
+    #[test]
+    fn merge_top_notif_same_reply_refetch_dedupes() {
+        // The SAME reply re-fetched next poll matches by uri+cid and
+        // does not duplicate into two rows.
+        let existing = vec![mk_group("reply", None, &["reply_x"])];
+        let fresh = vec![mk_group("reply", None, &["reply_x"])];
+        let merged = merge_top_notif_groups(existing, fresh, 100);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].items.len(), 1);
+    }
+
+    #[test]
+    fn append_bottom_notif_keeps_distinct_mentions_separate() {
+        // Same regression on the pagination path: two mentions with
+        // null subject must not collapse into one bottom row.
+        let existing = vec![mk_group("mention", None, &["mention_top"])];
+        let more = vec![mk_group("mention", None, &["mention_older"])];
+        let out = append_bottom_notif_groups(existing, more, 100);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|g| g.items.len() == 1));
+    }
+
+    #[test]
+    fn notif_group_matches_actor_text_and_empty_needle() {
+        let mut g = mk_group("reply", None, &["snowden"]);
+        // mk_notif sets handle = "snowden.test".
+        assert!(notif_group_matches(&g, None, "snowden")); // handle
+        assert!(!notif_group_matches(&g, None, "zzznope"));
+        assert!(notif_group_matches(&g, None, "")); // empty = match all
+                                                    // Match on the text the actor wrote (reply/mention/quote body).
+        g.items[0].record = Some(serde_json::json!({ "text": "ninety pt average" }));
+        assert!(notif_group_matches(&g, None, "ninety"));
+        assert!(!notif_group_matches(&g, None, "tournament"));
     }
 
     #[test]
