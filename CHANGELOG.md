@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.26.2
+
+### Patch Changes
+
+- [#73](https://github.com/SmooAI/smooblue/pull/73) [`206f959`](https://github.com/SmooAI/smooblue/commit/206f959040bd7e63d74f84759b71009110bcd54c) Thanks [@brentrager](https://github.com/brentrager)! - Fix replies getting orphaned from their thread. When you replied to a post that was itself a reply (anything below the top of a thread), Smooblue stamped the new reply's `reply.root` as the immediate parent instead of the true thread root. Bluesky groups a thread by its root, so those replies rendered disconnected with no visible parent. Replies now inherit the correct thread root (falling back to the post itself for top-level posts), so they thread under the real conversation.
+
 ## 1.26.1
 
 ### Patch Changes
