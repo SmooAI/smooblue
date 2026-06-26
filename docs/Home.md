@@ -56,6 +56,10 @@ cssclasses:
 - **Add an XRPC endpoint to the client** — [[Engineering/Adding-an-XRPC-Endpoint]]
 - **Land a fix** — [[Engineering/Engineering-Guide#Workflow]]
 
+### Ideas / research
+
+- **Account analytics (followers/following over time) — data sources** — [[Engineering/Account-Analytics-Data-Sources]]
+
 ---
 
 ## Status at a glance
