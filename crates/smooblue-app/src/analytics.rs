@@ -33,7 +33,7 @@
 //!   by the (later) view-aggregation layer — unit-tested here.
 
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::inbox::with_db;
@@ -107,6 +107,19 @@ impl BackfillPhase {
             "engagement" => Some(Self::Engagement),
             "complete" => Some(Self::Complete),
             _ => None,
+        }
+    }
+
+    /// Monotonic rank for "has the backfill reached past phase X yet?"
+    /// comparisons that drive the per-card loading states in the view.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Pending => 0,
+            Self::Posts => 1,
+            Self::Following => 2,
+            Self::Followers => 3,
+            Self::Engagement => 4,
+            Self::Complete => 5,
         }
     }
 }
@@ -528,6 +541,66 @@ pub fn list_metric_snapshots(limit: i64) -> Result<Vec<MetricSnapshot>> {
 /// Cumulative count of follow events in `direction` whose TID-decoded
 /// `ts` is at or before `until`. Drives each point on the reconstructed
 /// growth curve. Cutoff is bound as an RFC3339 parameter.
+/// Earliest follow-event timestamp across both directions, or `None`
+/// when no follow records have been ingested yet. Anchors the
+/// full-history growth curve at the account's first follow rather than
+/// an arbitrary fixed window.
+pub fn earliest_follow_event_ts() -> Result<Option<DateTime<Utc>>> {
+    with_db(|conn| {
+        let s: Option<String> =
+            conn.query_row("SELECT MIN(ts) FROM follow_events", [], |r| r.get(0))?;
+        Ok(s.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }))
+    })
+}
+
+/// One `(label, cutoff)` per calendar month from `from`'s month through
+/// `to`'s month. `cutoff` is the first instant of the *following* month
+/// so a cumulative `count(... ts <= cutoff)` includes that whole month.
+/// Labels are `YYYY-MM`. Used to sample the growth curve monthly across
+/// the full account history (the one-off chart did the same).
+fn month_cutoffs(from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<(String, DateTime<Utc>)> {
+    let mut out = Vec::new();
+    let (mut y, mut m) = (from.year(), from.month());
+    loop {
+        let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+        if let Some(cutoff) = Utc.with_ymd_and_hms(ny, nm, 1, 0, 0, 0).single() {
+            out.push((format!("{y:04}-{m:02}"), cutoff));
+        }
+        if (y, m) >= (to.year(), to.month()) {
+            break;
+        }
+        (y, m) = (ny, nm);
+        // Safety stop: never emit more than ~50 years of months.
+        if out.len() > 600 {
+            break;
+        }
+    }
+    out
+}
+
+/// Full-history monthly cumulative growth curves. Returns
+/// `(month_labels, followers_cumulative, following_cumulative)`. Empty
+/// vecs when no follow events exist yet (view shows a loading state).
+fn growth_series_monthly(now: DateTime<Utc>) -> Result<(Vec<String>, Vec<f64>, Vec<f64>)> {
+    let Some(earliest) = earliest_follow_event_ts()? else {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
+    };
+    let months = month_cutoffs(earliest, now);
+    let mut labels = Vec::with_capacity(months.len());
+    let mut followers = Vec::with_capacity(months.len());
+    let mut following = Vec::with_capacity(months.len());
+    for (label, cutoff) in months {
+        labels.push(label);
+        followers.push(count_follow_events_until(FollowDir::Incoming, cutoff)? as f64);
+        following.push(count_follow_events_until(FollowDir::Outgoing, cutoff)? as f64);
+    }
+    Ok((labels, followers, following))
+}
+
 pub fn count_follow_events_until(direction: FollowDir, until: DateTime<Utc>) -> Result<i64> {
     with_db(|conn| {
         let n: i64 = conn.query_row(
@@ -585,6 +658,59 @@ pub fn list_top_posts(limit: i64) -> Result<Vec<PostMetric>> {
         }
         Ok(out)
     })
+}
+
+/// Helper: run a `post_metrics` SELECT with a single `LIMIT` bind.
+fn post_metrics_query(sql: &str, limit: i64) -> Result<Vec<PostMetric>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![limit], row_to_post_metric)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    })
+}
+
+/// All own posts, ascending by `ts`, bounded by `limit`. Feeds the pure
+/// monthly-engagement bucketing in the pop-out builder.
+pub fn list_all_post_metrics(limit: i64) -> Result<Vec<PostMetric>> {
+    post_metrics_query(
+        r#"
+        SELECT rkey, uri, ts, like_count, repost_count, reply_count, quote_count, text_preview
+        FROM post_metrics
+        ORDER BY ts ASC
+        LIMIT ?1
+        "#,
+        limit,
+    )
+}
+
+/// Top posts by repost count descending, tie-broken by like count.
+pub fn list_top_posts_by_reposts(limit: i64) -> Result<Vec<PostMetric>> {
+    post_metrics_query(
+        r#"
+        SELECT rkey, uri, ts, like_count, repost_count, reply_count, quote_count, text_preview
+        FROM post_metrics
+        ORDER BY repost_count DESC, like_count DESC
+        LIMIT ?1
+        "#,
+        limit,
+    )
+}
+
+/// Top posts by reply count descending, tie-broken by like count.
+pub fn list_top_posts_by_replies(limit: i64) -> Result<Vec<PostMetric>> {
+    post_metrics_query(
+        r#"
+        SELECT rkey, uri, ts, like_count, repost_count, reply_count, quote_count, text_preview
+        FROM post_metrics
+        ORDER BY reply_count DESC, like_count DESC
+        LIMIT ?1
+        "#,
+        limit,
+    )
 }
 
 // ───────────────────── ranked follower cuts ────────────────────────
@@ -772,6 +898,71 @@ pub fn posts_per_day(
     out
 }
 
+/// Latest snapshot minus the baseline `days_back` ago.
+///
+/// Baseline = the last snapshot whose `snapshot_date` is `<= (now -
+/// days_back)` (local-day string compare); if no snapshot is that old the
+/// baseline is the earliest snapshot (so a young account reports its delta
+/// from first capture rather than `None`). Returns
+/// `(Δfollowers, Δfollowing, Δposts)`; `None` only when `snapshots` is
+/// empty. `snapshots` is assumed ascending by `snapshot_date` (as
+/// [`list_metric_snapshots`] returns them).
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn metric_deltas(
+    snapshots: &[MetricSnapshot],
+    now: DateTime<Utc>,
+    days_back: i64,
+) -> Option<(i64, i64, i64)> {
+    let latest = snapshots.last()?;
+    let cutoff = (now - Duration::days(days_back))
+        .format("%Y-%m-%d")
+        .to_string();
+    // Last (highest-date) snapshot at or before the cutoff day; fall back
+    // to the earliest capture when nothing is that old.
+    let baseline = snapshots
+        .iter()
+        .rev()
+        .find(|s| s.snapshot_date <= cutoff)
+        .unwrap_or(&snapshots[0]);
+    Some((
+        latest.followers_count - baseline.followers_count,
+        latest.following_count - baseline.following_count,
+        latest.posts_count - baseline.posts_count,
+    ))
+}
+
+/// Bucket own posts by `"%Y-%m"` of their `ts` (computed in Rust),
+/// summing each engagement metric within the month. Output is ascending
+/// by month; empty input yields an empty vec.
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn bucket_engagement_monthly(
+    posts: &[PostMetric],
+) -> Vec<crate::components::EngagementMetrics> {
+    use std::collections::BTreeMap;
+    let mut by_month: BTreeMap<String, crate::components::EngagementMetrics> = BTreeMap::new();
+    for p in posts {
+        let month = p.ts.format("%Y-%m").to_string();
+        let entry =
+            by_month
+                .entry(month.clone())
+                .or_insert_with(|| crate::components::EngagementMetrics {
+                    month,
+                    likes: 0,
+                    reposts: 0,
+                    replies: 0,
+                    quotes: 0,
+                });
+        entry.likes += p.like_count;
+        entry.reposts += p.repost_count;
+        entry.replies += p.reply_count;
+        entry.quotes += p.quote_count;
+    }
+    // BTreeMap iterates keys ascending → months ascending.
+    by_month.into_values().collect()
+}
+
 // ────────────────────── view aggregation (DTO) ─────────────────────
 
 /// Number of trailing days the growth curves + posts-per-day bar chart
@@ -804,16 +995,21 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
 
     let now = Utc::now();
 
-    // Cumulative growth curves, one sample per day (oldest → newest) so
-    // the line chart's left edge is the oldest day. `count_*_until` binds
-    // the cutoff as an RFC3339 parameter (never `datetime('now', …)`).
-    let mut followers_over_time = Vec::with_capacity(GROWTH_WINDOW_DAYS as usize);
-    let mut following_over_time = Vec::with_capacity(GROWTH_WINDOW_DAYS as usize);
-    for i in (0..GROWTH_WINDOW_DAYS).rev() {
-        let day_end = now - Duration::days(i);
-        followers_over_time.push(count_follow_events_until(FollowDir::Incoming, day_end)? as f64);
-        following_over_time.push(count_follow_events_until(FollowDir::Outgoing, day_end)? as f64);
-    }
+    // Full-history cumulative growth curves, one sample per month
+    // (oldest → newest). A fixed short window made years-old follows
+    // read as a constant — a flat, useless line; spanning the whole
+    // history shows the real curve. `count_*_until` binds the cutoff as
+    // an RFC3339 parameter (never `datetime('now', …)`).
+    let (growth_labels, followers_over_time, following_over_time) = growth_series_monthly(now)?;
+
+    // Backfill phase drives the view's per-card loading states (a
+    // degenerate/empty card mid-backfill must read as "loading", not
+    // "done + empty").
+    let backfill = get_backfill_state()?;
+    let phase = backfill
+        .as_ref()
+        .map(|b| b.phase)
+        .unwrap_or(BackfillPhase::Pending);
 
     // Posts: pull the wider cadence window once, derive both the per-day
     // bars (last GROWTH_WINDOW_DAYS) and the [7][24] cadence grid from it.
@@ -830,12 +1026,96 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
     let top_posts = list_top_posts(TOP_POSTS_LIMIT)?;
 
     Ok(AnalyticsData {
+        growth_labels,
         followers_over_time,
         following_over_time,
         posts_per_day,
         cadence,
         top_followers,
         top_posts,
+        backfill_phase_rank: phase.rank(),
+        backfill_complete: phase == BackfillPhase::Complete,
+    })
+}
+
+// ────────────────── expanded (pop-out) aggregation ─────────────────
+
+/// How many rows the pop-out's follower lenses show.
+const EXPANDED_FOLLOWERS_LIMIT: i64 = 50;
+/// How many rows each per-metric top-posts ranking shows.
+const EXPANDED_POSTS_LIMIT: i64 = 25;
+/// Minimum reach for a follower to count as a "lurker with clout".
+const LURKER_THRESHOLD: i64 = 10_000;
+/// Upper bound on the post / snapshot scans the pop-out performs.
+const ALL_POSTS_CAP: i64 = 10_000;
+
+/// Roll the analytics tables into the richer DTO the pop-out "deep dive"
+/// renders. A superset of [`build_analytics_data`] — it reuses that whole
+/// result verbatim for the glanceable base (growth / posts / cadence /
+/// backfill) and layers on the deep-dive cuts:
+///
+/// - **Summary deltas** from [`metric_deltas`] over the snapshot history
+///   (7-day + 30-day), plus the latest snapshot's displayed counts.
+/// - **Net-followers overlay** resampled from snapshots onto the monthly
+///   growth grid via [`crate::components::snapshot_series_for_months`]
+///   (index-aligned to `growth_labels`).
+/// - **Monthly engagement** bucketed by [`bucket_engagement_monthly`]
+///   over every captured post.
+/// - **Four follower lenses** reusing the scoring system of record.
+/// - **True per-metric top posts** (likes / reposts / replies), each
+///   pre-ranked by the store so the view just swaps vecs.
+///
+/// Pure store reads — no network — so it runs on a blocking task off the
+/// render thread (see the pop-out modal's fetch arm).
+pub fn build_expanded_analytics_data() -> Result<crate::components::ExpandedAnalyticsData> {
+    let now = Utc::now();
+    // Reuse the glanceable base wholesale — no re-derivation of growth,
+    // posts-per-day, cadence, or backfill state.
+    let base = build_analytics_data()?;
+
+    // Snapshot-sourced summary deltas (ascending by date).
+    let snaps = list_metric_snapshots(ALL_POSTS_CAP)?;
+    let (df7, dfo7, dp7) = metric_deltas(&snaps, now, 7).unwrap_or((0, 0, 0));
+    let (df30, dfo30, dp30) = metric_deltas(&snaps, now, 30).unwrap_or((0, 0, 0));
+    let latest = snaps.last();
+    let summary = crate::components::SummaryStats {
+        current_followers: latest.map(|s| s.followers_count).unwrap_or(0),
+        current_following: latest.map(|s| s.following_count).unwrap_or(0),
+        current_posts: latest.map(|s| s.posts_count).unwrap_or(0),
+        delta_followers_7d: df7,
+        delta_following_7d: dfo7,
+        delta_posts_7d: dp7,
+        delta_followers_30d: df30,
+        delta_following_30d: dfo30,
+        delta_posts_30d: dp30,
+    };
+
+    // Resample the daily followers snapshots onto the monthly growth grid
+    // so the overlay index-aligns with the reconstructed growth lines.
+    let net_followers_by_month =
+        crate::components::snapshot_series_for_months(&snaps, &base.growth_labels);
+
+    let all_posts = list_all_post_metrics(ALL_POSTS_CAP)?;
+    let engagement_monthly = bucket_engagement_monthly(&all_posts);
+
+    Ok(crate::components::ExpandedAnalyticsData {
+        growth_labels: base.growth_labels,
+        followers_over_time: base.followers_over_time,
+        following_over_time: base.following_over_time,
+        net_followers_by_month,
+        posts_per_day: base.posts_per_day,
+        cadence: base.cadence,
+        backfill_phase_rank: base.backfill_phase_rank,
+        backfill_complete: base.backfill_complete,
+        summary,
+        top_fans: list_top_fans(EXPANDED_FOLLOWERS_LIMIT)?,
+        high_clout_not_mutual: list_high_clout_not_mutual(EXPANDED_FOLLOWERS_LIMIT)?,
+        mutuals_by_reach: list_mutuals_by_reach(EXPANDED_FOLLOWERS_LIMIT)?,
+        lurkers_by_clout: list_lurkers_by_clout(EXPANDED_FOLLOWERS_LIMIT, LURKER_THRESHOLD)?,
+        engagement_monthly,
+        top_posts_by_likes: list_top_posts(EXPANDED_POSTS_LIMIT)?,
+        top_posts_by_reposts: list_top_posts_by_reposts(EXPANDED_POSTS_LIMIT)?,
+        top_posts_by_replies: list_top_posts_by_replies(EXPANDED_POSTS_LIMIT)?,
     })
 }
 
@@ -1225,6 +1505,38 @@ mod tests {
     }
 
     #[test]
+    fn month_cutoffs_spans_full_history_inclusive() {
+        let from = DateTime::parse_from_rfc3339("2024-09-25T15:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let to = DateTime::parse_from_rfc3339("2026-06-26T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let months = month_cutoffs(from, to);
+        // Sep 2024 .. Jun 2026 inclusive = 22 monthly samples.
+        assert_eq!(months.len(), 22);
+        assert_eq!(months.first().unwrap().0, "2024-09");
+        assert_eq!(months.last().unwrap().0, "2026-06");
+        // Each cutoff is the first instant of the month AFTER its label,
+        // so a `ts <= cutoff` count includes that whole labelled month.
+        let (label, cutoff) = &months[0];
+        assert_eq!(label, "2024-09");
+        assert_eq!(cutoff.to_rfc3339(), "2024-10-01T00:00:00+00:00");
+        // Cutoffs are strictly increasing.
+        assert!(months.windows(2).all(|w| w[0].1 < w[1].1));
+    }
+
+    #[test]
+    fn month_cutoffs_single_month() {
+        let t = DateTime::parse_from_rfc3339("2026-06-10T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let months = month_cutoffs(t, t);
+        assert_eq!(months.len(), 1);
+        assert_eq!(months[0].0, "2026-06");
+    }
+
+    #[test]
     fn posts_per_day_buckets_and_fills_gaps() {
         let mk = |rkey: &str, ts: DateTime<Utc>| PostMetric {
             rkey: rkey.into(),
@@ -1260,5 +1572,216 @@ mod tests {
 
         // Inverted range → empty.
         assert!(posts_per_day(&[], to, from).is_empty());
+    }
+
+    // ── pure helpers: metric_deltas / bucket_engagement_monthly ──
+
+    fn mk_snapshot(date: &str, followers: i64, following: i64, posts: i64) -> MetricSnapshot {
+        MetricSnapshot {
+            snapshot_date: date.into(),
+            ts: DateTime::parse_from_rfc3339(&format!("{date}T12:00:00Z"))
+                .unwrap()
+                .with_timezone(&Utc),
+            followers_count: followers,
+            following_count: following,
+            posts_count: posts,
+        }
+    }
+
+    #[test]
+    fn metric_deltas_against_on_or_before_baseline() {
+        let now = DateTime::parse_from_rfc3339("2026-06-26T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        // Snapshots ascending across ~40 days.
+        let snaps = vec![
+            mk_snapshot("2026-05-17", 1000, 500, 200), // ~40d ago (earliest)
+            mk_snapshot("2026-05-27", 1100, 510, 205), // ~30d ago
+            mk_snapshot("2026-06-19", 1300, 520, 210), // ~7d ago
+            mk_snapshot("2026-06-25", 1400, 525, 212), // latest
+        ];
+        // 7-day: baseline is the last snapshot on/before 2026-06-19.
+        let (df, dfo, dp) = metric_deltas(&snaps, now, 7).unwrap();
+        assert_eq!((df, dfo, dp), (1400 - 1300, 525 - 520, 212 - 210));
+        // 30-day: baseline is the snapshot on/before 2026-05-27.
+        let (df, dfo, dp) = metric_deltas(&snaps, now, 30).unwrap();
+        assert_eq!((df, dfo, dp), (1400 - 1100, 525 - 510, 212 - 205));
+    }
+
+    #[test]
+    fn metric_deltas_young_account_uses_earliest() {
+        let now = DateTime::parse_from_rfc3339("2026-06-26T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        // Every snapshot is younger than the 30-day window → baseline is
+        // the earliest capture, not None.
+        let snaps = vec![
+            mk_snapshot("2026-06-22", 50, 10, 2),
+            mk_snapshot("2026-06-25", 80, 14, 3),
+        ];
+        let (df, dfo, dp) = metric_deltas(&snaps, now, 30).unwrap();
+        assert_eq!((df, dfo, dp), (30, 4, 1));
+    }
+
+    #[test]
+    fn metric_deltas_single_and_empty_and_negative() {
+        let now = DateTime::parse_from_rfc3339("2026-06-26T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        // Single snapshot → baseline == latest → zero deltas.
+        let one = vec![mk_snapshot("2026-06-20", 100, 50, 10)];
+        assert_eq!(metric_deltas(&one, now, 7), Some((0, 0, 0)));
+        // Empty → None.
+        assert_eq!(metric_deltas(&[], now, 7), None);
+        // Negative deltas preserved (unfollow drop).
+        let drop = vec![
+            mk_snapshot("2026-05-17", 200, 90, 20),
+            mk_snapshot("2026-06-25", 150, 80, 22),
+        ];
+        let (df, dfo, dp) = metric_deltas(&drop, now, 30).unwrap();
+        assert_eq!((df, dfo, dp), (-50, -10, 2));
+    }
+
+    fn mk_post(
+        rkey: &str,
+        ts: &str,
+        likes: i64,
+        reposts: i64,
+        replies: i64,
+        quotes: i64,
+    ) -> PostMetric {
+        PostMetric {
+            rkey: rkey.into(),
+            uri: format!("at://did:plc:me/app.bsky.feed.post/{rkey}"),
+            ts: DateTime::parse_from_rfc3339(ts)
+                .unwrap()
+                .with_timezone(&Utc),
+            like_count: likes,
+            repost_count: reposts,
+            reply_count: replies,
+            quote_count: quotes,
+            text_preview: None,
+        }
+    }
+
+    #[test]
+    fn bucket_engagement_monthly_sums_and_orders() {
+        // Empty input → empty.
+        assert!(bucket_engagement_monthly(&[]).is_empty());
+
+        // Posts spanning 3 months; two share April; out-of-order input.
+        let posts = vec![
+            mk_post("a", "2026-06-02T10:00:00Z", 5, 1, 2, 0),
+            mk_post("b", "2026-04-15T10:00:00Z", 10, 2, 1, 1),
+            mk_post("c", "2026-04-20T10:00:00Z", 3, 0, 4, 2),
+            mk_post("d", "2026-05-01T10:00:00Z", 7, 3, 0, 0),
+        ];
+        let buckets = bucket_engagement_monthly(&posts);
+        // Three ascending months.
+        assert_eq!(buckets.len(), 3);
+        assert_eq!(buckets[0].month, "2026-04");
+        assert_eq!(buckets[1].month, "2026-05");
+        assert_eq!(buckets[2].month, "2026-06");
+        // April merges the two posts.
+        assert_eq!(buckets[0].likes, 13);
+        assert_eq!(buckets[0].reposts, 2);
+        assert_eq!(buckets[0].replies, 5);
+        assert_eq!(buckets[0].quotes, 3);
+        // May / June carry their single post each.
+        assert_eq!(buckets[1].likes, 7);
+        assert_eq!(buckets[2].replies, 2);
+    }
+
+    // ── new store queries (in-memory) ──
+
+    #[test]
+    fn top_posts_by_reposts_and_replies_order_and_tiebreak() {
+        let _g = install_in_memory();
+        // p1: most reposts. p2/p3 tie on reposts → like_count breaks it.
+        let p1 = mk_post("p1", "2026-06-01T10:00:00Z", 1, 100, 1, 0);
+        let p2 = mk_post("p2", "2026-06-02T10:00:00Z", 50, 10, 9, 0);
+        let p3 = mk_post("p3", "2026-06-03T10:00:00Z", 80, 10, 9, 0);
+        for p in [&p1, &p2, &p3] {
+            upsert_post_metric(p).unwrap();
+        }
+
+        let by_reposts = list_top_posts_by_reposts(10).unwrap();
+        assert_eq!(by_reposts[0].rkey, "p1", "highest reposts first");
+        // p3 outranks p2 on the like_count tie-break.
+        assert_eq!(by_reposts[1].rkey, "p3");
+        assert_eq!(by_reposts[2].rkey, "p2");
+
+        let by_replies = list_top_posts_by_replies(10).unwrap();
+        // p2 & p3 tie on replies (9); p3 wins on likes; p1 last (1 reply).
+        assert_eq!(by_replies[0].rkey, "p3");
+        assert_eq!(by_replies[1].rkey, "p2");
+        assert_eq!(by_replies[2].rkey, "p1");
+
+        // limit is honored.
+        assert_eq!(list_top_posts_by_reposts(1).unwrap().len(), 1);
+
+        // list_all_post_metrics is ascending by ts.
+        let all = list_all_post_metrics(10).unwrap();
+        assert_eq!(
+            all.iter().map(|p| p.rkey.clone()).collect::<Vec<_>>(),
+            vec!["p1", "p2", "p3"]
+        );
+    }
+
+    #[test]
+    fn build_expanded_analytics_data_smoke() {
+        let _g = install_in_memory();
+        let now = Utc::now();
+
+        // Snapshots: latest drives summary.current_*.
+        upsert_metric_snapshot_for_today(1234, 321, 99).unwrap();
+
+        // A follow event so growth reconstruction has an anchor.
+        upsert_follow_event(&sample_follow_event(
+            "f1",
+            FollowDir::Incoming,
+            now - Duration::days(40),
+        ))
+        .unwrap();
+
+        // Posts across two months → engagement_monthly non-empty.
+        upsert_post_metric(&mk_post("p1", "2026-05-10T10:00:00Z", 10, 5, 2, 0)).unwrap();
+        upsert_post_metric(&mk_post("p2", "2026-06-10T10:00:00Z", 40, 1, 9, 0)).unwrap();
+
+        // A follower stat so the lens vecs populate.
+        upsert_follower_stat(&FollowerStat {
+            follower_did: "did:plc:fan".into(),
+            follower_handle: "fan.bsky.social".into(),
+            follower_display_name: None,
+            follower_avatar: None,
+            followers_count: 5_000,
+            following_count: 100,
+            engagement_count: 7,
+            last_engagement_ts: Some(now),
+            mutual: true,
+            first_followed_ts: now - Duration::days(20),
+            reach_score: 0.5,
+            engagement_score: 0.4,
+            mutual_bonus: 0.15,
+            tenure_bonus: 0.0,
+            composite_score: 0.6,
+        })
+        .unwrap();
+
+        let data = build_expanded_analytics_data().unwrap();
+        assert_eq!(data.summary.current_followers, 1234);
+        assert_eq!(data.summary.current_following, 321);
+        assert_eq!(data.summary.current_posts, 99);
+        // net overlay index-aligns with the growth labels.
+        assert_eq!(data.net_followers_by_month.len(), data.growth_labels.len());
+        // engagement buckets present and ascending.
+        assert!(!data.engagement_monthly.is_empty());
+        // top-post vecs ordered by their own metric.
+        assert_eq!(data.top_posts_by_likes[0].rkey, "p2");
+        assert_eq!(data.top_posts_by_replies[0].rkey, "p2");
+        assert_eq!(data.top_posts_by_reposts[0].rkey, "p1");
+        // mutual fan shows up in the mutual-reach lens.
+        assert_eq!(data.mutuals_by_reach.len(), 1);
+        assert_eq!(data.top_fans.len(), 1);
     }
 }

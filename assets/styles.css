@@ -4955,6 +4955,78 @@ a {
     font-size: calc(12px * var(--font-scale, 1));
 }
 
+/* Per-card loading state — distinct from __empty so "still backfilling"
+ * reads differently from "done, nothing here". */
+.analytics__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: var(--space-4, 16px);
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: calc(12px * var(--font-scale, 1));
+}
+
+.analytics__spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--color-smooai-blue, #3fb6e6);
+    border-radius: 50%;
+    animation: analytics-spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes analytics-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Pop-out: full-screen richer page. Wider than the column; on roomy
+ * viewports the sections flow into two columns. */
+.analytics__modal {
+    width: min(960px, 94vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.analytics__modal-title {
+    margin: 0;
+    padding: var(--space-4, 16px) var(--space-4, 16px) 0;
+    font-size: calc(18px * var(--font-scale, 1));
+    font-weight: 700;
+    color: var(--foreground);
+}
+
+.analytics__modal .analytics {
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.analytics--expanded {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+
+/* Growth + cadence read best full-width even in the 2-col page. */
+.analytics--expanded > .analytics__section:nth-child(1),
+.analytics--expanded > .analytics__section:nth-child(3) {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+    .analytics--expanded {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Charts share one box so the column width drives their rendered size. */
 .analytics__chart {
     display: block;
@@ -5173,6 +5245,193 @@ a {
 
 .analytics__post-date {
     margin-left: auto;
+    font-size: calc(11px * var(--font-scale, 1));
+    color: var(--muted-foreground);
+}
+
+/* ───────────────── pop-out deep-dive (ExpandedAnalyticsView) ────────────
+ * Two-column page: charts stack in the left (wider) column, follower-lens
+ * cards stack in the right column. The summary header spans full width.
+ * Grid auto-placement fills the earliest free row per explicit column, so
+ * charts (col 1) and lenses (col 2) interleave by row without manual rows. */
+.analytics__deepdive {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--space-4, 16px);
+    align-items: start;
+}
+
+.analytics__deepdive > .analytics__section {
+    grid-column: 1;
+}
+
+.analytics__deepdive > .analytics__header-grid {
+    grid-column: 1 / -1;
+}
+
+.analytics__deepdive > .analytics__lens-card {
+    grid-column: 2;
+}
+
+@media (max-width: 700px) {
+    .analytics__deepdive {
+        grid-template-columns: 1fr;
+    }
+    .analytics__deepdive > .analytics__section,
+    .analytics__deepdive > .analytics__lens-card,
+    .analytics__deepdive > .analytics__header-grid {
+        grid-column: 1;
+    }
+}
+
+/* Summary header — responsive stat-card grid (full width). The grid
+ * display overrides .analytics__section's flex (later, equal specificity). */
+.analytics__header-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3, 12px);
+}
+
+@media (max-width: 520px) {
+    .analytics__header-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.analytics__stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2, 8px) var(--space-3, 12px);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--background);
+}
+
+.analytics__stat-value {
+    font-size: calc(20px * var(--font-scale, 1));
+    font-weight: 700;
+    color: var(--foreground);
+    line-height: 1.1;
+}
+
+.analytics__stat-label {
+    font-size: calc(11px * var(--font-scale, 1));
+    color: var(--muted-foreground);
+}
+
+.analytics__stat-deltas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.analytics__delta-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--muted);
+    color: var(--muted-foreground);
+    white-space: nowrap;
+}
+
+.analytics__delta-badge--negative {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+/* Dashed gray net-followers overlay on the growth chart (CSS-only — the
+ * LineChart applies `analytics__area {class}` and `analytics__line {class}`).
+ * Suppress the area fill so only the dashed stroke shows. */
+.analytics__line--net {
+    stroke: #999;
+    stroke-dasharray: 4 2;
+}
+
+.analytics__area.analytics__line--net {
+    fill: none;
+    stroke: none;
+}
+
+.analytics__swatch--net {
+    background: #999;
+}
+
+/* Engagement-over-time series colors + matching legend swatches. */
+.analytics__line--likes {
+    stroke: var(--color-smooai-blue-400, #3b82f6);
+}
+
+.analytics__line--reposts {
+    stroke: #22c55e;
+}
+
+.analytics__line--replies {
+    stroke: #a855f7;
+}
+
+.analytics__swatch--likes {
+    background: var(--color-smooai-blue-400, #3b82f6);
+}
+
+.analytics__swatch--reposts {
+    background: #22c55e;
+}
+
+.analytics__swatch--replies {
+    background: #a855f7;
+}
+
+/* Top-posts per-metric toggle. */
+.analytics__metric-toggle {
+    display: flex;
+    gap: 4px;
+    margin-bottom: var(--space-2, 8px);
+}
+
+.analytics__metric-toggle-btn {
+    font-size: calc(11px * var(--font-scale, 1));
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--muted-foreground);
+    cursor: pointer;
+}
+
+.analytics__metric-toggle-btn--active {
+    background: var(--color-smooai-blue-400, #3b82f6);
+    border-color: var(--color-smooai-blue-400, #3b82f6);
+    color: #fff;
+}
+
+/* Click-through top-post rows. */
+.analytics__posts-row--clickable {
+    cursor: pointer;
+}
+
+.analytics__posts-row--clickable:hover {
+    background: var(--muted);
+}
+
+/* Follower-lens cards (right column of the deep-dive). */
+.analytics__lens-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: var(--space-3, 12px);
+}
+
+.analytics__lens-title {
+    margin: 0;
+}
+
+.analytics__lens-subtitle {
+    margin: 0;
     font-size: calc(11px * var(--font-scale, 1));
     color: var(--muted-foreground);
 }

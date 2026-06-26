@@ -446,6 +446,11 @@ impl ThemeMode {
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
 pub struct ProfileEditOpen(pub bool);
 
+/// Open state for the full-screen Analytics "pop-out" page. Toggled by
+/// the expand button on the Analytics column header.
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct AnalyticsExpanded(pub bool);
+
 /// Transient "scroll-into-view + flash this column" signal. Set
 /// by the sidebar nav buttons (and anywhere else that adds a
 /// column) so the user can see *where* the requested column went
@@ -616,6 +621,7 @@ pub fn use_bootstrap() {
     use_context_provider::<Signal<PostMenuFocus>>(|| Signal::new(PostMenuFocus::default()));
     use_context_provider::<Signal<DeletedPosts>>(|| Signal::new(DeletedPosts::default()));
     use_context_provider::<Signal<ProfileEditOpen>>(|| Signal::new(ProfileEditOpen(false)));
+    use_context_provider::<Signal<AnalyticsExpanded>>(|| Signal::new(AnalyticsExpanded(false)));
     use_context_provider::<Signal<FocusColumn>>(|| Signal::new(FocusColumn::default()));
     use_context_provider::<Signal<LightboxFocus>>(|| Signal::new(LightboxFocus::default()));
     use_context_provider::<Signal<ThemeMode>>(|| {

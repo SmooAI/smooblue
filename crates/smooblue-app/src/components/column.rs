@@ -146,10 +146,12 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         ColumnKind::Inbox => Duration::from_secs(15),
         // Analytics reads the locally-aggregated view DTO from SQLite;
         // the background ingest task (analytics_ingest.rs) does the
-        // upstream crawl. A slow 5-minute re-read keeps the charts in
-        // step with whatever the backfill has accumulated without
-        // re-querying every few seconds.
-        ColumnKind::Analytics => Duration::from_secs(300),
+        // upstream crawl. Re-read every 20s so the charts visibly fill
+        // in as the one-time backfill progresses (the read is a handful
+        // of indexed COUNT queries off the render thread — cheap). Once
+        // the backfill completes the data is stable and the re-read is a
+        // no-op.
+        ColumnKind::Analytics => Duration::from_secs(20),
     }
 }
 
@@ -2301,6 +2303,8 @@ fn ColumnHeader(
 ) -> Element {
     let mut cols = use_context::<Signal<Vec<crate::state::ColumnSpec>>>();
     let mut drag_ctx = use_context::<Signal<ColumnDrag>>();
+    let mut analytics_expanded = use_context::<Signal<crate::state::AnalyticsExpanded>>();
+    let is_analytics = matches!(&kind, ColumnKind::Analytics);
     let id_for_close = id.clone();
     let close = move |_| {
         crate::state::remove_column(&mut cols, &id_for_close);
@@ -2381,6 +2385,13 @@ fn ColumnHeader(
                 }
             }
             span { class: "deck-column__title", "{title}" }
+            if is_analytics {
+                button { class: "deck-column__action",
+                    title: "Expand to full page",
+                    onclick: move |_| analytics_expanded.set(crate::state::AnalyticsExpanded(true)),
+                    icons::Expand { size: icons::Size::Sm }
+                }
+            }
             if let Some(cb) = mark_all_read {
                 button { class: "deck-column__action",
                     title: "Mark all as read",
