@@ -1022,7 +1022,11 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
         .map(|(label, value)| BarDatum { label, value })
         .collect();
 
-    let top_followers = list_top_fans(TOP_FOLLOWERS_LIMIT)?;
+    // The compact column shows mutuals ranked by reach — your most
+    // influential mutual followers, which reads more clearly at a glance
+    // than the engagement-weighted "top fans" composite (that lens still
+    // lives in the pop-out). See the analytics view's column card.
+    let top_followers = list_mutuals_by_reach(TOP_FOLLOWERS_LIMIT)?;
     let top_posts = list_top_posts(TOP_POSTS_LIMIT)?;
 
     Ok(AnalyticsData {
