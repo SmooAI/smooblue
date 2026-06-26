@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.28.0
+
+### Minor Changes
+
+- [#79](https://github.com/SmooAI/smooblue/pull/79) [`b39ac28`](https://github.com/SmooAI/smooblue/commit/b39ac28262a13f891e4e97231d314e07bec65c63) Thanks [@brentrager](https://github.com/brentrager)! - The analytics pop-out is now a full deep-dive (the column stays the glanceable summary):
+
+  - **Summary header** — followers / following / posts with net change over the last 7 and 30 days.
+  - **All four follower lenses** — Top fans, High-clout accounts you don't follow back, Mutuals by reach, and Lurkers with clout.
+  - **True net-followers line** from daily snapshots, overlaid (dashed) on the reconstructed growth curve.
+  - **Engagement over time** — monthly likes / reposts / replies on your posts.
+  - **Top posts** with a likes / reposts / replies toggle, and click a post to open its thread.
+
+- [#79](https://github.com/SmooAI/smooblue/pull/79) [`b39ac28`](https://github.com/SmooAI/smooblue/commit/b39ac28262a13f891e4e97231d314e07bec65c63) Thanks [@brentrager](https://github.com/brentrager)! - Analytics page improvements:
+
+  - **Pop out to a full page.** An expand button in the Analytics column header opens a wider, two-column version of the dashboard (Esc or the ✕ closes it).
+  - **Real loading states.** Each card now shows a spinner while its data is still being reconstructed in the background, instead of looking empty or showing misleading partial data. Driven by the backfill phase.
+  - **Growth chart now spans your full history.** It previously sampled only the last 30 days, which made a years-old account read as a flat line; it now plots the real follower/following curve from your first follow onward.
+  - **Top posts wait for engagement.** The list shows a loading state until like/repost counts are backfilled, so it ranks by actual engagement rather than falling back to most-recent.
+  - Analytics columns now re-read every 20s (was 5 min) so the charts visibly fill in as the backfill progresses.
+
 ## 1.27.0
 
 ### Minor Changes
