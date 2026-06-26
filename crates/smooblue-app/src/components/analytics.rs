@@ -358,7 +358,7 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
                         "Reconstructing your follow history…"
                     }
                 } else {
-                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true }
+                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true, point_labels: data.growth_labels.clone() }
                     div { class: "analytics__legend",
                         span { class: "analytics__legend-item",
                             span { class: "analytics__swatch analytics__swatch--followers" }
@@ -514,7 +514,7 @@ pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
                         "Reconstructing your follow history…"
                     }
                 } else {
-                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true }
+                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true, point_labels: data.growth_labels.clone() }
                     div { class: "analytics__legend",
                         span { class: "analytics__legend-item",
                             span { class: "analytics__swatch analytics__swatch--followers" }
@@ -776,8 +776,24 @@ fn FollowerLensCard(
 
 // ─────────────────────────── line chart ────────────────────────────
 
+/// Per-point hover-tooltip prefix: the x-axis label at index `i` (e.g.
+/// the growth month), with a separator, or empty when no labels are
+/// supplied or the index is out of range.
+fn point_tip_prefix(labels: &[String], i: usize) -> String {
+    labels.get(i).map(|l| format!("{l} · ")).unwrap_or_default()
+}
+
 #[component]
-fn LineChart(series: Vec<ChartSeries>, width: f64, height: f64, show_area: bool) -> Element {
+fn LineChart(
+    series: Vec<ChartSeries>,
+    width: f64,
+    height: f64,
+    show_area: bool,
+    /// Optional x-axis labels (one per data point) surfaced in the
+    /// per-point hover tooltip. Empty = value-only tooltips.
+    #[props(default)]
+    point_labels: Vec<String>,
+) -> Element {
     // Shared y-scale across every series so the two curves are directly
     // comparable. Floor the range at the data extent; if there's no
     // data (or one flat value) the helpers fall back to the baseline.
@@ -838,6 +854,18 @@ fn LineChart(series: Vec<ChartSeries>, width: f64, height: f64, show_area: bool)
                                 points: "{pts}",
                                 fill: "none",
                             }
+                            // Hover points: a marker per vertex with a
+                            // native tooltip ("2026-06 · Followers: 1040").
+                            for (i , v) in s.values.iter().enumerate() {
+                                circle {
+                                    key: "pt-{s.label}-{i}",
+                                    class: "analytics__point {s.class}",
+                                    cx: "{line_x(i, s.values.len(), width, CHART_PADDING):.2}",
+                                    cy: "{line_y(*v, min, max, height, CHART_PADDING):.2}",
+                                    r: "2.5",
+                                    title { "{point_tip_prefix(&point_labels, i)}{s.label}: {*v as i64}" }
+                                }
+                            }
                         }
                     }
                 }
@@ -895,6 +923,8 @@ fn BarChart(bars: Vec<BarDatum>, max_value: Option<f64>) -> Element {
                             height: "{bh:.2}",
                             rx: "1",
                             "data-label": "{b.label}",
+                            // Native SVG tooltip on hover.
+                            title { "{b.label}: {b.value as i64}" }
                         }
                     }
                 }
@@ -967,6 +997,7 @@ fn CadenceHeatmap(cells: Vec<Vec<f64>>) -> Element {
                                 height: "{cell - 1.0}",
                                 rx: "1",
                                 fill_opacity: "{opacity:.3}",
+                                title { "{WEEKDAYS[w]} {h}:00 · {(value * 100.0) as i64}% of peak" }
                             }
                         }
                     }
