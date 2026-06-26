@@ -21,7 +21,7 @@
 //! renderer (see the `tests` module). The components only string the
 //! coordinates into attributes.
 
-use crate::analytics::{FollowerStat, PostMetric};
+use crate::analytics::{FollowerStat, MetricSnapshot, PostMetric};
 use dioxus::prelude::*;
 
 /// Inner padding (px) between a chart's drawing area and its viewBox
@@ -60,6 +60,69 @@ pub struct AnalyticsData {
     pub backfill_phase_rank: u8,
     /// `true` once the one-time backfill has fully completed.
     pub backfill_complete: bool,
+}
+
+/// Current displayed counts plus 7-day and 30-day deltas, surfaced in the
+/// pop-out's summary header. Deltas are computed by the pure
+/// [`crate::analytics::metric_deltas`] helper over the snapshot history,
+/// so this carries plain owned scalars.
+#[derive(Clone, PartialEq, Default)]
+pub struct SummaryStats {
+    pub current_followers: i64,
+    pub current_following: i64,
+    pub current_posts: i64,
+    pub delta_followers_7d: i64,
+    pub delta_following_7d: i64,
+    pub delta_posts_7d: i64,
+    pub delta_followers_30d: i64,
+    pub delta_following_30d: i64,
+    pub delta_posts_30d: i64,
+}
+
+/// One month's summed first-party engagement across own posts. Ascending
+/// by `month` (`"YYYY-MM"`). Built by the pure
+/// [`crate::analytics::bucket_engagement_monthly`] helper.
+#[derive(Clone, PartialEq, Default)]
+pub struct EngagementMetrics {
+    /// `"YYYY-MM"`.
+    pub month: String,
+    pub likes: i64,
+    pub reposts: i64,
+    pub replies: i64,
+    pub quotes: i64,
+}
+
+/// Superset of [`AnalyticsData`] the pop-out "deep dive" renders. The
+/// glanceable base fields are reused verbatim from
+/// [`crate::analytics::build_analytics_data`]; the deep-dive additions
+/// (summary deltas, four follower lenses, monthly engagement, true
+/// per-metric top-posts) come from extra store reads + pure helpers. All
+/// fields are plain owned data so the modal can clone it cheaply.
+#[derive(Clone, PartialEq, Default)]
+pub struct ExpandedAnalyticsData {
+    // ── superset of AnalyticsData (glanceable base, reused verbatim) ──
+    /// `YYYY-MM` label per growth sample (full account history, monthly).
+    pub growth_labels: Vec<String>,
+    pub followers_over_time: Vec<f64>,
+    pub following_over_time: Vec<f64>,
+    /// Snapshot-sourced followers overlay, resampled onto `growth_labels`
+    /// (index-aligned, same length).
+    pub net_followers_by_month: Vec<f64>,
+    pub posts_per_day: Vec<BarDatum>,
+    pub cadence: Vec<Vec<f64>>,
+    pub backfill_phase_rank: u8,
+    pub backfill_complete: bool,
+
+    // ── deep-dive additions ──
+    pub summary: SummaryStats,
+    pub top_fans: Vec<FollowerStat>,
+    pub high_clout_not_mutual: Vec<FollowerStat>,
+    pub mutuals_by_reach: Vec<FollowerStat>,
+    pub lurkers_by_clout: Vec<FollowerStat>,
+    pub engagement_monthly: Vec<EngagementMetrics>,
+    pub top_posts_by_likes: Vec<PostMetric>,
+    pub top_posts_by_reposts: Vec<PostMetric>,
+    pub top_posts_by_replies: Vec<PostMetric>,
 }
 
 /// Backfill-phase ranks (mirror of [`crate::analytics::BackfillPhase::rank`])
@@ -122,6 +185,30 @@ pub fn bar_height(value: f64, max: f64, chart_h: f64) -> f64 {
     (value / max) * chart_h
 }
 
+/// Build the three engagement-over-time line series (likes / reposts /
+/// replies) from the monthly engagement buckets, index-aligned to the
+/// bucket order (ascending by month). Quotes are carried in the DTO but
+/// not drawn in v1 — three lines stay readable on a column-width chart.
+fn engagement_series(metrics: &[EngagementMetrics]) -> Vec<ChartSeries> {
+    vec![
+        ChartSeries {
+            label: "Likes".into(),
+            values: metrics.iter().map(|m| m.likes as f64).collect(),
+            class: "analytics__line--likes".into(),
+        },
+        ChartSeries {
+            label: "Reposts".into(),
+            values: metrics.iter().map(|m| m.reposts as f64).collect(),
+            class: "analytics__line--reposts".into(),
+        },
+        ChartSeries {
+            label: "Replies".into(),
+            values: metrics.iter().map(|m| m.replies as f64).collect(),
+            class: "analytics__line--replies".into(),
+        },
+    ]
+}
+
 /// Build the `points` attribute for a polyline from a value series.
 fn polyline_points(values: &[f64], min: f64, max: f64, width: f64, height: f64) -> String {
     let n = values.len();
@@ -139,6 +226,63 @@ fn polyline_points(values: &[f64], min: f64, max: f64, width: f64, height: f64) 
         .join(" ")
 }
 
+// ──────────────────── snapshot resampling / slicing ────────────────
+
+/// Resample daily [`MetricSnapshot::followers_count`] onto a monthly grid.
+/// For each `"YYYY-MM"` label, take the last snapshot whose
+/// `snapshot_date[0..7]` is `<=` the label (carry-forward); months before
+/// the first snapshot map to `0.0`. The output length equals
+/// `month_labels.len()` so it index-aligns with [`LineChart`]'s other
+/// series. `snapshots` is assumed ascending by `snapshot_date` (as
+/// [`crate::analytics::list_metric_snapshots`] returns them).
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn snapshot_series_for_months(
+    snapshots: &[MetricSnapshot],
+    month_labels: &[String],
+) -> Vec<f64> {
+    month_labels
+        .iter()
+        .map(|label| {
+            let mut val = 0.0;
+            for s in snapshots {
+                if s.snapshot_date.len() < 7 {
+                    continue;
+                }
+                let month = &s.snapshot_date[0..7];
+                if month <= label.as_str() {
+                    // Carry-forward: keep the latest in/before this month.
+                    val = s.followers_count as f64;
+                } else {
+                    // Ascending input → no later snapshot can be <= label.
+                    break;
+                }
+            }
+            val
+        })
+        .collect()
+}
+
+/// Clamped, exclusive-end slice of a parallel `(labels, values)` series.
+/// Out-of-range or inverted ranges yield empty vecs; the two returned vecs
+/// are always equal length. Zoom-ready; v1 renders the full range.
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn slice_series(
+    labels: &[String],
+    values: &[f64],
+    start_idx: usize,
+    end_idx: usize,
+) -> (Vec<String>, Vec<f64>) {
+    let n = labels.len().min(values.len());
+    let start = start_idx.min(n);
+    let end = end_idx.min(n);
+    if start >= end {
+        return (Vec::new(), Vec::new());
+    }
+    (labels[start..end].to_vec(), values[start..end].to_vec())
+}
+
 // ─────────────────────── number formatting ─────────────────────────
 
 /// Compact follower/engagement counts: `1234 → "1.2k"`, `2_500_000 →
@@ -151,6 +295,17 @@ fn fmt_count(n: i64) -> String {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+/// Signed compact delta for the summary header (`+1.2k`, `-340`, `0`).
+/// `fmt_count` already carries the minus sign for negatives; we only
+/// prepend `+` for positives so the badge always reads as a signed change.
+fn fmt_delta(n: i64) -> String {
+    if n > 0 {
+        format!("+{}", fmt_count(n))
+    } else {
+        fmt_count(n)
     }
 }
 
@@ -252,15 +407,26 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
 #[component]
 pub fn AnalyticsModal() -> Element {
     let mut expanded = use_context::<Signal<crate::state::AnalyticsExpanded>>();
+    // Reactive: read `expanded` synchronously in the closure so opening
+    // the pop-out fires the fetch, while a closed modal resolves cheaply
+    // to `None` without touching the DB. Hooks run unconditionally per
+    // Dioxus rules (mirrors `ThreadSheet`), so the closed-state early
+    // return comes *after* `use_resource` — never before it.
+    let data = use_resource(move || {
+        let is_open = expanded.read().0;
+        async move {
+            if !is_open {
+                return None;
+            }
+            tokio::task::spawn_blocking(crate::analytics::build_expanded_analytics_data)
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+        }
+    });
     if !expanded.read().0 {
         return rsx! { Fragment {} };
     }
-    let data = use_resource(|| async move {
-        tokio::task::spawn_blocking(crate::analytics::build_analytics_data)
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-    });
     let close = move |_| expanded.set(crate::state::AnalyticsExpanded(false));
     rsx! {
         div { class: "modal__backdrop", onclick: close,
@@ -272,7 +438,7 @@ pub fn AnalyticsModal() -> Element {
                 }
                 h2 { class: "analytics__modal-title", "Analytics" }
                 match &*data.read_unchecked() {
-                    Some(Some(d)) => rsx! { AnalyticsView { data: d.clone(), expanded: true } },
+                    Some(Some(d)) => rsx! { ExpandedAnalyticsView { data: d.clone() } },
                     Some(None) => rsx! { div { class: "analytics__empty", "Couldn't load analytics." } },
                     None => rsx! {
                         div { class: "analytics__loading",
@@ -282,6 +448,326 @@ pub fn AnalyticsModal() -> Element {
                     },
                 }
             }
+        }
+    }
+}
+
+// ───────────────────── expanded (pop-out) view ─────────────────────
+
+/// Which engagement metric the [`TopPostsExpanded`] toggle is ranking by.
+/// Each variant maps to a pre-ranked vec the store handed down, so the
+/// toggle just swaps which vec renders — no client-side re-sort.
+#[derive(Clone, Copy, PartialEq)]
+enum MetricSortBy {
+    Likes,
+    Reposts,
+    Replies,
+}
+
+/// Full deep-dive layout rendered inside the pop-out modal. A superset of
+/// [`AnalyticsView`]: reuses the same `LineChart` / `BarChart` /
+/// `CadenceHeatmap` / `TopFollowersList` primitives but adds the summary
+/// header, the dashed net-followers overlay on the growth chart, the
+/// engagement-over-time chart, true per-metric top posts, and four
+/// follower lenses. Backed by [`crate::analytics::build_expanded_analytics_data`].
+#[component]
+pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
+    let complete = data.backfill_complete;
+    let rank = data.backfill_phase_rank;
+    let growth_loading = !complete && rank < PHASE_FOLLOWING;
+    let engagement_loading = !complete && rank < PHASE_ENGAGEMENT;
+    let posts_loading = !complete && rank < PHASE_ENGAGEMENT;
+    let followers_loading = !complete && rank < PHASE_FOLLOWERS;
+
+    // Growth: reconstructed followers + following, plus the snapshot-sourced
+    // net-followers overlay as a third, dashed/gray series (CSS-only — no
+    // LineChart change). The overlay is index-aligned to growth_labels.
+    let growth = vec![
+        ChartSeries {
+            label: "Followers".into(),
+            values: data.followers_over_time.clone(),
+            class: "analytics__line--followers".into(),
+        },
+        ChartSeries {
+            label: "Following".into(),
+            values: data.following_over_time.clone(),
+            class: "analytics__line--following".into(),
+        },
+        ChartSeries {
+            label: "Net".into(),
+            values: data.net_followers_by_month.clone(),
+            class: "analytics__line--net".into(),
+        },
+    ];
+    let engagement = engagement_series(&data.engagement_monthly);
+
+    rsx! {
+        div { class: "analytics analytics__deepdive",
+            SummaryStatsHeader { stats: data.summary.clone() }
+
+            // ── Growth (followers / following / net overlay) ──
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Growth" }
+                if growth_loading {
+                    div { class: "analytics__loading",
+                        span { class: "analytics__spinner" }
+                        "Reconstructing your follow history…"
+                    }
+                } else {
+                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true }
+                    div { class: "analytics__legend",
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--followers" }
+                            "Followers"
+                        }
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--following" }
+                            "Following"
+                        }
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--net" }
+                            "Net (snapshots)"
+                        }
+                    }
+                    p { class: "analytics__note",
+                        "Solid lines are reconstructed from public follow records (~94% coverage). The dashed gray line is exact net followers from daily snapshots — flat before snapshots began."
+                    }
+                }
+            }
+
+            // ── Posting volume ──
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Posts per day" }
+                BarChart { bars: data.posts_per_day.clone(), max_value: None }
+            }
+
+            // ── Posting cadence ──
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Posting cadence" }
+                CadenceHeatmap { cells: data.cadence.clone() }
+            }
+
+            // ── Engagement over time ──
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Engagement over time" }
+                if engagement_loading {
+                    div { class: "analytics__loading",
+                        span { class: "analytics__spinner" }
+                        "Charting engagement once the backfill finishes…"
+                    }
+                } else {
+                    LineChart { series: engagement, width: LINE_W, height: LINE_H, show_area: false }
+                    div { class: "analytics__legend",
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--likes" }
+                            "Likes"
+                        }
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--reposts" }
+                            "Reposts"
+                        }
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--replies" }
+                            "Replies"
+                        }
+                    }
+                }
+            }
+
+            // ── Top posts (per-metric ranking + click-through) ──
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Top posts" }
+                TopPostsExpanded {
+                    by_likes: data.top_posts_by_likes.clone(),
+                    by_reposts: data.top_posts_by_reposts.clone(),
+                    by_replies: data.top_posts_by_replies.clone(),
+                    loading: posts_loading,
+                    limit: 25,
+                }
+            }
+
+            // ── Follower lenses ──
+            FollowerLensCard {
+                title: "Top Fans",
+                subtitle: "Most inbox engagements",
+                followers: data.top_fans.clone(),
+                loading: followers_loading,
+                limit: 50,
+            }
+            FollowerLensCard {
+                title: "High Clout (Not Mutual)",
+                subtitle: "High reach, you don't follow back",
+                followers: data.high_clout_not_mutual.clone(),
+                loading: followers_loading,
+                limit: 50,
+            }
+            FollowerLensCard {
+                title: "Mutuals by Reach",
+                subtitle: "Your mutual followers, ranked",
+                followers: data.mutuals_by_reach.clone(),
+                loading: followers_loading,
+                limit: 50,
+            }
+            FollowerLensCard {
+                title: "Lurkers with Clout",
+                subtitle: "Silent high-reach followers",
+                followers: data.lurkers_by_clout.clone(),
+                loading: followers_loading,
+                limit: 50,
+            }
+        }
+    }
+}
+
+/// Full-width summary header: current followers / following / posts with
+/// 7-day and 30-day delta badges (computed store-side by
+/// [`crate::analytics::metric_deltas`]). Negative deltas flip the badge to
+/// the warning style.
+#[component]
+fn SummaryStatsHeader(stats: SummaryStats) -> Element {
+    let cards: [(&str, i64, i64, i64); 3] = [
+        (
+            "Followers",
+            stats.current_followers,
+            stats.delta_followers_7d,
+            stats.delta_followers_30d,
+        ),
+        (
+            "Following",
+            stats.current_following,
+            stats.delta_following_7d,
+            stats.delta_following_30d,
+        ),
+        (
+            "Posts",
+            stats.current_posts,
+            stats.delta_posts_7d,
+            stats.delta_posts_30d,
+        ),
+    ];
+    rsx! {
+        section { class: "analytics__section analytics__header-grid",
+            for (label , value , d7 , d30) in cards {
+                div { key: "{label}", class: "analytics__stat-card",
+                    span { class: "analytics__stat-value", "{fmt_count(value)}" }
+                    span { class: "analytics__stat-label", "{label}" }
+                    div { class: "analytics__stat-deltas",
+                        span {
+                            class: if d7 < 0 { "analytics__delta-badge analytics__delta-badge--negative" } else { "analytics__delta-badge" },
+                            "{fmt_delta(d7)} (7d)"
+                        }
+                        span {
+                            class: if d30 < 0 { "analytics__delta-badge analytics__delta-badge--negative" } else { "analytics__delta-badge" },
+                            "{fmt_delta(d30)} (30d)"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Top posts with a likes/reposts/replies toggle. Each toggle swaps in a
+/// pre-ranked vec (no client-side re-sort) and each row is click-through:
+/// it focuses the post's thread in the main column and closes the pop-out.
+#[component]
+fn TopPostsExpanded(
+    by_likes: Vec<PostMetric>,
+    by_reposts: Vec<PostMetric>,
+    by_replies: Vec<PostMetric>,
+    loading: bool,
+    limit: usize,
+) -> Element {
+    let mut sort_by = use_signal(|| MetricSortBy::Likes);
+    let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
+    let mut expanded = use_context::<Signal<crate::state::AnalyticsExpanded>>();
+
+    if loading {
+        // Until the engagement backfill runs, every count is 0 and a
+        // "top" ranking would just be most-recent — misleading.
+        return rsx! {
+            div { class: "analytics__loading",
+                span { class: "analytics__spinner" }
+                "Ranking by engagement once the backfill finishes…"
+            }
+        };
+    }
+
+    let rows = match sort_by() {
+        MetricSortBy::Likes => &by_likes,
+        MetricSortBy::Reposts => &by_reposts,
+        MetricSortBy::Replies => &by_replies,
+    };
+    let shown = rows.len().min(limit);
+
+    rsx! {
+        div { class: "analytics__metric-toggle",
+            for (variant , label) in [
+                (MetricSortBy::Likes, "Likes"),
+                (MetricSortBy::Reposts, "Reposts"),
+                (MetricSortBy::Replies, "Replies"),
+            ] {
+                button {
+                    key: "{label}",
+                    class: if sort_by() == variant { "analytics__metric-toggle-btn analytics__metric-toggle-btn--active" } else { "analytics__metric-toggle-btn" },
+                    onclick: move |_| sort_by.set(variant),
+                    "{label}"
+                }
+            }
+        }
+        if rows.is_empty() {
+            div { class: "analytics__empty", "No posts captured yet…" }
+        } else {
+            ol { class: "analytics__posts-list",
+                for p in rows.iter().take(shown) {
+                    {
+                        let uri = p.uri.clone();
+                        let rkey = p.rkey.clone();
+                        let text = p.text_preview.clone().unwrap_or_default();
+                        let like = p.like_count;
+                        let repost = p.repost_count;
+                        let reply = p.reply_count;
+                        let date = p.ts.format("%b %d").to_string();
+                        rsx! {
+                            li {
+                                key: "{rkey}",
+                                class: "analytics__posts-row analytics__posts-row--clickable",
+                                onclick: move |_| {
+                                    thread_focus.set(crate::state::ThreadFocus(Some(uri.clone())));
+                                    expanded.set(crate::state::AnalyticsExpanded(false));
+                                },
+                                p { class: "analytics__post-text", "{text}" }
+                                div { class: "analytics__post-stats",
+                                    span { class: "analytics__stat", title: "Likes", "♥ {fmt_count(like)}" }
+                                    span { class: "analytics__stat", title: "Reposts", "⇄ {fmt_count(repost)}" }
+                                    span { class: "analytics__stat", title: "Replies", "💬 {fmt_count(reply)}" }
+                                    span { class: "analytics__post-date", "{date}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One titled follower-lens card wrapping the existing [`TopFollowersList`]
+/// (which owns the loading / empty states). Used four times in the pop-out
+/// for the top-fans / high-clout / mutuals / lurkers cuts.
+#[component]
+fn FollowerLensCard(
+    title: String,
+    subtitle: String,
+    followers: Vec<FollowerStat>,
+    loading: bool,
+    limit: usize,
+) -> Element {
+    rsx! {
+        section { class: "analytics__lens-card",
+            h3 { class: "analytics__title analytics__lens-title", "{title}" }
+            p { class: "analytics__lens-subtitle", "{subtitle}" }
+            TopFollowersList { followers, loading, limit }
         }
     }
 }
@@ -669,5 +1155,81 @@ mod tests {
         assert_eq!(fmt_count(999), "999");
         assert_eq!(fmt_count(1_500), "1.5k");
         assert_eq!(fmt_count(2_500_000), "2.5M");
+    }
+
+    fn snap(date: &str, followers: i64) -> MetricSnapshot {
+        MetricSnapshot {
+            snapshot_date: date.into(),
+            ts: chrono::DateTime::parse_from_rfc3339(&format!("{date}T00:00:00Z"))
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            followers_count: followers,
+            following_count: 0,
+            posts_count: 0,
+        }
+    }
+
+    #[test]
+    fn snapshot_series_for_months_carry_forward_and_alignment() {
+        // Snapshots ascending by date, sparse across months.
+        let snaps = vec![
+            snap("2026-02-15", 100),
+            snap("2026-02-20", 120), // later in Feb → Feb resolves to 120
+            snap("2026-04-10", 200), // March has no snapshot
+        ];
+        let labels: Vec<String> = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let series = snapshot_series_for_months(&snaps, &labels);
+        // Output length tracks labels exactly (LineChart alignment).
+        assert_eq!(series.len(), labels.len());
+        // Jan is before the first snapshot → 0.0.
+        assert_eq!(series[0], 0.0);
+        // Feb resolves to the LAST in-month snapshot (120, not 100).
+        assert_eq!(series[1], 120.0);
+        // Mar has no snapshot → carry forward the latest in/before (Feb → 120).
+        assert_eq!(series[2], 120.0);
+        // Apr resolves to its own snapshot.
+        assert_eq!(series[3], 200.0);
+        // May (after last snapshot) carries forward Apr's value.
+        assert_eq!(series[4], 200.0);
+    }
+
+    #[test]
+    fn snapshot_series_for_months_empty_inputs() {
+        assert!(snapshot_series_for_months(&[], &[]).is_empty());
+        let labels: Vec<String> = vec!["2026-01".into(), "2026-02".into()];
+        // No snapshots → all zero, still label-aligned.
+        assert_eq!(snapshot_series_for_months(&[], &labels), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn slice_series_clamps_and_inverts() {
+        let labels: Vec<String> = (0..5).map(|i| format!("l{i}")).collect();
+        let values: Vec<f64> = (0..5).map(|i| i as f64).collect();
+
+        // Full passthrough.
+        let (l, v) = slice_series(&labels, &values, 0, 5);
+        assert_eq!(l.len(), 5);
+        assert_eq!(v, values);
+
+        // Tail half.
+        let (l, v) = slice_series(&labels, &values, 2, 5);
+        assert_eq!(l, vec!["l2", "l3", "l4"]);
+        assert_eq!(v, vec![2.0, 3.0, 4.0]);
+
+        // End clamps past the length.
+        let (l, v) = slice_series(&labels, &values, 3, 99);
+        assert_eq!(l.len(), 2);
+        assert_eq!(v, vec![3.0, 4.0]);
+
+        // Inverted range → empty, equal length.
+        let (l, v) = slice_series(&labels, &values, 5, 0);
+        assert!(l.is_empty() && v.is_empty());
+
+        // Empty inputs → empty.
+        let (l, v) = slice_series(&[], &[], 0, 3);
+        assert!(l.is_empty() && v.is_empty());
     }
 }

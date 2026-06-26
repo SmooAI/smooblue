@@ -19,4 +19,7 @@ pub mod sidebar;
 pub mod suggestion;
 pub mod thread;
 
-pub use analytics::{AnalyticsData, AnalyticsModal, AnalyticsView, BarDatum};
+pub use analytics::{
+    snapshot_series_for_months, AnalyticsData, AnalyticsModal, AnalyticsView, BarDatum,
+    EngagementMetrics, ExpandedAnalyticsData, SummaryStats,
+};
