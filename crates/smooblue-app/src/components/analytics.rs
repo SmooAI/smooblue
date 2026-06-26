@@ -385,9 +385,9 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
                 CadenceHeatmap { cells: data.cadence.clone() }
             }
 
-            // ── Best followers ──
+            // ── Top mutuals ── (mutual followers ranked by their reach)
             section { class: "analytics__section",
-                h3 { class: "analytics__title", "Best followers" }
+                h3 { class: "analytics__title", "Top mutuals" }
                 TopFollowersList { followers: data.top_followers.clone(), loading: followers_loading, limit: followers_n }
             }
 
@@ -586,11 +586,13 @@ pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
                 }
             }
 
-            // ── Follower lenses ──
+            // ── Follower lenses ── Ordered most-useful-first: your
+            // influential mutuals, then high-reach accounts you could
+            // follow back, then who engages most, then silent reach.
             FollowerLensCard {
-                title: "Top Fans",
-                subtitle: "Most inbox engagements",
-                followers: data.top_fans.clone(),
+                title: "Mutuals by Reach",
+                subtitle: "Your most influential mutual followers",
+                followers: data.mutuals_by_reach.clone(),
                 loading: followers_loading,
                 limit: 50,
             }
@@ -602,9 +604,9 @@ pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
                 limit: 50,
             }
             FollowerLensCard {
-                title: "Mutuals by Reach",
-                subtitle: "Your mutual followers, ranked",
-                followers: data.mutuals_by_reach.clone(),
+                title: "Top Fans",
+                subtitle: "Engage with you most (replies, mentions, quotes)",
+                followers: data.top_fans.clone(),
                 loading: followers_loading,
                 limit: 50,
             }
