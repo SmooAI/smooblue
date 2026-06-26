@@ -4988,6 +4988,10 @@ a {
  * viewports the sections flow into two columns. */
 .analytics__modal {
     width: min(960px, 94vw);
+    /* Override the base .modal__sheet max-width (560px) — the deep-dive
+     * is a two-column page and needs the room (verified against the
+     * running app: 560px forced ~440px of horizontal overflow). */
+    max-width: min(960px, 94vw);
     max-height: 90vh;
     display: flex;
     flex-direction: column;
@@ -5077,6 +5081,38 @@ a {
 .analytics__area.analytics__line--following {
     fill: var(--color-smooai-orange, #f59e0b);
     stroke: none;
+}
+
+/* Hover points: a marker per data vertex, invisible until the chart is
+ * hovered (keeps the resting line clean), each carrying a native SVG
+ * <title> tooltip ("2026-06 · Followers: 1040"). */
+.analytics__point {
+    stroke: none;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.analytics__chart:hover .analytics__point {
+    opacity: 0.9;
+}
+
+.analytics__point.analytics__line--followers {
+    fill: var(--color-smooai-blue-400, #3b82f6);
+}
+.analytics__point.analytics__line--following {
+    fill: var(--color-smooai-orange, #f59e0b);
+}
+.analytics__point.analytics__line--net {
+    fill: var(--muted-foreground, #9aa7b4);
+}
+.analytics__point.analytics__line--likes {
+    fill: var(--color-smooai-blue-400, #3b82f6);
+}
+.analytics__point.analytics__line--reposts {
+    fill: var(--color-smooai-orange, #f59e0b);
+}
+.analytics__point.analytics__line--replies {
+    fill: var(--muted-foreground, #9aa7b4);
 }
 
 .analytics__legend {
@@ -5256,7 +5292,13 @@ a {
  * charts (col 1) and lenses (col 2) interleave by row without manual rows. */
 .analytics__deepdive {
     display: grid;
-    grid-template-columns: 2fr 1fr;
+    /* minmax(0, …) lets the columns shrink below their content's
+     * intrinsic width so the follower rows truncate instead of forcing
+     * horizontal overflow (verified against the running app). `dense`
+     * pulls the right-column lens cards up beside the charts instead of
+     * leaving the whole right side empty until the charts run out. */
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    grid-auto-flow: row dense;
     gap: var(--space-4, 16px);
     align-items: start;
 }
