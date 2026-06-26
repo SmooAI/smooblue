@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.28.1
+
+### Patch Changes
+
+- [#82](https://github.com/SmooAI/smooblue/pull/82) [`a77928f`](https://github.com/SmooAI/smooblue/commit/a77928fe62d3686e21aa1e0ae00e4cf31021bf6d) Thanks [@brentrager](https://github.com/brentrager)! - Follower clout now accounts for the follower:following ratio, so accounts that farm follow-backs are penalized. A follower's reach is scaled by `clamp(followers / following, 0.25, 1.0)`: a ratio ≥ 1 (more followers than they follow — real clout) keeps full credit, while following far more than they're followed scales reach down (floored at 25%, never zeroed). The reach-driven lenses (Mutuals by Reach, High Clout Not Mutual, Lurkers) now rank by this ratio-adjusted reach, and existing follower scores are recomputed on launch so it applies right away.
+
+- [#81](https://github.com/SmooAI/smooblue/pull/81) [`9083125`](https://github.com/SmooAI/smooblue/commit/9083125154d0f7b203d3b98f82b87928fa53928c) Thanks [@brentrager](https://github.com/brentrager)! - Analytics follower ranking, reworked around what's actually useful:
+
+  - The main Analytics column now shows **Top mutuals** (your mutual followers ranked by reach) instead of the engagement-weighted "Best followers", which mixed signals and could rank a non-mutual above your highest-reach mutuals.
+  - In the pop-out, the follower lenses are reordered **Mutuals by Reach → High Clout (Not Mutual) → Top Fans → Lurkers with Clout**, and each lens now has a clearer subtitle explaining how it ranks.
+
 ## 1.28.0
 
 ### Minor Changes
