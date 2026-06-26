@@ -122,6 +122,11 @@ pub enum ColumnKind {
     /// store — ingestion populates the DB on a poll, this column
     /// just reads it. Pearl th-e17045.
     Inbox,
+    /// Account analytics dashboard — growth curves, posting cadence,
+    /// and ranked follower/post lists. Backed by the [`crate::analytics`]
+    /// SQLite store; this column reads the aggregated view DTO, the
+    /// background ingest task populates the DB. Pearl account-analytics.
+    Analytics,
 }
 
 impl ColumnSpec {
@@ -190,6 +195,15 @@ impl ColumnSpec {
             id: "inbox".into(),
             kind: ColumnKind::Inbox,
             title: "Inbox".into(),
+            settings: ColumnSettings::default(),
+        }
+    }
+
+    pub fn analytics() -> Self {
+        Self {
+            id: "analytics".into(),
+            kind: ColumnKind::Analytics,
+            title: "Analytics".into(),
             settings: ColumnSettings::default(),
         }
     }

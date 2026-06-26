@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 
 /// Hour-bucket granularity, in seconds. The sort uses
 /// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
@@ -273,7 +273,7 @@ fn open() -> Result<Connection> {
 /// All errors propagate to the caller — no silent in-memory fallback
 /// that would let triage actions look like they landed when they
 /// didn't. Adversarial-review P2 fix.
-fn with_db<R>(f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
+pub(crate) fn with_db<R>(f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
     let slot = DB.get_or_init(|| Mutex::new(None));
     let mut guard = slot.lock();
     if guard.is_none() {
@@ -283,6 +283,32 @@ fn with_db<R>(f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
     // mutex guard prevents anyone else from setting it back to None.
     f(guard.as_ref().expect("inbox connection set above"))
 }
+
+/// Test-only: install a connection into the shared slot, replacing any
+/// existing one. Swapping through the mutex (rather than
+/// `OnceLock::set`, which only fires once per process) lets each
+/// storage-layer test start from a clean schema.
+#[cfg(test)]
+pub(crate) fn install_test_connection(conn: Connection) {
+    let slot = DB.get_or_init(|| Mutex::new(None));
+    *slot.lock() = Some(conn);
+}
+
+/// Test-only: open a fresh in-memory DB, run every migration (so the
+/// analytics v5 tables exist too), and install it as the process-wide
+/// connection. Callers MUST hold [`TEST_DB_GUARD`] for the whole test
+/// so concurrent DB tests don't stomp each other's connection.
+#[cfg(test)]
+pub(crate) fn install_fresh_test_db() {
+    let conn = Connection::open_in_memory().expect("open in-memory");
+    migrate(&conn).expect("migrate");
+    install_test_connection(conn);
+}
+
+/// Test-only: serializes every DB-touching unit test across modules,
+/// since they all share the single process-wide connection slot.
+#[cfg(test)]
+pub(crate) static TEST_DB_GUARD: Mutex<()> = Mutex::new(());
 
 /// Apply pending migrations. Versioned via `PRAGMA user_version`.
 fn migrate(conn: &Connection) -> Result<()> {
@@ -374,6 +400,13 @@ fn migrate(conn: &Connection) -> Result<()> {
             ALTER TABLE inbox_items ADD COLUMN actor_follows_count INTEGER NOT NULL DEFAULT 0;
             "#,
         )?;
+    }
+    if current < 5 {
+        // v5: account-analytics tables. analytics.rs owns the SQL; inbox.rs
+        // owns the single per-file user_version (PRAGMA user_version is a
+        // per-file value, so analytics shares this version scheme rather
+        // than gating on its own and corrupting the migration ratchet).
+        crate::analytics::create_tables_v5(conn)?;
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
@@ -705,12 +738,12 @@ mod tests {
     /// returns the row sorted by directness.
     #[test]
     fn inbox_roundtrip_in_memory() {
-        // Force the in-memory fallback by pre-poisoning the cache
-        // with a fresh in-memory conn. Avoids touching the user's
-        // real DB during tests.
-        let conn = Connection::open_in_memory().expect("open");
-        migrate(&conn).expect("migrate");
-        let _ = DB.set(Mutex::new(Some(conn)));
+        // Install a fresh in-memory connection into the shared slot,
+        // serialized against every other DB-touching test so they don't
+        // stomp each other's connection. Avoids touching the user's real
+        // DB during tests.
+        let _guard = TEST_DB_GUARD.lock();
+        install_fresh_test_db();
 
         let now = Utc::now();
         let item = InboxItem {
