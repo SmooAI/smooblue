@@ -77,6 +77,12 @@ pub fn Compass(size: Size) -> Element {
 }
 
 #[component]
+pub fn ChartColumn(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdBarChartBig } }
+}
+
+#[component]
 pub fn User(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdUser } }

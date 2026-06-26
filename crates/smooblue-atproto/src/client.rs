@@ -1164,6 +1164,36 @@ impl AtClient {
         Ok(views)
     }
 
+    /// `com.atproto.repo.listRecords` — page the records of one
+    /// `collection` on a single `repo`, against the **session PDS**. The
+    /// AppView returns 501 for `listRecords` (it's a repo-host method, not
+    /// an AppView query), so this must hit the PDS like the write methods
+    /// do. Analytics uses it to enumerate the signed-in user's own posts
+    /// (`app.bsky.feed.post`) and follows (`app.bsky.graph.follow`) — pass
+    /// the user's own DID as `repo`; arbitrary-DID listing would need PDS
+    /// resolution (deferred). Each [`crate::feed::ListedRecord`] carries the
+    /// AT-URI (rkey in the tail → [`crate::tid`] for the creation instant)
+    /// and the raw record `value`.
+    pub async fn list_records(
+        &self,
+        repo: &str,
+        collection: &str,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::ListRecordsResponse, AtError> {
+        let mut url = self
+            .session_pds_url("/xrpc/com.atproto.repo.listRecords")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("repo", repo)
+            .append_pair("collection", collection)
+            .append_pair("limit", &limit.to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// Fetch trending topics via `app.bsky.unspecced.getTrendingTopics`.
     /// `unspecced` endpoints are bsky-AppView-internal — they're not
     /// in the public lexicon, so the shape is best-effort and may

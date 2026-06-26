@@ -2,13 +2,37 @@
 
 #engineering #idea
 
-Research notes for a potential **account analytics** feature (e.g. a
-"followers vs following over time" chart, growth stats). Captures where
-the time-series data actually comes from, because Bluesky's API does
-**not** expose historical counts — it has to be reconstructed.
+Research notes for the **account analytics** feature (a "followers vs
+following over time" chart, growth stats, follower clout, posting
+cadence). Captures where the time-series data actually comes from,
+because Bluesky's API does **not** expose historical counts — it has to
+be reconstructed.
 
 Findings gathered 2026-06-26 while building a one-off growth chart for
-`@rager.tech` (1,108 followers / 1,340 following at the time).
+`@rager.tech` (1,108 followers / 1,340 following at the time). **Shipped
+as an in-app Analytics page** — see [Status](#status--shipped).
+
+---
+
+## Status — shipped
+
+Built as the **Analytics** rail button → an Analytics deck column.
+
+| Layer | Files |
+| --- | --- |
+| Storage (SQLite, `user_version` 4→5) | `crates/smooblue-app/src/analytics.rs` (tables `metric_snapshots`, `follow_events`, `post_metrics`, `follower_stats`, `backfill_state`; migration hook in `inbox.rs`) |
+| Data collection | `crates/smooblue-atproto/src/{tid.rs,constellation.rs}` + `client.rs::list_records` |
+| Background tasks | `crates/smooblue-app/src/analytics_ingest.rs` (one-time resumable backfill + daily snapshot, spawned at App mount) |
+| Scoring | `crates/smooblue-app/src/analytics_score.rs` (clout = reach × engages-with-me × mutual × recency) |
+| View | `crates/smooblue-app/src/components/analytics.rs` (inline-SVG line/bar/heatmap, best-followers + best-posts lists) |
+
+The render path reads a pre-aggregated DTO from SQLite via
+`spawn_blocking(build_analytics_data)` — no network on the UI thread;
+the ingest task does the crawling. **v1 scope:** followers (Constellation)
++ following (own repo) growth, posts-over-time, posting cadence heatmap,
+follower clout, best posts by engagement. **Deferred:** full-history
+per-post engagement (v1 uses first-party `getPosts` counts on recent
+posts only).
 
 ---
 

@@ -10,6 +10,29 @@ pub struct FeedResponse {
     pub cursor: Option<String>,
 }
 
+/// Response shape for `com.atproto.repo.listRecords` (records of one
+/// collection on a single repo). Used by analytics to page the signed-in
+/// user's own `app.bsky.feed.post` / `app.bsky.graph.follow` records off
+/// the PDS (the AppView 501s on `listRecords`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListRecordsResponse {
+    #[serde(default)]
+    pub records: Vec<ListedRecord>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// A single record from `listRecords`. `value` is the raw record body
+/// (kept as a `Value` so each collection's lexicon can be picked apart by
+/// the caller without a typed struct per collection — the rkey for TID
+/// dating lives in the tail of `uri`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListedRecord {
+    pub uri: String,
+    pub cid: String,
+    pub value: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct FeedItem {
     pub post: PostView,

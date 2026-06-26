@@ -93,6 +93,13 @@ enum ColumnData {
     /// listConvos. v1 ships read-only (Phase A); triage actions
     /// (archive/snooze/quick-reply) land in subsequent phases.
     Inbox(Vec<crate::inbox::InboxItem>),
+    /// Account-analytics dashboard DTO (pearl account-analytics). One
+    /// aggregated value, not a list — `build_analytics_data` rolls the
+    /// SQLite analytics tables into growth series, posting cadence, and
+    /// the ranked follower/post cuts. The view renders its own per-chart
+    /// "collecting data" empty states, so this is never treated as an
+    /// empty column once the first read lands.
+    Analytics(crate::components::AnalyticsData),
 }
 
 impl ColumnData {
@@ -104,6 +111,10 @@ impl ColumnData {
             Self::Suggestions(actors) => actors.is_empty(),
             Self::Convos(convos) => convos.is_empty(),
             Self::Inbox(items) => items.is_empty(),
+            // Once analytics data has been built it always renders the
+            // dashboard frame (each chart owns its empty state), so the
+            // column is never "empty" in the loading/Nothing-here sense.
+            Self::Analytics(_) => false,
         }
     }
 }
@@ -133,6 +144,12 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         // list close to what the DB has if a triage action elsewhere
         // mutates a row.
         ColumnKind::Inbox => Duration::from_secs(15),
+        // Analytics reads the locally-aggregated view DTO from SQLite;
+        // the background ingest task (analytics_ingest.rs) does the
+        // upstream crawl. A slow 5-minute re-read keeps the charts in
+        // step with whatever the backfill has accumulated without
+        // re-querying every few seconds.
+        ColumnKind::Analytics => Duration::from_secs(300),
     }
 }
 
@@ -903,6 +920,9 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             }
                         }
                     }
+                    (ColumnData::Analytics(d), _, _) => rsx! {
+                        crate::components::AnalyticsView { data: d.clone() }
+                    },
                     _ => rsx! {},
                 }
                 if let Some(msg) = &*error.read() {
@@ -1739,6 +1759,12 @@ async fn fetch_page(
             // Demo mode: empty inbox triage list. The SQLite store is
             // user-real anyway; demo just doesn't seed canned items.
             ColumnKind::Inbox => ColumnData::Inbox(Vec::new()),
+            // Demo mode shows an empty analytics dashboard — the charts
+            // render their own "collecting data" frames. The SQLite store
+            // is user-real, demo just doesn't seed canned analytics.
+            ColumnKind::Analytics => {
+                ColumnData::Analytics(crate::components::AnalyticsData::default())
+            }
             ColumnKind::Home
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
@@ -1880,6 +1906,22 @@ async fn fetch_page(
                 .map_err(|e| format!("inbox list task panicked: {e}"))?
                 .map(|items| Page {
                     data: ColumnData::Inbox(items),
+                    cursor: None,
+                })
+                .map_err(|e| e.to_string())
+        }
+        ColumnKind::Analytics => {
+            // Analytics, like Inbox, reads the local SQLite store rather
+            // than the network — `build_analytics_data` aggregates the
+            // snapshot / follow-event / post / follower-stat tables into
+            // the view DTO. The background ingest task is the side that
+            // crawls the PDS + Constellation. Single-page (no cursor).
+            let _ = client; // silence unused-variable when this arm is the only one to compile
+            tokio::task::spawn_blocking(crate::analytics::build_analytics_data)
+                .await
+                .map_err(|e| format!("analytics build task panicked: {e}"))?
+                .map(|data| Page {
+                    data: ColumnData::Analytics(data),
                     cursor: None,
                 })
                 .map_err(|e| e.to_string())
@@ -2334,6 +2376,7 @@ fn ColumnHeader(
                     ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
                     ColumnKind::Messages => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
                     ColumnKind::Inbox => rsx! { icons::Inbox { size: icons::Size::Sm } },
+                    ColumnKind::Analytics => rsx! { icons::ChartColumn { size: icons::Size::Sm } },
                     ColumnKind::Home => rsx! { icons::Home { size: icons::Size::Sm } },
                 }
             }

@@ -3,6 +3,9 @@
 //! (components, view models, persistence helpers) lives here.
 
 pub mod alt_text;
+pub mod analytics;
+pub mod analytics_ingest;
+pub mod analytics_score;
 pub mod auth_refresh;
 pub mod automation;
 pub mod components;
@@ -196,6 +199,18 @@ pub fn App() -> Element {
     // call this — silent empty-inbox until now (pearl: filed below).
     use_hook(move || {
         crate::inbox_ingest::spawn_ingestion_task(session);
+    });
+
+    // Account-analytics background tasks. Mirrors the inbox ingester:
+    // spawned ONCE at App-mount, lives the process lifetime, re-derives
+    // auth via fresh_client each cycle. Runs the daily metric snapshot
+    // and the one-time resumable backfill phase machine (posts /
+    // following / followers / engagement → complete). Guarded internally
+    // on a present session + non-demo mode; the backfill resumes from its
+    // last checkpoint after a restart and is a no-op once complete (the
+    // daily snapshot keeps ticking).
+    use_hook(move || {
+        crate::analytics_ingest::spawn_analytics_tasks(session);
     });
 
     // Opt-in UI-automation bridge (SMOOBLUE_AUTOMATION=<port>). Off by

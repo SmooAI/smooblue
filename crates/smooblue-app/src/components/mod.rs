@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod column;
 pub mod compose;
 pub mod deck;
@@ -17,3 +18,5 @@ pub mod settings_sheet;
 pub mod sidebar;
 pub mod suggestion;
 pub mod thread;
+
+pub use analytics::{AnalyticsData, AnalyticsView, BarDatum};

@@ -61,6 +61,8 @@ pub fn Sidebar(
     let add_messages =
         move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::messages());
     let add_inbox = move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::inbox());
+    let add_analytics =
+        move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::analytics());
     let open_search = move |_| search_open.set(true);
     let mut sf_open = saved_feeds_open;
     let open_saved_feeds = move |_| sf_open.set(true);
@@ -118,6 +120,7 @@ pub fn Sidebar(
             RailBtn { label: "Suggested follows", active: false, kind: RailKind::Sparkles, badge: 0, onclick: add_suggestions }
             RailBtn { label: "Messages", active: false, kind: RailKind::Messages, badge: 0, onclick: add_messages }
             RailBtn { label: "Inbox", active: false, kind: RailKind::InboxTriage, badge: 0, onclick: add_inbox }
+            RailBtn { label: "Analytics", active: false, kind: RailKind::Analytics, badge: 0, onclick: add_analytics }
             div { class: "rail__divider" }
             // "+ Add column" opens the Saved Feeds sheet (which lists
             // your saved feeds, your lists, your *own* feed generators,
@@ -160,6 +163,7 @@ pub enum RailKind {
     Sparkles,
     Messages,
     InboxTriage,
+    Analytics,
     Bookmark,
     Add,
     Profile,
@@ -199,6 +203,7 @@ fn RailBtn(
                 RailKind::Sparkles => rsx! { icons::Sparkles { size: icons::Size::Md } },
                 RailKind::Messages => rsx! { icons::MessageCircle { size: icons::Size::Md } },
                 RailKind::InboxTriage => rsx! { icons::Inbox { size: icons::Size::Md } },
+                RailKind::Analytics => rsx! { icons::ChartColumn { size: icons::Size::Md } },
                 RailKind::Bookmark => rsx! { icons::Bookmark { size: icons::Size::Md } },
                 RailKind::Add => rsx! { icons::Plus { size: icons::Size::Md } },
                 RailKind::Profile => rsx! { icons::User { size: icons::Size::Md } },
