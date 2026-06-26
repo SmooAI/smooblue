@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.27.0
+
+### Minor Changes
+
+- [#77](https://github.com/SmooAI/smooblue/pull/77) [`96f4a85`](https://github.com/SmooAI/smooblue/commit/96f4a857bc9daa37f08279ad20b3c81dc7898cdb) Thanks [@brentrager](https://github.com/brentrager)! - Add an **Analytics** page (new rail button → Analytics column). It charts your account over time, reconstructed from the follow graph — no third-party site needed:
+
+  - **Followers vs following over time** and **posts over time** (inline-SVG growth curves), plus a **posting-cadence heatmap** (weekday × hour).
+  - **Best followers**, ranked by a clout score that blends their reach, how often they engage with you, whether you follow them back, and recency.
+  - **Best posts** by engagement.
+
+  Data is reconstructed once (your repo for following/posts, the Constellation backlink index for followers, with each follow's TID timestamp) and cached in the local SQLite store, then a daily snapshot tracks true net counts going forward. The charts read the pre-aggregated data off the UI thread, so the page stays responsive while the background task backfills.
+
+### Patch Changes
+
+- [#75](https://github.com/SmooAI/smooblue/pull/75) [`b9fc832`](https://github.com/SmooAI/smooblue/commit/b9fc832a5940c304e61831b022c31faaabf68611) Thanks [@brentrager](https://github.com/brentrager)! - Two Notifications-column fixes:
+
+  - **Replies and mentions no longer go missing.** On each poll the column merged fresh notifications into existing ones keyed only by `(reason, subject)`. Because replies/mentions/quotes are ungrouped singletons (and often share a null subject), distinct ones collapsed into a single row and the newer notification was swallowed as a hidden sub-item. Notifications now merge by a key that keeps reply/mention/quote rows unique per notification, so every reply and mention shows up — while a re-fetched identical one still dedupes.
+  - **The header filter box now works on Notifications.** Typing in the column filter previously did nothing for a Notifications column. It now matches on the actor's handle/display name, the text they wrote, and the subject post's text/author.
+
 ## 1.26.2
 
 ### Patch Changes
