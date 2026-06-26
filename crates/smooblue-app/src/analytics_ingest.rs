@@ -270,7 +270,7 @@ async fn backfill_posts(client: &AtClient, my_did: &str, state: &mut BackfillSta
     }
 
     // Engagement on the most-recent window only (v1 scope).
-    seen.sort_by(|a, b| b.0.cmp(&a.0));
+    seen.sort_by_key(|(ts, _)| std::cmp::Reverse(*ts));
     let recent_uris: Vec<String> = seen
         .into_iter()
         .take(ENGAGEMENT_POST_WINDOW)
