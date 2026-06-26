@@ -81,6 +81,15 @@ pub fn spawn_analytics_tasks(session: Signal<Option<Session>>) {
         // before we add backfill traffic.
         tokio::time::sleep(Duration::from_secs(10)).await;
 
+        // One-shot on launch: recompute cached follower scores so a
+        // scoring-formula change (e.g. the reach ratio penalty) applies
+        // to existing data immediately, not only after a re-backfill.
+        if let Some(n) = db(analytics::rescore_all_follower_stats).await {
+            if n > 0 {
+                crate::diag!("[analytics] re-scored {n} cached follower_stats on launch");
+            }
+        }
+
         loop {
             run_analytics_cycle(session).await;
             tokio::time::sleep(Duration::from_secs(BACKFILL_CHECK_INTERVAL_SECS)).await;

@@ -755,7 +755,7 @@ pub fn list_high_clout_not_mutual(limit: i64) -> Result<Vec<FollowerStat>> {
                composite_score
         FROM follower_stats
         WHERE mutual = 0
-        ORDER BY followers_count DESC
+        ORDER BY reach_score DESC, followers_count DESC
         LIMIT ?1
         "#,
         limit,
@@ -772,7 +772,7 @@ pub fn list_mutuals_by_reach(limit: i64) -> Result<Vec<FollowerStat>> {
                composite_score
         FROM follower_stats
         WHERE mutual = 1
-        ORDER BY followers_count DESC
+        ORDER BY reach_score DESC, followers_count DESC
         LIMIT ?1
         "#,
         limit,
@@ -791,7 +791,7 @@ pub fn list_lurkers_by_clout(limit: i64, min_followers: i64) -> Result<Vec<Follo
                    composite_score
             FROM follower_stats
             WHERE engagement_count = 0 AND followers_count >= ?2
-            ORDER BY followers_count DESC
+            ORDER BY reach_score DESC, followers_count DESC
             LIMIT ?1
             "#,
         )?;
@@ -802,6 +802,57 @@ pub fn list_lurkers_by_clout(limit: i64, min_followers: i64) -> Result<Vec<Follo
         }
         Ok(out)
     })
+}
+
+/// Recompute every cached follower's score columns from its stored raw
+/// signals and write them back. Pure + cheap (a few hundred rows), so
+/// it runs once on launch — a scoring-formula change (e.g. the reach
+/// follower:following ratio penalty) then applies to existing data
+/// without waiting for a full re-backfill. Returns the row count.
+pub fn rescore_all_follower_stats() -> Result<usize> {
+    // Read all rows under one lock; rescore off-lock (pure); write back
+    // under one lock. `upsert_follower_stat` takes its own lock, so it
+    // can't be called inside a `with_db` closure — issue UPDATEs here.
+    let mut stats: Vec<FollowerStat> = with_db(|conn| {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT follower_did, follower_handle, follower_display_name, follower_avatar,
+                   followers_count, following_count, engagement_count, last_engagement_ts,
+                   mutual, first_followed_ts, reach_score, engagement_score, mutual_bonus,
+                   composite_score
+            FROM follower_stats
+            "#,
+        )?;
+        let rows = stmt.query_map([], row_to_follower_stat)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    })?;
+    for s in &mut stats {
+        crate::analytics_score::rescore(s);
+    }
+    with_db(|conn| {
+        for s in &stats {
+            conn.execute(
+                r#"
+                UPDATE follower_stats
+                SET reach_score = ?1, engagement_score = ?2, mutual_bonus = ?3, composite_score = ?4
+                WHERE follower_did = ?5
+                "#,
+                params![
+                    s.reach_score,
+                    s.engagement_score,
+                    s.mutual_bonus,
+                    s.composite_score,
+                    s.follower_did
+                ],
+            )?;
+        }
+        Ok(())
+    })?;
+    Ok(stats.len())
 }
 
 // ────────────── engagement reads from inbox_items ──────────────────
