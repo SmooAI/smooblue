@@ -41,6 +41,12 @@ pub const TENURE_WEIGHT: f64 = 0.15;
 /// `log10(followers)` value that maps to a full reach score of `1.0`
 /// (`10^6` followers). `log10(100)/6 ≈ 0.33`, `log10(10_000)/6 ≈ 0.67`.
 pub const MAX_REACH_SCORE: f64 = 6.0;
+/// Anti-farming floor for the follower:following ratio factor. A
+/// follower whose follower count is dwarfed by how many accounts THEY
+/// follow (follow-farming) keeps at most this fraction of their raw
+/// reach credit; a ratio ≥ 1 keeps all of it. Never zeroes a real
+/// account.
+pub const REACH_RATIO_FLOOR: f64 = 0.25;
 /// Engagement count that saturates the count component at `1.0`.
 pub const ENGAGEMENT_SATURATION: f64 = 50.0;
 /// Half-life (days) of the engagement recency decay — a 30-day-old last
@@ -57,12 +63,22 @@ pub const MIN_ENGAGEMENT_WEIGHT: f64 = 0.1;
 // ─────────────────────────── component fns ─────────────────────────
 
 /// Normalized reach `0.0..=1.0` from the follower's follower count, on a
-/// `log10` curve capped at `10^MAX_REACH_SCORE`. `0` followers → `0.0`.
-pub fn compute_reach_score(followers_count: i64) -> f64 {
+/// `log10` curve capped at `10^MAX_REACH_SCORE`, then scaled by an
+/// anti-farming follower:following ratio factor. `0` followers → `0.0`.
+///
+/// The ratio factor is `clamp(followers / following, REACH_RATIO_FLOOR,
+/// 1.0)`: a ratio ≥ 1 (more followers than they follow — the classic
+/// "real clout" signal) keeps full credit; following far more than
+/// they're followed (farming follow-backs) scales reach down, floored at
+/// [`REACH_RATIO_FLOOR`] so a genuine account is never zeroed.
+pub fn compute_reach_score(followers_count: i64, following_count: i64) -> f64 {
     if followers_count <= 0 {
         return 0.0;
     }
-    ((followers_count as f64).log10() / MAX_REACH_SCORE).clamp(0.0, 1.0)
+    let base = ((followers_count as f64).log10() / MAX_REACH_SCORE).clamp(0.0, 1.0);
+    let ratio = followers_count as f64 / (following_count.max(1) as f64);
+    let ratio_factor = ratio.clamp(REACH_RATIO_FLOOR, 1.0);
+    base * ratio_factor
 }
 
 /// Normalized engagement `0.0..=1.0` from how many times the follower has
@@ -124,7 +140,7 @@ pub fn compute_composite_score(
 /// `tenure_bonus` / `composite_score` on a [`crate::analytics::FollowerStat`]
 /// in place from its raw signals.
 pub fn rescore(stat: &mut crate::analytics::FollowerStat) {
-    stat.reach_score = compute_reach_score(stat.followers_count);
+    stat.reach_score = compute_reach_score(stat.followers_count, stat.following_count);
     stat.engagement_score =
         compute_engagement_score(stat.engagement_count, stat.last_engagement_ts);
     stat.mutual_bonus = compute_mutual_bonus(stat.mutual);
@@ -148,12 +164,31 @@ mod tests {
 
     #[test]
     fn reach_score_log_curve_and_cap() {
-        assert_eq!(compute_reach_score(0), 0.0);
-        approx(compute_reach_score(100), 0.33);
-        approx(compute_reach_score(10_000), 0.67);
-        assert_eq!(compute_reach_score(1_000_000), 1.0);
+        // following=0 → ratio factor 1.0, so these exercise the base curve.
+        assert_eq!(compute_reach_score(0, 0), 0.0);
+        approx(compute_reach_score(100, 0), 0.33);
+        approx(compute_reach_score(10_000, 0), 0.67);
+        assert_eq!(compute_reach_score(1_000_000, 0), 1.0);
         // Above the cap still clamps at 1.0.
-        assert_eq!(compute_reach_score(50_000_000), 1.0);
+        assert_eq!(compute_reach_score(50_000_000, 0), 1.0);
+    }
+
+    #[test]
+    fn reach_ratio_penalizes_follow_farming() {
+        let base = compute_reach_score(10_000, 0); // full credit (ratio≫1)
+                                                   // ratio == 1 (followers == following) still gets full credit.
+        approx(compute_reach_score(10_000, 10_000), base);
+        // ratio == 2 (twice as many followers as following) — full credit.
+        approx(compute_reach_score(10_000, 5_000), base);
+        // ratio == 0.5 (follows 2× their followers) — reach halved.
+        approx(compute_reach_score(10_000, 20_000), base * 0.5);
+        // Heavy farmer (ratio 0.1) — floored, not zeroed.
+        approx(
+            compute_reach_score(10_000, 100_000),
+            base * REACH_RATIO_FLOOR,
+        );
+        // The healthy account outranks the farmer at equal follower count.
+        assert!(compute_reach_score(10_000, 5_000) > compute_reach_score(10_000, 100_000));
     }
 
     #[test]
