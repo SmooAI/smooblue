@@ -27,8 +27,8 @@
 //! is the universal close.
 
 use crate::state::{
-    add_column_unique, ColumnSpec, ComposeContext, EngagementFocus, FocusedItem, KeyboardHelp,
-    LightboxFocus, PendingChord, ProfileFocus, ThreadFocus,
+    add_column_unique, AnalyticsExpanded, ColumnSpec, ComposeContext, EngagementFocus, FocusedItem,
+    KeyboardHelp, LightboxFocus, PendingChord, ProfileFocus, ThreadFocus,
 };
 use dioxus::prelude::*;
 use smooblue_oauth::Session;
@@ -50,6 +50,7 @@ pub struct KeyContext {
     pub saved_feeds_open: Signal<bool>,
     pub settings_open: Signal<bool>,
     pub lightbox: Signal<LightboxFocus>,
+    pub analytics_expanded: Signal<AnalyticsExpanded>,
 }
 
 /// `true` when any modal sheet is open. Used to skip vim shortcuts
@@ -64,6 +65,7 @@ pub fn any_modal_open(ctx: &KeyContext) -> bool {
         || *ctx.saved_feeds_open.read()
         || *ctx.settings_open.read()
         || ctx.help.read().0
+        || ctx.analytics_expanded.read().0
 }
 
 /// Close whichever modal is on top. Esc handler.
@@ -76,6 +78,10 @@ pub fn close_top_modal(ctx: &mut KeyContext) {
     // first regardless of what else is open underneath.
     if ctx.lightbox.read().0.is_some() {
         ctx.lightbox.set(LightboxFocus(None));
+        return;
+    }
+    if ctx.analytics_expanded.read().0 {
+        ctx.analytics_expanded.set(AnalyticsExpanded(false));
         return;
     }
     // Innermost-first close order — engagement / profile / thread

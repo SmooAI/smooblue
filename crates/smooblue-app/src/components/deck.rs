@@ -44,6 +44,7 @@ pub fn DeckShell() -> Element {
         saved_feeds_open,
         settings_open,
         lightbox: use_context::<Signal<LightboxFocus>>(),
+        analytics_expanded: use_context::<Signal<crate::state::AnalyticsExpanded>>(),
     };
 
     // Chord-timeout: clear PendingChord after 1.5s so a stray `g`
@@ -349,6 +350,7 @@ pub fn DeckShell() -> Element {
             LightboxSheet {}
             ProfileEditSheet {}
             KeyboardHelpSheet {}
+            crate::components::AnalyticsModal {}
             UpdateToast {}
         }
     }

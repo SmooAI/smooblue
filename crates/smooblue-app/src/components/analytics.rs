@@ -41,9 +41,11 @@ const LINE_H: f64 = 140.0;
 /// owned data so the column can clone it cheaply into the render arm.
 #[derive(Clone, PartialEq, Default)]
 pub struct AnalyticsData {
-    /// Cumulative followers per day, oldest → newest.
+    /// `YYYY-MM` label per growth sample (full account history, monthly).
+    pub growth_labels: Vec<String>,
+    /// Cumulative followers per month, oldest → newest.
     pub followers_over_time: Vec<f64>,
-    /// Cumulative following per day, oldest → newest.
+    /// Cumulative following per month, oldest → newest.
     pub following_over_time: Vec<f64>,
     /// One bar per calendar day (count of own posts).
     pub posts_per_day: Vec<BarDatum>,
@@ -53,7 +55,18 @@ pub struct AnalyticsData {
     pub top_followers: Vec<FollowerStat>,
     /// Top own posts by like count.
     pub top_posts: Vec<PostMetric>,
+    /// [`crate::analytics::BackfillPhase::rank`] of the backfill machine
+    /// — drives per-card "still collecting" vs "done + empty" states.
+    pub backfill_phase_rank: u8,
+    /// `true` once the one-time backfill has fully completed.
+    pub backfill_complete: bool,
 }
+
+/// Backfill-phase ranks (mirror of [`crate::analytics::BackfillPhase::rank`])
+/// used to decide whether a card's data source has been populated yet.
+pub const PHASE_FOLLOWING: u8 = 2;
+pub const PHASE_FOLLOWERS: u8 = 3;
+pub const PHASE_ENGAGEMENT: u8 = 4;
 
 /// One labelled bar. Shared with the store aggregator so it can build
 /// the per-day series without depending back on the view internals.
@@ -144,7 +157,7 @@ fn fmt_count(n: i64) -> String {
 // ─────────────────────────── view root ─────────────────────────────
 
 #[component]
-pub fn AnalyticsView(data: AnalyticsData) -> Element {
+pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> Element {
     let growth = vec![
         ChartSeries {
             label: "Followers".into(),
@@ -158,24 +171,50 @@ pub fn AnalyticsView(data: AnalyticsData) -> Element {
         },
     ];
 
+    // Per-card loading: a card is "loading" (vs done-and-empty) when the
+    // backfill phase that fills it hasn't run yet. Ranks mirror the
+    // store's BackfillPhase::rank.
+    let complete = data.backfill_complete;
+    let growth_loading = !complete && data.backfill_phase_rank < PHASE_FOLLOWING;
+    // Following line exists but followers (incoming, Constellation) is
+    // still being crawled — show a sub-note so the missing blue line
+    // doesn't look like a bug.
+    let followers_pending = !complete
+        && data.backfill_phase_rank < PHASE_FOLLOWERS
+        && data.followers_over_time.iter().all(|&v| v == 0.0);
+    let followers_loading = !complete && data.top_followers.is_empty();
+    let posts_ranking_loading = !complete && data.backfill_phase_rank < PHASE_ENGAGEMENT;
+
+    let growth_caption = if followers_pending {
+        "Followers are still backfilling from public follow records (~94% coverage); the blue line fills in shortly. Net counts accrue forward daily."
+    } else {
+        "Followers reconstructed from public follow records (~94% coverage); exact net counts accrue forward daily."
+    };
+    let (followers_n, posts_n) = if expanded { (25, 25) } else { (5, 5) };
+
     rsx! {
-        div { class: "analytics",
+        div { class: if expanded { "analytics analytics--expanded" } else { "analytics" },
             // ── Growth ──
             section { class: "analytics__section",
                 h3 { class: "analytics__title", "Growth" }
-                LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true }
-                div { class: "analytics__legend",
-                    span { class: "analytics__legend-item",
-                        span { class: "analytics__swatch analytics__swatch--followers" }
-                        "Followers"
+                if growth_loading {
+                    div { class: "analytics__loading",
+                        span { class: "analytics__spinner" }
+                        "Reconstructing your follow history…"
                     }
-                    span { class: "analytics__legend-item",
-                        span { class: "analytics__swatch analytics__swatch--following" }
-                        "Following"
+                } else {
+                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true }
+                    div { class: "analytics__legend",
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--followers" }
+                            "Followers"
+                        }
+                        span { class: "analytics__legend-item",
+                            span { class: "analytics__swatch analytics__swatch--following" }
+                            "Following"
+                        }
                     }
-                }
-                p { class: "analytics__note",
-                    "Followers reconstructed from public follow records (~94% coverage); exact net counts accrue forward daily."
+                    p { class: "analytics__note", "{growth_caption}" }
                 }
             }
 
@@ -194,13 +233,54 @@ pub fn AnalyticsView(data: AnalyticsData) -> Element {
             // ── Best followers ──
             section { class: "analytics__section",
                 h3 { class: "analytics__title", "Best followers" }
-                TopFollowersList { followers: data.top_followers.clone() }
+                TopFollowersList { followers: data.top_followers.clone(), loading: followers_loading, limit: followers_n }
             }
 
             // ── Top posts ──
             section { class: "analytics__section",
                 h3 { class: "analytics__title", "Top posts" }
-                TopPostsList { posts: data.top_posts.clone() }
+                TopPostsList { posts: data.top_posts.clone(), loading: posts_ranking_loading, limit: posts_n }
+            }
+        }
+    }
+}
+
+/// Full-screen "pop-out" of the analytics dashboard — a richer, wider
+/// layout of the same data. Opened from the Analytics column header.
+/// Loads its own [`AnalyticsData`] off the render thread so it's
+/// independent of the column's poll cycle.
+#[component]
+pub fn AnalyticsModal() -> Element {
+    let mut expanded = use_context::<Signal<crate::state::AnalyticsExpanded>>();
+    if !expanded.read().0 {
+        return rsx! { Fragment {} };
+    }
+    let data = use_resource(|| async move {
+        tokio::task::spawn_blocking(crate::analytics::build_analytics_data)
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+    });
+    let close = move |_| expanded.set(crate::state::AnalyticsExpanded(false));
+    rsx! {
+        div { class: "modal__backdrop", onclick: close,
+            div {
+                class: "modal__sheet analytics__modal",
+                onclick: move |e| e.stop_propagation(),
+                button { class: "profile__close", title: "Close (Esc)", onclick: close,
+                    crate::icons::X { size: crate::icons::Size::Sm }
+                }
+                h2 { class: "analytics__modal-title", "Analytics" }
+                match &*data.read_unchecked() {
+                    Some(Some(d)) => rsx! { AnalyticsView { data: d.clone(), expanded: true } },
+                    Some(None) => rsx! { div { class: "analytics__empty", "Couldn't load analytics." } },
+                    None => rsx! {
+                        div { class: "analytics__loading",
+                            span { class: "analytics__spinner" }
+                            "Loading…"
+                        }
+                    },
+                }
             }
         }
     }
@@ -411,15 +491,25 @@ fn CadenceHeatmap(cells: Vec<Vec<f64>>) -> Element {
 // ───────────────────────── ranked lists ────────────────────────────
 
 #[component]
-fn TopFollowersList(followers: Vec<FollowerStat>) -> Element {
+fn TopFollowersList(followers: Vec<FollowerStat>, loading: bool, limit: usize) -> Element {
     if followers.is_empty() {
+        // Distinguish "still computing" from "genuinely none" so an
+        // empty mid-backfill card doesn't read as a finished result.
         return rsx! {
-            div { class: "analytics__empty", "No follower stats yet — enriching in the background…" }
+            if loading {
+                div { class: "analytics__loading",
+                    span { class: "analytics__spinner" }
+                    "Analyzing your followers…"
+                }
+            } else {
+                div { class: "analytics__empty", "No follower data." }
+            }
         };
     }
+    let shown = followers.len().min(limit);
     rsx! {
         ol { class: "analytics__followers-list",
-            for (i , f) in followers.iter().enumerate() {
+            for (i , f) in followers.iter().take(shown).enumerate() {
                 li {
                     key: "{f.follower_did}",
                     class: "analytics__followers-row",
@@ -456,15 +546,26 @@ fn TopFollowersList(followers: Vec<FollowerStat>) -> Element {
 }
 
 #[component]
-fn TopPostsList(posts: Vec<PostMetric>) -> Element {
-    if posts.is_empty() {
+fn TopPostsList(posts: Vec<PostMetric>, loading: bool, limit: usize) -> Element {
+    if posts.is_empty() || loading {
+        // `loading` is set until the engagement backfill has run — until
+        // then like/repost counts are all 0 and a "top" ranking would
+        // just be most-recent, which is misleading.
         return rsx! {
-            div { class: "analytics__empty", "No posts captured yet…" }
+            if loading {
+                div { class: "analytics__loading",
+                    span { class: "analytics__spinner" }
+                    "Ranking by engagement once the backfill finishes…"
+                }
+            } else {
+                div { class: "analytics__empty", "No posts captured yet…" }
+            }
         };
     }
+    let shown = posts.len().min(limit);
     rsx! {
         ol { class: "analytics__posts-list",
-            for p in posts.iter() {
+            for p in posts.iter().take(shown) {
                 li {
                     key: "{p.rkey}",
                     class: "analytics__posts-row",

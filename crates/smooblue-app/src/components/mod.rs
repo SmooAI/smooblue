@@ -19,4 +19,4 @@ pub mod sidebar;
 pub mod suggestion;
 pub mod thread;
 
-pub use analytics::{AnalyticsData, AnalyticsView, BarDatum};
+pub use analytics::{AnalyticsData, AnalyticsModal, AnalyticsView, BarDatum};

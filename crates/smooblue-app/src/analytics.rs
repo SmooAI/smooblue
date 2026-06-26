@@ -33,7 +33,7 @@
 //!   by the (later) view-aggregation layer — unit-tested here.
 
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::inbox::with_db;
@@ -107,6 +107,19 @@ impl BackfillPhase {
             "engagement" => Some(Self::Engagement),
             "complete" => Some(Self::Complete),
             _ => None,
+        }
+    }
+
+    /// Monotonic rank for "has the backfill reached past phase X yet?"
+    /// comparisons that drive the per-card loading states in the view.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::Pending => 0,
+            Self::Posts => 1,
+            Self::Following => 2,
+            Self::Followers => 3,
+            Self::Engagement => 4,
+            Self::Complete => 5,
         }
     }
 }
@@ -528,6 +541,66 @@ pub fn list_metric_snapshots(limit: i64) -> Result<Vec<MetricSnapshot>> {
 /// Cumulative count of follow events in `direction` whose TID-decoded
 /// `ts` is at or before `until`. Drives each point on the reconstructed
 /// growth curve. Cutoff is bound as an RFC3339 parameter.
+/// Earliest follow-event timestamp across both directions, or `None`
+/// when no follow records have been ingested yet. Anchors the
+/// full-history growth curve at the account's first follow rather than
+/// an arbitrary fixed window.
+pub fn earliest_follow_event_ts() -> Result<Option<DateTime<Utc>>> {
+    with_db(|conn| {
+        let s: Option<String> =
+            conn.query_row("SELECT MIN(ts) FROM follow_events", [], |r| r.get(0))?;
+        Ok(s.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .ok()
+                .map(|d| d.with_timezone(&Utc))
+        }))
+    })
+}
+
+/// One `(label, cutoff)` per calendar month from `from`'s month through
+/// `to`'s month. `cutoff` is the first instant of the *following* month
+/// so a cumulative `count(... ts <= cutoff)` includes that whole month.
+/// Labels are `YYYY-MM`. Used to sample the growth curve monthly across
+/// the full account history (the one-off chart did the same).
+fn month_cutoffs(from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<(String, DateTime<Utc>)> {
+    let mut out = Vec::new();
+    let (mut y, mut m) = (from.year(), from.month());
+    loop {
+        let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+        if let Some(cutoff) = Utc.with_ymd_and_hms(ny, nm, 1, 0, 0, 0).single() {
+            out.push((format!("{y:04}-{m:02}"), cutoff));
+        }
+        if (y, m) >= (to.year(), to.month()) {
+            break;
+        }
+        (y, m) = (ny, nm);
+        // Safety stop: never emit more than ~50 years of months.
+        if out.len() > 600 {
+            break;
+        }
+    }
+    out
+}
+
+/// Full-history monthly cumulative growth curves. Returns
+/// `(month_labels, followers_cumulative, following_cumulative)`. Empty
+/// vecs when no follow events exist yet (view shows a loading state).
+fn growth_series_monthly(now: DateTime<Utc>) -> Result<(Vec<String>, Vec<f64>, Vec<f64>)> {
+    let Some(earliest) = earliest_follow_event_ts()? else {
+        return Ok((Vec::new(), Vec::new(), Vec::new()));
+    };
+    let months = month_cutoffs(earliest, now);
+    let mut labels = Vec::with_capacity(months.len());
+    let mut followers = Vec::with_capacity(months.len());
+    let mut following = Vec::with_capacity(months.len());
+    for (label, cutoff) in months {
+        labels.push(label);
+        followers.push(count_follow_events_until(FollowDir::Incoming, cutoff)? as f64);
+        following.push(count_follow_events_until(FollowDir::Outgoing, cutoff)? as f64);
+    }
+    Ok((labels, followers, following))
+}
+
 pub fn count_follow_events_until(direction: FollowDir, until: DateTime<Utc>) -> Result<i64> {
     with_db(|conn| {
         let n: i64 = conn.query_row(
@@ -804,16 +877,21 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
 
     let now = Utc::now();
 
-    // Cumulative growth curves, one sample per day (oldest → newest) so
-    // the line chart's left edge is the oldest day. `count_*_until` binds
-    // the cutoff as an RFC3339 parameter (never `datetime('now', …)`).
-    let mut followers_over_time = Vec::with_capacity(GROWTH_WINDOW_DAYS as usize);
-    let mut following_over_time = Vec::with_capacity(GROWTH_WINDOW_DAYS as usize);
-    for i in (0..GROWTH_WINDOW_DAYS).rev() {
-        let day_end = now - Duration::days(i);
-        followers_over_time.push(count_follow_events_until(FollowDir::Incoming, day_end)? as f64);
-        following_over_time.push(count_follow_events_until(FollowDir::Outgoing, day_end)? as f64);
-    }
+    // Full-history cumulative growth curves, one sample per month
+    // (oldest → newest). A fixed short window made years-old follows
+    // read as a constant — a flat, useless line; spanning the whole
+    // history shows the real curve. `count_*_until` binds the cutoff as
+    // an RFC3339 parameter (never `datetime('now', …)`).
+    let (growth_labels, followers_over_time, following_over_time) = growth_series_monthly(now)?;
+
+    // Backfill phase drives the view's per-card loading states (a
+    // degenerate/empty card mid-backfill must read as "loading", not
+    // "done + empty").
+    let backfill = get_backfill_state()?;
+    let phase = backfill
+        .as_ref()
+        .map(|b| b.phase)
+        .unwrap_or(BackfillPhase::Pending);
 
     // Posts: pull the wider cadence window once, derive both the per-day
     // bars (last GROWTH_WINDOW_DAYS) and the [7][24] cadence grid from it.
@@ -830,12 +908,15 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
     let top_posts = list_top_posts(TOP_POSTS_LIMIT)?;
 
     Ok(AnalyticsData {
+        growth_labels,
         followers_over_time,
         following_over_time,
         posts_per_day,
         cadence,
         top_followers,
         top_posts,
+        backfill_phase_rank: phase.rank(),
+        backfill_complete: phase == BackfillPhase::Complete,
     })
 }
 
@@ -1222,6 +1303,38 @@ mod tests {
         assert_eq!(cells[2][14], 0.5);
         // An untouched cell stays 0.
         assert_eq!(cells[1][0], 0.0);
+    }
+
+    #[test]
+    fn month_cutoffs_spans_full_history_inclusive() {
+        let from = DateTime::parse_from_rfc3339("2024-09-25T15:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let to = DateTime::parse_from_rfc3339("2026-06-26T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let months = month_cutoffs(from, to);
+        // Sep 2024 .. Jun 2026 inclusive = 22 monthly samples.
+        assert_eq!(months.len(), 22);
+        assert_eq!(months.first().unwrap().0, "2024-09");
+        assert_eq!(months.last().unwrap().0, "2026-06");
+        // Each cutoff is the first instant of the month AFTER its label,
+        // so a `ts <= cutoff` count includes that whole labelled month.
+        let (label, cutoff) = &months[0];
+        assert_eq!(label, "2024-09");
+        assert_eq!(cutoff.to_rfc3339(), "2024-10-01T00:00:00+00:00");
+        // Cutoffs are strictly increasing.
+        assert!(months.windows(2).all(|w| w[0].1 < w[1].1));
+    }
+
+    #[test]
+    fn month_cutoffs_single_month() {
+        let t = DateTime::parse_from_rfc3339("2026-06-10T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let months = month_cutoffs(t, t);
+        assert_eq!(months.len(), 1);
+        assert_eq!(months[0].0, "2026-06");
     }
 
     #[test]
