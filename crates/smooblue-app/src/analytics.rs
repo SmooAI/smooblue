@@ -399,6 +399,73 @@ pub fn upsert_post_metric(p: &PostMetric) -> Result<()> {
     })
 }
 
+/// Posts whose first-party engagement has never been fetched
+/// (`engagement_fetched_at IS NULL`), newest first, bounded. Drives the
+/// resumable engagement refresh so the WHOLE post history gets real
+/// like/repost/reply counts (newest — most likely relevant — first).
+/// Returns `(rkey, uri)` pairs.
+pub fn list_posts_without_engagement(limit: i64) -> Result<Vec<(String, String)>> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT rkey, uri FROM post_metrics
+            WHERE engagement_fetched_at IS NULL
+            ORDER BY ts DESC
+            LIMIT ?1
+            "#,
+        )?;
+        let rows = stmt.query_map(params![limit], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    })
+}
+
+/// One engagement update: `(rkey, Some((likes, reposts, replies, quotes)))`
+/// or `(rkey, None)` when getPosts didn't return the post.
+pub type EngagementUpdate = (String, Option<(i64, i64, i64, i64)>);
+
+/// Apply a batch of engagement updates, stamping each post fetched. A
+/// `None` count means `getPosts` didn't return the post (deleted/blocked)
+/// — we still stamp `engagement_fetched_at` so it isn't retried forever.
+pub fn apply_engagement_batch(updates: &[EngagementUpdate]) -> Result<()> {
+    with_db(|conn| {
+        let now = Utc::now().to_rfc3339();
+        for (rkey, counts) in updates {
+            match counts {
+                Some((l, rp, re, q)) => conn.execute(
+                    r#"UPDATE post_metrics
+                       SET like_count = ?2, repost_count = ?3, reply_count = ?4,
+                           quote_count = ?5, engagement_fetched_at = ?6
+                       WHERE rkey = ?1"#,
+                    params![rkey, l, rp, re, q, now],
+                )?,
+                None => conn.execute(
+                    "UPDATE post_metrics SET engagement_fetched_at = ?2 WHERE rkey = ?1",
+                    params![rkey, now],
+                )?,
+            };
+        }
+        Ok(())
+    })
+}
+
+/// Count of posts still missing engagement — for completion logging.
+pub fn count_posts_without_engagement() -> Result<i64> {
+    with_db(|conn| {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM post_metrics WHERE engagement_fetched_at IS NULL",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n)
+    })
+}
+
 /// Upsert a follower clout row, keyed by `follower_did`. `tenure_bonus`
 /// is not persisted — it is recomputed at read and folded into
 /// `composite_score`.
@@ -660,6 +727,43 @@ pub fn list_top_posts(limit: i64) -> Result<Vec<PostMetric>> {
     })
 }
 
+/// Top posts by like count, descending, optionally windowed by `since`.
+/// `since = None` = all-time; `Some(dt)` filters to `ts >= dt` (an
+/// RFC3339 string compare against the stored RFC3339 `ts`, which sorts
+/// chronologically). The cutoff is a Rust-computed parameter — never
+/// `datetime('now', …)`. Static SQL is chosen by branch (no dynamic
+/// `ToSql` boxing) so clippy stays quiet.
+pub fn list_top_posts_since(since: Option<DateTime<Utc>>, limit: i64) -> Result<Vec<PostMetric>> {
+    match since {
+        Some(cutoff) => with_db(|conn| {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT rkey, uri, ts, like_count, repost_count, reply_count, quote_count, text_preview
+                FROM post_metrics
+                WHERE ts >= ?1
+                ORDER BY like_count DESC
+                LIMIT ?2
+                "#,
+            )?;
+            let rows = stmt.query_map(params![cutoff.to_rfc3339(), limit], row_to_post_metric)?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        }),
+        None => post_metrics_query(
+            r#"
+            SELECT rkey, uri, ts, like_count, repost_count, reply_count, quote_count, text_preview
+            FROM post_metrics
+            ORDER BY like_count DESC
+            LIMIT ?1
+            "#,
+            limit,
+        ),
+    }
+}
+
 /// Helper: run a `post_metrics` SELECT with a single `LIMIT` bind.
 fn post_metrics_query(sql: &str, limit: i64) -> Result<Vec<PostMetric>> {
     with_db(|conn| {
@@ -728,7 +832,11 @@ fn follower_stats_query(sql: &str, limit: i64) -> Result<Vec<FollowerStat>> {
     })
 }
 
-/// Your biggest fans — most inbox engagements, descending.
+/// Your biggest fans — engaged followers ranked by composite clout. A
+/// "fan" must have engaged at least once (`engagement_count > 0`); among
+/// those, the composite score (reach + engagement + mutual + tenure)
+/// decides the order, so a high-clout engaged mutual outranks a tiny
+/// account that engaged a few more times.
 pub fn list_top_fans(limit: i64) -> Result<Vec<FollowerStat>> {
     follower_stats_query(
         r#"
@@ -737,7 +845,8 @@ pub fn list_top_fans(limit: i64) -> Result<Vec<FollowerStat>> {
                mutual, first_followed_ts, reach_score, engagement_score, mutual_bonus,
                composite_score
         FROM follower_stats
-        ORDER BY engagement_count DESC, composite_score DESC
+        WHERE engagement_count > 0
+        ORDER BY composite_score DESC
         LIMIT ?1
         "#,
         limit,
@@ -1025,9 +1134,12 @@ const GROWTH_WINDOW_DAYS: i64 = 30;
 /// month is too sparse to reveal a weekly rhythm, so the heatmap reaches
 /// back a quarter.
 const CADENCE_WINDOW_DAYS: i64 = 90;
-/// How many rows the ranked follower / post lists show.
-const TOP_FOLLOWERS_LIMIT: i64 = 25;
+/// How many rows the ranked top-posts list shows in the compact column.
 const TOP_POSTS_LIMIT: i64 = 10;
+/// How many rows each compact-column follower list (Top fans / Top
+/// mutuals) carries. The column renders 5 by default and 25 expanded, so
+/// 10 keeps both within the fetched set without over-querying.
+const COLUMN_FOLLOWERS_LIMIT: i64 = 10;
 
 /// Roll the analytics tables into the view DTO the Analytics column
 /// renders. Pure store reads — no network — so it runs on a blocking
@@ -1073,11 +1185,12 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
         .map(|(label, value)| BarDatum { label, value })
         .collect();
 
-    // The compact column shows mutuals ranked by reach — your most
-    // influential mutual followers, which reads more clearly at a glance
-    // than the engagement-weighted "top fans" composite (that lens still
-    // lives in the pop-out). See the analytics view's column card.
-    let top_followers = list_mutuals_by_reach(TOP_FOLLOWERS_LIMIT)?;
+    // The compact column shows two follower cuts side by side: your most
+    // engaged fans (composite-ranked) and your highest-reach mutuals.
+    // Each carries COLUMN_FOLLOWERS_LIMIT rows so the column can render 5
+    // (default) or 25 (expanded) without over-querying.
+    let top_fans = list_top_fans(COLUMN_FOLLOWERS_LIMIT)?;
+    let top_mutuals = list_mutuals_by_reach(COLUMN_FOLLOWERS_LIMIT)?;
     let top_posts = list_top_posts(TOP_POSTS_LIMIT)?;
 
     Ok(AnalyticsData {
@@ -1086,7 +1199,8 @@ pub fn build_analytics_data() -> Result<crate::components::AnalyticsData> {
         following_over_time,
         posts_per_day,
         cadence,
-        top_followers,
+        top_fans,
+        top_mutuals,
         top_posts,
         backfill_phase_rank: phase.rank(),
         backfill_complete: phase == BackfillPhase::Complete,
@@ -1153,6 +1267,11 @@ pub fn build_expanded_analytics_data() -> Result<crate::components::ExpandedAnal
     let all_posts = list_all_post_metrics(ALL_POSTS_CAP)?;
     let engagement_monthly = bucket_engagement_monthly(&all_posts);
 
+    // Time-windowed top-post rankings (all like-ranked) for the pop-out's
+    // All time / Last year / Last month toggle.
+    let one_year_ago = now - Duration::days(365);
+    let one_month_ago = now - Duration::days(30);
+
     Ok(crate::components::ExpandedAnalyticsData {
         growth_labels: base.growth_labels,
         followers_over_time: base.followers_over_time,
@@ -1171,6 +1290,10 @@ pub fn build_expanded_analytics_data() -> Result<crate::components::ExpandedAnal
         top_posts_by_likes: list_top_posts(EXPANDED_POSTS_LIMIT)?,
         top_posts_by_reposts: list_top_posts_by_reposts(EXPANDED_POSTS_LIMIT)?,
         top_posts_by_replies: list_top_posts_by_replies(EXPANDED_POSTS_LIMIT)?,
+        top_posts_all_time: list_top_posts_since(None, EXPANDED_POSTS_LIMIT)?,
+        top_posts_last_year: list_top_posts_since(Some(one_year_ago), EXPANDED_POSTS_LIMIT)?,
+        top_posts_last_month: list_top_posts_since(Some(one_month_ago), EXPANDED_POSTS_LIMIT)?,
+        snapshot_count: snaps.len(),
     })
 }
 
@@ -1318,9 +1441,10 @@ mod tests {
                 )?;
                 assert_eq!(n, 1, "index {idx} must exist");
             }
-            // user_version must be the unified 5.
+            // user_version must be the unified 6 (v6 added
+            // post_metrics.engagement_fetched_at).
             let ver: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            assert_eq!(ver, 5);
+            assert_eq!(ver, 6);
             Ok(())
         })
         .expect("schema checks");
@@ -1416,7 +1540,7 @@ mod tests {
     fn follower_stat_roundtrip_and_ranked_cuts() {
         let _g = install_in_memory();
         let now = Utc::now();
-        let mk = |did: &str, followers: i64, eng: i64, mutual: bool| FollowerStat {
+        let mk = |did: &str, followers: i64, eng: i64, mutual: bool, composite: f64| FollowerStat {
             follower_did: did.into(),
             follower_handle: format!("{did}.bsky.social"),
             follower_display_name: Some(did.to_uppercase()),
@@ -1431,18 +1555,31 @@ mod tests {
             engagement_score: 0.4,
             mutual_bonus: if mutual { 0.15 } else { 0.0 },
             tenure_bonus: 0.0,
-            composite_score: 0.6,
+            composite_score: composite,
         };
-        let fan = mk("fan", 200, 25, true);
-        let whale = mk("whale", 100_000, 0, false);
-        let mutual_big = mk("mutualbig", 5_000, 3, true);
+        // `fan` engages a lot but has lower clout; `mutual_big` engages less
+        // but has the higher composite score → it ranks first now.
+        let fan = mk("fan", 200, 25, true, 0.6);
+        let whale = mk("whale", 100_000, 0, false, 0.9);
+        let mutual_big = mk("mutualbig", 5_000, 3, true, 0.8);
         upsert_follower_stat(&fan).unwrap();
         upsert_follower_stat(&whale).unwrap();
         upsert_follower_stat(&mutual_big).unwrap();
 
-        // round-trip identity (tenure_bonus is not persisted → 0.0).
+        // Top fans: engaged followers ranked by composite (whale excluded —
+        // zero engagement disqualifies it despite the highest composite).
         let fans = list_top_fans(10).unwrap();
-        assert_eq!(fans[0].follower_did, "fan", "most engagements first");
+        assert_eq!(fans.len(), 2, "zero-engagement whale excluded");
+        assert!(
+            !fans.iter().any(|f| f.follower_did == "whale"),
+            "whale never engaged"
+        );
+        assert_eq!(
+            fans[0].follower_did, "mutualbig",
+            "highest composite among engaged"
+        );
+        assert_eq!(fans[1].follower_did, "fan");
+        // round-trip identity (tenure_bonus is not persisted → 0.0).
         assert_eq!(fans[0].tenure_bonus, 0.0);
 
         let high = list_high_clout_not_mutual(10).unwrap();
@@ -1784,6 +1921,115 @@ mod tests {
     }
 
     #[test]
+    fn list_top_posts_since_windows_and_orders() {
+        let _g = install_in_memory();
+        let now = Utc::now();
+        // Three posts at known ages, distinct like counts.
+        let old = PostMetric {
+            rkey: "old".into(),
+            uri: "at://did:plc:me/app.bsky.feed.post/old".into(),
+            ts: now - Duration::days(400),
+            like_count: 100,
+            repost_count: 0,
+            reply_count: 0,
+            quote_count: 0,
+            text_preview: None,
+        };
+        let mid = PostMetric {
+            rkey: "mid".into(),
+            uri: "at://did:plc:me/app.bsky.feed.post/mid".into(),
+            ts: now - Duration::days(60),
+            like_count: 50,
+            repost_count: 0,
+            reply_count: 0,
+            quote_count: 0,
+            text_preview: None,
+        };
+        let fresh = PostMetric {
+            rkey: "fresh".into(),
+            uri: "at://did:plc:me/app.bsky.feed.post/fresh".into(),
+            ts: now - Duration::days(5),
+            like_count: 10,
+            repost_count: 0,
+            reply_count: 0,
+            quote_count: 0,
+            text_preview: None,
+        };
+        for p in [&old, &mid, &fresh] {
+            upsert_post_metric(p).unwrap();
+        }
+
+        // All-time: every post, like-ranked descending.
+        let all_time = list_top_posts_since(None, 10).unwrap();
+        assert_eq!(
+            all_time.iter().map(|p| p.rkey.clone()).collect::<Vec<_>>(),
+            vec!["old", "mid", "fresh"]
+        );
+
+        // Last year (365d): excludes the 400-day-old post.
+        let last_year = list_top_posts_since(Some(now - Duration::days(365)), 10).unwrap();
+        assert_eq!(
+            last_year.iter().map(|p| p.rkey.clone()).collect::<Vec<_>>(),
+            vec!["mid", "fresh"]
+        );
+
+        // Last month (30d): only the freshest post.
+        let last_month = list_top_posts_since(Some(now - Duration::days(30)), 10).unwrap();
+        assert_eq!(
+            last_month
+                .iter()
+                .map(|p| p.rkey.clone())
+                .collect::<Vec<_>>(),
+            vec!["fresh"]
+        );
+
+        // LIMIT is honored on both arms.
+        assert_eq!(list_top_posts_since(None, 1).unwrap().len(), 1);
+        assert_eq!(
+            list_top_posts_since(Some(now - Duration::days(365)), 1)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn list_top_fans_excludes_zero_engagement_and_orders_by_composite() {
+        let _g = install_in_memory();
+        let now = Utc::now();
+        let mk = |did: &str, eng: i64, composite: f64| FollowerStat {
+            follower_did: did.into(),
+            follower_handle: format!("{did}.bsky.social"),
+            follower_display_name: None,
+            follower_avatar: None,
+            followers_count: 1_000,
+            following_count: 100,
+            engagement_count: eng,
+            last_engagement_ts: if eng > 0 { Some(now) } else { None },
+            mutual: false,
+            first_followed_ts: now - Duration::days(30),
+            reach_score: 0.5,
+            engagement_score: 0.4,
+            mutual_bonus: 0.0,
+            tenure_bonus: 0.0,
+            composite_score: composite,
+        };
+        // `lurker` never engaged → excluded despite top composite.
+        upsert_follower_stat(&mk("lurker", 0, 0.99)).unwrap();
+        upsert_follower_stat(&mk("low", 5, 0.3)).unwrap();
+        upsert_follower_stat(&mk("high", 2, 0.8)).unwrap();
+
+        let fans = list_top_fans(10).unwrap();
+        assert_eq!(
+            fans.iter()
+                .map(|f| f.follower_did.clone())
+                .collect::<Vec<_>>(),
+            vec!["high", "low"],
+            "engaged only, composite-ranked descending"
+        );
+    }
+
+    #[test]
     fn build_expanded_analytics_data_smoke() {
         let _g = install_in_memory();
         let now = Utc::now();
@@ -1838,5 +2084,10 @@ mod tests {
         // mutual fan shows up in the mutual-reach lens.
         assert_eq!(data.mutuals_by_reach.len(), 1);
         assert_eq!(data.top_fans.len(), 1);
+        // time-windowed top posts: all-time has both; like-ranked.
+        assert_eq!(data.top_posts_all_time.len(), 2);
+        assert_eq!(data.top_posts_all_time[0].rkey, "p2", "p2 has more likes");
+        // snapshot_count reflects the single snapshot written above.
+        assert_eq!(data.snapshot_count, 1);
     }
 }

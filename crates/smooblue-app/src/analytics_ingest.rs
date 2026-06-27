@@ -24,8 +24,9 @@
 //!
 //!    - **posts** — `listRecords(app.bsky.feed.post)` on our own repo →
 //!      `post_metrics` (TID-dated). First-party engagement counts
-//!      (`getPosts`) are then fetched for the most-recent
-//!      [`ENGAGEMENT_POST_WINDOW`] posts only (v1 scope).
+//!      (`getPosts`) are then fetched for ALL posts (paginated 25/call,
+//!      idempotent, resumable — a transient `getPosts` error re-enters
+//!      the phase next cycle).
 //!    - **following** — `listRecords(app.bsky.graph.follow)` → outgoing
 //!      `follow_events` (we follow them).
 //!    - **followers** — Constellation `links(.subject)` → incoming
@@ -60,10 +61,6 @@ const BACKFILL_CHECK_INTERVAL_SECS: u64 = 60;
 
 /// Records per `listRecords` / Constellation `links` page (lexicon max).
 const PAGE_LIMIT: u32 = 100;
-
-/// v1: first-party engagement counts are fetched only for the most
-/// recent N own posts (full-history engagement is deferred).
-const ENGAGEMENT_POST_WINDOW: usize = 50;
 
 /// Cap on the cached `text_preview` per post — one line's worth.
 const PREVIEW_LEN: usize = 240;
@@ -165,6 +162,12 @@ async fn run_analytics_cycle(session: Signal<Option<Session>>) {
         }
         BackfillPhase::Complete => {}
     }
+
+    // Engagement refresh runs every cycle, independent of the phase
+    // machine, until every post's first-party engagement has been
+    // fetched — so "all-time top posts" reflects the full history, not
+    // just recently-fetched posts. A no-op once complete.
+    refresh_post_engagement(&client).await;
 }
 
 /// Advance the phase machine and checkpoint.
@@ -221,13 +224,10 @@ async fn write_daily_snapshot(client: &AtClient, my_did: &str) {
 // ───────────────────────────── posts phase ─────────────────────────
 
 /// Drain own `app.bsky.feed.post` records into `post_metrics`, then fetch
-/// first-party engagement for the most-recent [`ENGAGEMENT_POST_WINDOW`]
-/// posts. Returns `true` when the full history has been paged.
+/// first-party engagement for ALL posts (paginated 25/call). Returns
+/// `true` when the full history has been paged and engagement extracted.
 async fn backfill_posts(client: &AtClient, my_did: &str, state: &mut BackfillState) -> bool {
     let mut cursor = state.repo_posts_cursor.clone();
-    // (ts, uri) of every post seen — sorted at the end to pick the most
-    // recent N for engagement, independent of listRecords page order.
-    let mut seen: Vec<(DateTime<Utc>, String)> = Vec::new();
 
     loop {
         let resp = match client
@@ -265,7 +265,6 @@ async fn backfill_posts(client: &AtClient, my_did: &str, state: &mut BackfillSta
                 text_preview: text,
             };
             db(move || analytics::upsert_post_metric(&pm)).await;
-            seen.push((ts, rec.uri.clone()));
         }
         match resp.cursor {
             Some(c) => {
@@ -278,41 +277,61 @@ async fn backfill_posts(client: &AtClient, my_did: &str, state: &mut BackfillSta
         }
     }
 
-    // Engagement on the most-recent window only (v1 scope).
-    seen.sort_by_key(|(ts, _)| std::cmp::Reverse(*ts));
-    let recent_uris: Vec<String> = seen
-        .into_iter()
-        .take(ENGAGEMENT_POST_WINDOW)
-        .map(|(_, uri)| uri)
-        .collect();
-    if !recent_uris.is_empty() {
-        match client.get_posts(&recent_uris).await {
-            Ok(posts) => {
-                for pv in posts {
-                    let rkey = rkey_from_uri(&pv.uri);
-                    if rkey.is_empty() {
-                        continue;
-                    }
-                    let ts = tid::tid_to_datetime(rkey).unwrap_or_else(Utc::now);
-                    let pm = PostMetric {
-                        rkey: rkey.to_string(),
-                        uri: pv.uri.clone(),
-                        ts,
-                        like_count: pv.like_count,
-                        repost_count: pv.repost_count,
-                        reply_count: pv.reply_count,
-                        quote_count: pv.quote_count,
-                        text_preview: Some(truncate_preview(&pv.record.text)),
-                    };
-                    db(move || analytics::upsert_post_metric(&pm)).await;
-                }
-            }
-            Err(e) => crate::diag!("[analytics] getPosts(engagement) failed: {e}"),
-        }
-    }
-
+    // Engagement (like/repost/reply counts) is filled separately by the
+    // resumable `refresh_post_engagement` pass, which covers the WHOLE post
+    // history independent of this one-time phase machine.
     state.repo_posts_cursor = None;
     true
+}
+
+/// Resumable engagement refresh. Each cycle, fetch first-party engagement
+/// (`getPosts`, 25 uris/call) for up to `ENGAGEMENT_REFRESH_PER_CYCLE`
+/// posts never yet fetched (`engagement_fetched_at IS NULL`), newest
+/// first, and stamp them fetched. Runs independent of the backfill phase
+/// machine, so it fills engagement for the full post history even after
+/// backfill is `complete`. A no-op once every post has been stamped.
+async fn refresh_post_engagement(client: &AtClient) {
+    const ENGAGEMENT_REFRESH_PER_CYCLE: i64 = 1000;
+    const BATCH: usize = 25;
+    let posts =
+        match db(move || analytics::list_posts_without_engagement(ENGAGEMENT_REFRESH_PER_CYCLE))
+            .await
+        {
+            Some(p) if !p.is_empty() => p,
+            _ => return,
+        };
+    let mut updates: Vec<analytics::EngagementUpdate> = Vec::with_capacity(posts.len());
+    for chunk in posts.chunks(BATCH) {
+        let uris: Vec<String> = chunk.iter().map(|(_, u)| u.clone()).collect();
+        let by_uri: HashMap<String, (i64, i64, i64, i64)> = match client.get_posts(&uris).await {
+            Ok(pvs) => pvs
+                .into_iter()
+                .map(|pv| {
+                    (
+                        pv.uri.clone(),
+                        (
+                            pv.like_count,
+                            pv.repost_count,
+                            pv.reply_count,
+                            pv.quote_count,
+                        ),
+                    )
+                })
+                .collect(),
+            Err(e) => {
+                crate::diag!("[analytics] getPosts(engagement-refresh) batch failed: {e}");
+                HashMap::new()
+            }
+        };
+        for (rkey, uri) in chunk {
+            updates.push((rkey.clone(), by_uri.get(uri).copied()));
+        }
+    }
+    let n = updates.len();
+    db(move || analytics::apply_engagement_batch(&updates)).await;
+    if let Some(remaining) = db(analytics::count_posts_without_engagement).await {
+        crate::diag!("[analytics] engagement refresh: stamped {n} posts, {remaining} remaining");
+    }
 }
 
 // ──────────────────────────── following phase ──────────────────────
