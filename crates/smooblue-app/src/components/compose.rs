@@ -413,17 +413,20 @@ pub fn ComposeSheet() -> Element {
     });
 
     // Debounced link-card fetch. Watches the post text for the first
-    // URL; when it changes (and isn't dismissed) we fetch the card
-    // after a short pause. Clears the card when the URL disappears.
-    // Failures are silent — a post with a bare link is still fine,
-    // it just won't get a card.
+    // URL; when it changes (and isn't dismissed) we fetch the card after
+    // a short pause. Failures are silent — a post with a bare link is
+    // still fine, it just won't get a card.
+    //
+    // Once a card is attached it STAYS, even if the URL is later erased
+    // from the text — people routinely paste a link to get the embed,
+    // then delete the raw URL so only the card/quote shows. The card is
+    // removed only by the explicit dismiss (✕), send, or reset — never
+    // by the link leaving the text.
     use_effect(move || {
         let url = first_link_url(&text.read());
-        // Drop the card if the link is gone or the user dismissed it.
+        // No (non-dismissed) URL in the text: keep whatever card is
+        // already attached; there's nothing new to fetch.
         let Some(url) = url.filter(|u| !link_card_dismissed.read().contains(u)) else {
-            if link_card.peek().is_some() {
-                link_card.set(None);
-            }
             return;
         };
         // Already have (or are loading) this exact card — nothing to do.
