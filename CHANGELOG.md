@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.29.0
+
+### Minor Changes
+
+- [#86](https://github.com/SmooAI/smooblue/pull/86) [`1ea8b2b`](https://github.com/SmooAI/smooblue/commit/1ea8b2bd221dd7afa82d05b8fba989e9f0a98090) Thanks [@brentrager](https://github.com/brentrager)! - Analytics round 3 — column, pop-out layout, charts, and ranking improvements:
+
+  - **Column** now shows both **Top fans** and **Top mutuals** (top 10 each).
+  - **Top fans** are ranked among people who actually engage with you, by overall clout — so a high-volume but low-quality follower no longer tops the list.
+  - **Pop-out** is reorganized into two independent columns (no more vertical gaps), with **Top posts moved into the charts column**, and the follower lenses ordered Top Fans → Mutuals by Reach → High Clout → Lurkers.
+  - **Growth chart** gains a y-axis scale, x-axis date labels, and **working hover tooltips** with a guide line; the confusing "Net followers" overlay now stays hidden until there's a meaningful week of daily snapshots.
+  - **Top posts** gain an **All time / Last year / Last month** time-range toggle.
+  - **Engagement** now backfills across your whole post history (not just recent posts), so "all-time top posts" and the engagement-over-time chart reflect everything — it fills in over a few minutes of use.
+
+### Patch Changes
+
+- [#87](https://github.com/SmooAI/smooblue/pull/87) [`4bd0948`](https://github.com/SmooAI/smooblue/commit/4bd09489672c4136135d337988fef5d25d2d3c38) Thanks [@brentrager](https://github.com/brentrager)! - Erasing a link from a post no longer deletes its embed. Paste a URL (or a link to another post), let the preview card / quote attach, then delete the raw URL from the text — the card now stays, so you can post just the embed without the bare link. It's removed only by the card's ✕, sending, or clearing the draft.
+
 ## 1.28.2
 
 ### Patch Changes
