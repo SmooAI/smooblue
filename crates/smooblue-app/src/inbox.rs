@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 
 /// Hour-bucket granularity, in seconds. The sort uses
 /// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
@@ -407,6 +407,18 @@ fn migrate(conn: &Connection) -> Result<()> {
         // per-file value, so analytics shares this version scheme rather
         // than gating on its own and corrupting the migration ratchet).
         crate::analytics::create_tables_v5(conn)?;
+    }
+    if current < 6 {
+        // v6: mark which posts have had their first-party engagement
+        // fetched (NULL = never). Lets a resumable background refresh fill
+        // engagement for the WHOLE post history independent of the
+        // (already-complete) backfill phase machine — without it, only
+        // recently-fetched posts have real like/repost/reply counts, so
+        // "all-time top posts" only ever surfaced recent posts.
+        conn.execute(
+            "ALTER TABLE post_metrics ADD COLUMN engagement_fetched_at TEXT",
+            [],
+        )?;
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
