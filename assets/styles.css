@@ -5286,43 +5286,52 @@ a {
 }
 
 /* ───────────────── pop-out deep-dive (ExpandedAnalyticsView) ────────────
- * Two-column page: charts stack in the left (wider) column, follower-lens
- * cards stack in the right column. The summary header spans full width.
- * Grid auto-placement fills the earliest free row per explicit column, so
- * charts (col 1) and lenses (col 2) interleave by row without manual rows. */
+ * Vertical stack: the summary header on top, a two-column `.analytics__body`
+ * (charts in the wider main column, follower-lens cards in the side column),
+ * then a full-width Top-posts section below. The two-column split now lives
+ * in `.analytics__body` (flex) rather than on the deep-dive grid, so the
+ * charts pack tightly without their rows being coupled to the lens cards. */
 .analytics__deepdive {
-    display: grid;
-    /* minmax(0, …) lets the columns shrink below their content's
-     * intrinsic width so the follower rows truncate instead of forcing
-     * horizontal overflow (verified against the running app). `dense`
-     * pulls the right-column lens cards up beside the charts instead of
-     * leaving the whole right side empty until the charts run out. */
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-    grid-auto-flow: row dense;
+    display: flex;
+    flex-direction: column;
     gap: var(--space-4, 16px);
-    align-items: start;
 }
 
-.analytics__deepdive > .analytics__section {
-    grid-column: 1;
+.analytics__body {
+    display: flex;
+    gap: var(--space-4, 16px);
+    align-items: flex-start;
 }
 
-.analytics__deepdive > .analytics__header-grid {
-    grid-column: 1 / -1;
+/* minmax/min-width:0 lets columns shrink below their content's intrinsic
+ * width so follower rows truncate instead of forcing horizontal overflow. */
+.analytics__col-main {
+    flex: 1 1 60%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4, 16px);
 }
 
-.analytics__deepdive > .analytics__lens-card {
-    grid-column: 2;
+.analytics__col-side {
+    flex: 1 1 40%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4, 16px);
 }
 
-@media (max-width: 700px) {
-    .analytics__deepdive {
-        grid-template-columns: 1fr;
+.analytics__section--full {
+    width: 100%;
+}
+
+@media (max-width: 900px) {
+    .analytics__body {
+        flex-direction: column;
     }
-    .analytics__deepdive > .analytics__section,
-    .analytics__deepdive > .analytics__lens-card,
-    .analytics__deepdive > .analytics__header-grid {
-        grid-column: 1;
+    .analytics__col-main,
+    .analytics__col-side {
+        flex: 1 1 100%;
     }
 }
 
@@ -5446,6 +5455,99 @@ a {
     background: var(--color-smooai-blue-400, #3b82f6);
     border-color: var(--color-smooai-blue-400, #3b82f6);
     color: #fff;
+}
+
+/* Top-posts time-range segmented control (All time / Last year / Last month). */
+.analytics__time-range {
+    display: flex;
+    gap: 4px;
+    margin-bottom: var(--space-3, 12px);
+}
+
+.analytics__time-range-btn {
+    font-size: calc(11px * var(--font-scale, 1));
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--muted-foreground);
+    cursor: pointer;
+}
+
+.analytics__time-range-btn--active {
+    background: var(--color-smooai-blue-400, #3b82f6);
+    border-color: var(--color-smooai-blue-400, #3b82f6);
+    color: #fff;
+}
+
+/* ── Interactive line-chart hover (hit rects + guide + tooltip) ── */
+.analytics__chart-wrap {
+    position: relative;
+    width: 100%;
+}
+
+/* In-SVG y/x axis tick labels. */
+.analytics__axis-label {
+    fill: var(--muted-foreground);
+    font-size: 8px;
+}
+
+/* Full-height transparent hover targets, one per data slot. */
+.analytics__chart-hit {
+    cursor: crosshair;
+}
+
+/* Vertical guide line under the hovered column. */
+.analytics__chart-guide {
+    stroke: var(--border);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+    pointer-events: none;
+}
+
+/* Enlarged marker for the hovered index — always fully opaque (overrides
+ * the resting `.analytics__point { opacity: 0 }`). */
+.analytics__point--hovered {
+    opacity: 1 !important;
+    pointer-events: none;
+}
+
+/* HTML tooltip floating over the hovered column. */
+.analytics__chart-tooltip {
+    position: absolute;
+    top: 4px;
+    transform: translateX(-50%);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: var(--foreground);
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 10;
+    pointer-events: none;
+}
+
+.analytics__tooltip-label {
+    font-weight: 600;
+    color: var(--muted-foreground);
+    margin-bottom: 4px;
+}
+
+.analytics__tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.analytics__tooltip-name {
+    color: var(--muted-foreground);
+}
+
+.analytics__tooltip-value {
+    font-weight: 600;
+    color: var(--foreground);
 }
 
 /* Click-through top-post rows. */

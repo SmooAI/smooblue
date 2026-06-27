@@ -51,8 +51,10 @@ pub struct AnalyticsData {
     pub posts_per_day: Vec<BarDatum>,
     /// `[7][24]` (weekday × hour) posting cadence, normalized `0.0..=1.0`.
     pub cadence: Vec<Vec<f64>>,
-    /// Ranked follower cut (best fans first).
-    pub top_followers: Vec<FollowerStat>,
+    /// Your most engaged fans (composite-ranked), `list_top_fans`.
+    pub top_fans: Vec<FollowerStat>,
+    /// Your highest-reach mutuals, `list_mutuals_by_reach`.
+    pub top_mutuals: Vec<FollowerStat>,
     /// Top own posts by like count.
     pub top_posts: Vec<PostMetric>,
     /// [`crate::analytics::BackfillPhase::rank`] of the backfill machine
@@ -123,6 +125,15 @@ pub struct ExpandedAnalyticsData {
     pub top_posts_by_likes: Vec<PostMetric>,
     pub top_posts_by_reposts: Vec<PostMetric>,
     pub top_posts_by_replies: Vec<PostMetric>,
+    /// Like-ranked top posts across all of history.
+    pub top_posts_all_time: Vec<PostMetric>,
+    /// Like-ranked top posts from the last 365 days.
+    pub top_posts_last_year: Vec<PostMetric>,
+    /// Like-ranked top posts from the last 30 days.
+    pub top_posts_last_month: Vec<PostMetric>,
+    /// Number of daily snapshots captured — gates the exact net-followers
+    /// overlay (needs `>= 2` to draw a meaningful line).
+    pub snapshot_count: usize,
 }
 
 /// Backfill-phase ranks (mirror of [`crate::analytics::BackfillPhase::rank`])
@@ -183,6 +194,50 @@ pub fn bar_height(value: f64, max: f64, chart_h: f64) -> f64 {
         return 0.0;
     }
     (value / max) * chart_h
+}
+
+/// Evenly-spaced y-axis tick *values* across `[min, max]` — `count`
+/// inclusive samples (e.g. `count = 3` → `[min, mid, max]`). A flat range
+/// (`min == max`, or an inverted/degenerate `count`) collapses to a single
+/// `[min]` tick so the axis never emits `NaN` or duplicate labels.
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn y_axis_ticks(min: f64, max: f64, count: usize) -> Vec<f64> {
+    if max <= min || count < 2 {
+        return vec![min];
+    }
+    let step = (max - min) / (count - 1) as f64;
+    (0..count).map(|i| min + step * i as f64).collect()
+}
+
+/// Indices into a `len`-length label vector to actually render — about
+/// `target` evenly-spaced labels, always anchored on the first and last
+/// index so the axis reads from the real start/end. Returns every index
+/// when `len <= target` (nothing to subsample) and `[]` for an empty
+/// label set. Indices are unique and ascending.
+///
+/// Pure — no IO — so it's directly unit-testable.
+pub fn x_axis_label_indices(len: usize, target: usize) -> Vec<usize> {
+    if len == 0 {
+        return Vec::new();
+    }
+    if target <= 1 {
+        return vec![0];
+    }
+    if len <= target {
+        return (0..len).collect();
+    }
+    // Spread `target` picks across [0, len-1] inclusive, deduping any
+    // rounding collisions so two picks never land on the same index.
+    let last = (len - 1) as f64;
+    let mut out: Vec<usize> = Vec::with_capacity(target);
+    for i in 0..target {
+        let idx = (i as f64 / (target - 1) as f64 * last).round() as usize;
+        if out.last() != Some(&idx) {
+            out.push(idx);
+        }
+    }
+    out
 }
 
 /// Build the three engagement-over-time line series (likes / reposts /
@@ -337,7 +392,7 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
     let followers_pending = !complete
         && data.backfill_phase_rank < PHASE_FOLLOWERS
         && data.followers_over_time.iter().all(|&v| v == 0.0);
-    let followers_loading = !complete && data.top_followers.is_empty();
+    let followers_loading = !complete && data.top_fans.is_empty() && data.top_mutuals.is_empty();
     let posts_ranking_loading = !complete && data.backfill_phase_rank < PHASE_ENGAGEMENT;
 
     let growth_caption = if followers_pending {
@@ -345,7 +400,7 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
     } else {
         "Followers reconstructed from public follow records (~94% coverage); exact net counts accrue forward daily."
     };
-    let (followers_n, posts_n) = if expanded { (25, 25) } else { (5, 5) };
+    let (followers_n, posts_n) = if expanded { (25, 25) } else { (10, 5) };
 
     rsx! {
         div { class: if expanded { "analytics analytics--expanded" } else { "analytics" },
@@ -385,10 +440,16 @@ pub fn AnalyticsView(data: AnalyticsData, #[props(default)] expanded: bool) -> E
                 CadenceHeatmap { cells: data.cadence.clone() }
             }
 
+            // ── Top fans ── (engaged followers, composite-ranked)
+            section { class: "analytics__section",
+                h3 { class: "analytics__title", "Top fans" }
+                TopFollowersList { followers: data.top_fans.clone(), loading: followers_loading, limit: followers_n }
+            }
+
             // ── Top mutuals ── (mutual followers ranked by their reach)
             section { class: "analytics__section",
                 h3 { class: "analytics__title", "Top mutuals" }
-                TopFollowersList { followers: data.top_followers.clone(), loading: followers_loading, limit: followers_n }
+                TopFollowersList { followers: data.top_mutuals.clone(), loading: followers_loading, limit: followers_n }
             }
 
             // ── Top posts ──
@@ -464,6 +525,16 @@ enum MetricSortBy {
     Replies,
 }
 
+/// Which time window the [`TopPostsExpanded`] segmented control is showing.
+/// `AllTime` keeps the per-metric (likes/reposts/replies) toggle live; the
+/// two bounded windows are like-ranked only and hide the metric toggle.
+#[derive(Clone, Copy, PartialEq)]
+enum TimeRange {
+    AllTime,
+    LastYear,
+    LastMonth,
+}
+
 /// Full deep-dive layout rendered inside the pop-out modal. A superset of
 /// [`AnalyticsView`]: reuses the same `LineChart` / `BarChart` /
 /// `CadenceHeatmap` / `TopFollowersList` primitives but adds the summary
@@ -479,10 +550,20 @@ pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
     let posts_loading = !complete && rank < PHASE_ENGAGEMENT;
     let followers_loading = !complete && rank < PHASE_FOLLOWERS;
 
+    // Net-followers overlay only draws meaningfully once at least two
+    // daily snapshots exist (one point is a flat dot, not a trend). When
+    // gated off, the Net series is dropped from the growth vec entirely so
+    // LineChart never sees it — and the legend / caption adapt to match.
+    // Hold the "net followers" overlay until ~a week of daily snapshots
+    // exists — a 2-point line over a multi-year x-axis just reads as a
+    // flat, confusing artifact (and "Net 0" for every pre-snapshot month).
+    let has_net = data.snapshot_count >= 7;
+
     // Growth: reconstructed followers + following, plus the snapshot-sourced
     // net-followers overlay as a third, dashed/gray series (CSS-only — no
-    // LineChart change). The overlay is index-aligned to growth_labels.
-    let growth = vec![
+    // LineChart change), pushed only when the gate is open. The overlay is
+    // index-aligned to growth_labels.
+    let mut growth = vec![
         ChartSeries {
             label: "Followers".into(),
             values: data.followers_over_time.clone(),
@@ -493,129 +574,154 @@ pub fn ExpandedAnalyticsView(data: ExpandedAnalyticsData) -> Element {
             values: data.following_over_time.clone(),
             class: "analytics__line--following".into(),
         },
-        ChartSeries {
+    ];
+    if has_net {
+        growth.push(ChartSeries {
             label: "Net".into(),
             values: data.net_followers_by_month.clone(),
             class: "analytics__line--net".into(),
-        },
-    ];
+        });
+    }
     let engagement = engagement_series(&data.engagement_monthly);
+    // Month labels for the engagement chart's x-axis + hover tooltip.
+    let engagement_labels: Vec<String> = data
+        .engagement_monthly
+        .iter()
+        .map(|m| m.month.clone())
+        .collect();
+
+    let growth_caption = if has_net {
+        "Solid lines are reconstructed from public follow records (~94% coverage). The dashed gray line is exact net followers from daily snapshots."
+    } else {
+        "Solid lines reconstructed from public follow records (~94% coverage). Daily snapshots begin accruing for exact net-follower tracking."
+    };
 
     rsx! {
         div { class: "analytics analytics__deepdive",
             SummaryStatsHeader { stats: data.summary.clone() }
 
-            // ── Growth (followers / following / net overlay) ──
-            section { class: "analytics__section",
-                h3 { class: "analytics__title", "Growth" }
-                if growth_loading {
-                    div { class: "analytics__loading",
-                        span { class: "analytics__spinner" }
-                        "Reconstructing your follow history…"
+            // ── Two-column body: charts (main) + follower lenses (side) ──
+            div { class: "analytics__body",
+                div { class: "analytics__col-main",
+                    // ── Growth (followers / following / optional net overlay) ──
+                    section { class: "analytics__section",
+                        h3 { class: "analytics__title", "Growth" }
+                        if growth_loading {
+                            div { class: "analytics__loading",
+                                span { class: "analytics__spinner" }
+                                "Reconstructing your follow history…"
+                            }
+                        } else {
+                            LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true, point_labels: data.growth_labels.clone() }
+                            div { class: "analytics__legend",
+                                span { class: "analytics__legend-item",
+                                    span { class: "analytics__swatch analytics__swatch--followers" }
+                                    "Followers"
+                                }
+                                span { class: "analytics__legend-item",
+                                    span { class: "analytics__swatch analytics__swatch--following" }
+                                    "Following"
+                                }
+                                if has_net {
+                                    span { class: "analytics__legend-item",
+                                        span { class: "analytics__swatch analytics__swatch--net" }
+                                        "Net followers (measured daily)"
+                                    }
+                                }
+                            }
+                            p { class: "analytics__note", "{growth_caption}" }
+                        }
                     }
-                } else {
-                    LineChart { series: growth, width: LINE_W, height: LINE_H, show_area: true, point_labels: data.growth_labels.clone() }
-                    div { class: "analytics__legend",
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--followers" }
-                            "Followers"
-                        }
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--following" }
-                            "Following"
-                        }
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--net" }
-                            "Net (snapshots)"
+
+                    // ── Posting volume ──
+                    section { class: "analytics__section",
+                        h3 { class: "analytics__title", "Posts per day" }
+                        BarChart { bars: data.posts_per_day.clone(), max_value: None }
+                    }
+
+                    // ── Posting cadence ──
+                    section { class: "analytics__section",
+                        h3 { class: "analytics__title", "Posting cadence" }
+                        CadenceHeatmap { cells: data.cadence.clone() }
+                    }
+
+                    // ── Engagement over time ──
+                    section { class: "analytics__section",
+                        h3 { class: "analytics__title", "Engagement over time" }
+                        if engagement_loading {
+                            div { class: "analytics__loading",
+                                span { class: "analytics__spinner" }
+                                "Charting engagement once the backfill finishes…"
+                            }
+                        } else {
+                            LineChart { series: engagement, width: LINE_W, height: LINE_H, show_area: false, point_labels: engagement_labels }
+                            div { class: "analytics__legend",
+                                span { class: "analytics__legend-item",
+                                    span { class: "analytics__swatch analytics__swatch--likes" }
+                                    "Likes"
+                                }
+                                span { class: "analytics__legend-item",
+                                    span { class: "analytics__swatch analytics__swatch--reposts" }
+                                    "Reposts"
+                                }
+                                span { class: "analytics__legend-item",
+                                    span { class: "analytics__swatch analytics__swatch--replies" }
+                                    "Replies"
+                                }
+                            }
                         }
                     }
-                    p { class: "analytics__note",
-                        "Solid lines are reconstructed from public follow records (~94% coverage). The dashed gray line is exact net followers from daily snapshots — flat before snapshots began."
+                    // ── Top posts: lives in the charts column (chart-width)
+                    // so it fills the left-column whitespace next to the
+                    // tall follower-lens stack, rather than full-width below. ──
+                    section { class: "analytics__section",
+                        h3 { class: "analytics__title", "Top posts" }
+                        TopPostsExpanded {
+                            all_time: data.top_posts_all_time.clone(),
+                            last_year: data.top_posts_last_year.clone(),
+                            last_month: data.top_posts_last_month.clone(),
+                            by_likes: data.top_posts_by_likes.clone(),
+                            by_reposts: data.top_posts_by_reposts.clone(),
+                            by_replies: data.top_posts_by_replies.clone(),
+                            loading: posts_loading,
+                            limit: 25,
+                        }
                     }
                 }
-            }
 
-            // ── Posting volume ──
-            section { class: "analytics__section",
-                h3 { class: "analytics__title", "Posts per day" }
-                BarChart { bars: data.posts_per_day.clone(), max_value: None }
-            }
-
-            // ── Posting cadence ──
-            section { class: "analytics__section",
-                h3 { class: "analytics__title", "Posting cadence" }
-                CadenceHeatmap { cells: data.cadence.clone() }
-            }
-
-            // ── Engagement over time ──
-            section { class: "analytics__section",
-                h3 { class: "analytics__title", "Engagement over time" }
-                if engagement_loading {
-                    div { class: "analytics__loading",
-                        span { class: "analytics__spinner" }
-                        "Charting engagement once the backfill finishes…"
+                // ── Follower lenses ── Ordered most-useful-first:
+                // your engaged fans, influential mutuals, high-reach
+                // accounts you could follow back, then silent reach.
+                div { class: "analytics__col-side",
+                    FollowerLensCard {
+                        title: "Top Fans",
+                        subtitle: "Engage with you most (replies, mentions, quotes)",
+                        followers: data.top_fans.clone(),
+                        loading: followers_loading,
+                        limit: 50,
                     }
-                } else {
-                    LineChart { series: engagement, width: LINE_W, height: LINE_H, show_area: false }
-                    div { class: "analytics__legend",
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--likes" }
-                            "Likes"
-                        }
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--reposts" }
-                            "Reposts"
-                        }
-                        span { class: "analytics__legend-item",
-                            span { class: "analytics__swatch analytics__swatch--replies" }
-                            "Replies"
-                        }
+                    FollowerLensCard {
+                        title: "Mutuals by Reach",
+                        subtitle: "Your most influential mutual followers",
+                        followers: data.mutuals_by_reach.clone(),
+                        loading: followers_loading,
+                        limit: 50,
+                    }
+                    FollowerLensCard {
+                        title: "High Clout (Not Mutual)",
+                        subtitle: "High reach, you don't follow back",
+                        followers: data.high_clout_not_mutual.clone(),
+                        loading: followers_loading,
+                        limit: 50,
+                    }
+                    FollowerLensCard {
+                        title: "Lurkers with Clout",
+                        subtitle: "Silent high-reach followers",
+                        followers: data.lurkers_by_clout.clone(),
+                        loading: followers_loading,
+                        limit: 50,
                     }
                 }
-            }
-
-            // ── Top posts (per-metric ranking + click-through) ──
-            section { class: "analytics__section",
-                h3 { class: "analytics__title", "Top posts" }
-                TopPostsExpanded {
-                    by_likes: data.top_posts_by_likes.clone(),
-                    by_reposts: data.top_posts_by_reposts.clone(),
-                    by_replies: data.top_posts_by_replies.clone(),
-                    loading: posts_loading,
-                    limit: 25,
-                }
-            }
-
-            // ── Follower lenses ── Ordered most-useful-first: your
-            // influential mutuals, then high-reach accounts you could
-            // follow back, then who engages most, then silent reach.
-            FollowerLensCard {
-                title: "Mutuals by Reach",
-                subtitle: "Your most influential mutual followers",
-                followers: data.mutuals_by_reach.clone(),
-                loading: followers_loading,
-                limit: 50,
-            }
-            FollowerLensCard {
-                title: "High Clout (Not Mutual)",
-                subtitle: "High reach, you don't follow back",
-                followers: data.high_clout_not_mutual.clone(),
-                loading: followers_loading,
-                limit: 50,
-            }
-            FollowerLensCard {
-                title: "Top Fans",
-                subtitle: "Engage with you most (replies, mentions, quotes)",
-                followers: data.top_fans.clone(),
-                loading: followers_loading,
-                limit: 50,
-            }
-            FollowerLensCard {
-                title: "Lurkers with Clout",
-                subtitle: "Silent high-reach followers",
-                followers: data.lurkers_by_clout.clone(),
-                loading: followers_loading,
-                limit: 50,
             }
         }
     }
@@ -669,17 +775,24 @@ fn SummaryStatsHeader(stats: SummaryStats) -> Element {
     }
 }
 
-/// Top posts with a likes/reposts/replies toggle. Each toggle swaps in a
-/// pre-ranked vec (no client-side re-sort) and each row is click-through:
-/// it focuses the post's thread in the main column and closes the pop-out.
+/// Top posts with a time-range segmented control (All time / Last year /
+/// Last month) and — in All-time mode only — a likes/reposts/replies
+/// metric toggle. The bounded windows are like-ranked store cuts; the
+/// All-time view swaps between the three pre-ranked metric vecs (no
+/// client-side re-sort). Each row is click-through: it focuses the post's
+/// thread in the main column and closes the pop-out.
 #[component]
 fn TopPostsExpanded(
+    all_time: Vec<PostMetric>,
+    last_year: Vec<PostMetric>,
+    last_month: Vec<PostMetric>,
     by_likes: Vec<PostMetric>,
     by_reposts: Vec<PostMetric>,
     by_replies: Vec<PostMetric>,
     loading: bool,
     limit: usize,
 ) -> Element {
+    let mut time_range = use_signal(|| TimeRange::AllTime);
     let mut sort_by = use_signal(|| MetricSortBy::Likes);
     let mut thread_focus = use_context::<Signal<crate::state::ThreadFocus>>();
     let mut expanded = use_context::<Signal<crate::state::AnalyticsExpanded>>();
@@ -695,25 +808,53 @@ fn TopPostsExpanded(
         };
     }
 
-    let rows = match sort_by() {
-        MetricSortBy::Likes => &by_likes,
-        MetricSortBy::Reposts => &by_reposts,
-        MetricSortBy::Replies => &by_replies,
+    let range = time_range();
+    let show_metric_toggle = range == TimeRange::AllTime;
+    // All-time honors the metric toggle (swapping the pre-ranked vec);
+    // the bounded windows are like-ranked store cuts. `all_time` ==
+    // `by_likes`, so All-time/Likes reuses the metric vec directly.
+    let rows = match range {
+        TimeRange::AllTime => match sort_by() {
+            MetricSortBy::Likes => &by_likes,
+            MetricSortBy::Reposts => &by_reposts,
+            MetricSortBy::Replies => &by_replies,
+        },
+        TimeRange::LastYear => &last_year,
+        TimeRange::LastMonth => &last_month,
     };
+    // Silence the unused-binding lint for the all-time-only alias while
+    // keeping the explicit prop in the signature.
+    let _ = &all_time;
     let shown = rows.len().min(limit);
 
     rsx! {
-        div { class: "analytics__metric-toggle",
+        div { class: "analytics__time-range",
             for (variant , label) in [
-                (MetricSortBy::Likes, "Likes"),
-                (MetricSortBy::Reposts, "Reposts"),
-                (MetricSortBy::Replies, "Replies"),
+                (TimeRange::AllTime, "All time"),
+                (TimeRange::LastYear, "Last year"),
+                (TimeRange::LastMonth, "Last month"),
             ] {
                 button {
                     key: "{label}",
-                    class: if sort_by() == variant { "analytics__metric-toggle-btn analytics__metric-toggle-btn--active" } else { "analytics__metric-toggle-btn" },
-                    onclick: move |_| sort_by.set(variant),
+                    class: if range == variant { "analytics__time-range-btn analytics__time-range-btn--active" } else { "analytics__time-range-btn" },
+                    onclick: move |_| time_range.set(variant),
                     "{label}"
+                }
+            }
+        }
+        if show_metric_toggle {
+            div { class: "analytics__metric-toggle",
+                for (variant , label) in [
+                    (MetricSortBy::Likes, "Likes"),
+                    (MetricSortBy::Reposts, "Reposts"),
+                    (MetricSortBy::Replies, "Replies"),
+                ] {
+                    button {
+                        key: "{label}",
+                        class: if sort_by() == variant { "analytics__metric-toggle-btn analytics__metric-toggle-btn--active" } else { "analytics__metric-toggle-btn" },
+                        onclick: move |_| sort_by.set(variant),
+                        "{label}"
+                    }
                 }
             }
         }
@@ -776,25 +917,35 @@ fn FollowerLensCard(
 
 // ─────────────────────────── line chart ────────────────────────────
 
-/// Per-point hover-tooltip prefix: the x-axis label at index `i` (e.g.
-/// the growth month), with a separator, or empty when no labels are
-/// supplied or the index is out of range.
-fn point_tip_prefix(labels: &[String], i: usize) -> String {
-    labels.get(i).map(|l| format!("{l} · ")).unwrap_or_default()
-}
-
+/// Interactive multi-series line chart. Reusable for Growth (followers /
+/// following / optional net overlay) and Engagement (likes / reposts /
+/// replies). Beyond the polylines it renders:
+///
+/// - a y-axis scale (3 evenly-spaced tick labels via [`y_axis_ticks`]),
+/// - x-axis labels subsampled from `point_labels` via [`x_axis_label_indices`],
+/// - full-height transparent **hit rects** (one per data slot) that drive
+///   a `hover_index` signal, so hovering anywhere in a column registers,
+/// - on hover: a vertical **guide line**, **enlarged markers** at that
+///   index for every series, and an HTML **tooltip** (label + per-series
+///   value) positioned over the hovered column.
+///
+/// The overlay/net series is the caller's concern — `LineChart` is
+/// overlay-agnostic and just renders whatever series it's handed.
 #[component]
 fn LineChart(
     series: Vec<ChartSeries>,
     width: f64,
     height: f64,
     show_area: bool,
-    /// Optional x-axis labels (one per data point) surfaced in the
-    /// per-point hover tooltip. Empty = value-only tooltips.
+    /// Optional x-axis labels (one per data point) — drives both the
+    /// x-axis tick labels and the hover tooltip's header. Empty = no
+    /// x-axis labels / a value-only tooltip.
     #[props(default)]
     point_labels: Vec<String>,
 ) -> Element {
-    // Shared y-scale across every series so the two curves are directly
+    let mut hover_index = use_signal::<Option<usize>>(|| None);
+
+    // Shared y-scale across every series so the curves are directly
     // comparable. Floor the range at the data extent; if there's no
     // data (or one flat value) the helpers fall back to the baseline.
     let all: Vec<f64> = series
@@ -810,61 +961,150 @@ fn LineChart(
     let max = all.iter().copied().fold(f64::MIN, f64::max);
     let min = all.iter().copied().fold(f64::MAX, f64::min);
 
+    // One hover "slot" per data point across the widest series.
+    let n = series.iter().map(|s| s.values.len()).max().unwrap_or(0);
+    let slot_w = if n > 0 {
+        (width - 2.0 * CHART_PADDING) / n as f64
+    } else {
+        width
+    };
+
     // Three horizontal gridlines (top / mid / baseline) for reference.
     let grid_ys: Vec<f64> = (0..=2)
         .map(|i| CHART_PADDING + i as f64 * (height - 2.0 * CHART_PADDING) / 2.0)
         .collect();
     let base_y = height - CHART_PADDING;
 
+    let y_ticks = y_axis_ticks(min, max, 3);
+    let x_label_idxs = x_axis_label_indices(point_labels.len(), 6);
+    let hovered = hover_index();
+
     rsx! {
-        svg {
-            class: "analytics__chart",
-            width: "100%",
-            view_box: "0 0 {width} {height}",
-            preserve_aspect_ratio: "none",
-            role: "img",
-            for (gi , gy) in grid_ys.iter().enumerate() {
-                line {
-                    key: "grid-{gi}",
-                    class: "analytics__grid-line",
-                    x1: "{CHART_PADDING}",
-                    y1: "{gy}",
-                    x2: "{width - CHART_PADDING}",
-                    y2: "{gy}",
+        div { class: "analytics__chart-wrap", onmouseleave: move |_| hover_index.set(None),
+            svg {
+                class: "analytics__chart",
+                width: "100%",
+                view_box: "0 0 {width} {height}",
+                role: "img",
+                // Reference gridlines.
+                for (gi , gy) in grid_ys.iter().enumerate() {
+                    line {
+                        key: "grid-{gi}",
+                        class: "analytics__grid-line",
+                        x1: "{CHART_PADDING}",
+                        y1: "{gy}",
+                        x2: "{width - CHART_PADDING}",
+                        y2: "{gy}",
+                    }
+                }
+                // Y-axis scale labels (value at each tick).
+                for (ti , tv) in y_ticks.iter().enumerate() {
+                    text {
+                        key: "yt-{ti}",
+                        class: "analytics__axis-label",
+                        x: "2",
+                        y: "{line_y(*tv, min, max, height, CHART_PADDING):.2}",
+                        text_anchor: "start",
+                        dominant_baseline: "middle",
+                        "{*tv as i64}"
+                    }
+                }
+                // X-axis labels, subsampled to ~6 evenly-spaced points.
+                for idx in x_label_idxs.iter() {
+                    if let Some(label) = point_labels.get(*idx) {
+                        text {
+                            key: "xt-{idx}",
+                            class: "analytics__axis-label",
+                            x: "{line_x(*idx, n, width, CHART_PADDING):.2}",
+                            y: "{height - 2.0}",
+                            text_anchor: "middle",
+                            dominant_baseline: "hanging",
+                            "{label}"
+                        }
+                    }
+                }
+                // Series areas + polylines.
+                for s in series.iter() {
+                    if s.values.len() >= 2 {
+                        {
+                            let pts = polyline_points(&s.values, min, max, width, height);
+                            let first_x = line_x(0, s.values.len(), width, CHART_PADDING);
+                            let last_x = line_x(s.values.len() - 1, s.values.len(), width, CHART_PADDING);
+                            let area_pts = format!("{pts} {last_x:.2},{base_y:.2} {first_x:.2},{base_y:.2}");
+                            rsx! {
+                                if show_area {
+                                    polygon {
+                                        key: "area-{s.label}",
+                                        class: "analytics__area {s.class}",
+                                        points: "{area_pts}",
+                                    }
+                                }
+                                polyline {
+                                    key: "line-{s.label}",
+                                    class: "analytics__line {s.class}",
+                                    points: "{pts}",
+                                    fill: "none",
+                                }
+                            }
+                        }
+                    }
+                }
+                // Hover overlay: vertical guide + enlarged per-series markers.
+                if let Some(idx) = hovered {
+                    {
+                        let gx = line_x(idx, n, width, CHART_PADDING);
+                        rsx! {
+                            line {
+                                class: "analytics__chart-guide",
+                                x1: "{gx:.2}",
+                                y1: "{CHART_PADDING}",
+                                x2: "{gx:.2}",
+                                y2: "{height - CHART_PADDING}",
+                            }
+                            for s in series.iter() {
+                                if idx < s.values.len() {
+                                    circle {
+                                        key: "hov-{s.label}",
+                                        class: "analytics__point {s.class} analytics__point--hovered",
+                                        cx: "{gx:.2}",
+                                        cy: "{line_y(s.values[idx], min, max, height, CHART_PADDING):.2}",
+                                        r: "4.5",
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Full-height transparent hit rects per slot — hovering
+                // anywhere in a column selects that index.
+                for i in 0..n {
+                    rect {
+                        key: "hit-{i}",
+                        class: "analytics__chart-hit",
+                        x: "{line_x(i, n, width, CHART_PADDING) - slot_w / 2.0:.2}",
+                        y: "0",
+                        width: "{slot_w:.2}",
+                        height: "{height}",
+                        fill: "transparent",
+                        onmouseenter: move |_| hover_index.set(Some(i)),
+                        onmousemove: move |_| hover_index.set(Some(i)),
+                    }
                 }
             }
-            for s in series.iter() {
-                if s.values.len() >= 2 {
-                    {
-                        let pts = polyline_points(&s.values, min, max, width, height);
-                        let first_x = line_x(0, s.values.len(), width, CHART_PADDING);
-                        let last_x = line_x(s.values.len() - 1, s.values.len(), width, CHART_PADDING);
-                        let area_pts = format!("{pts} {last_x:.2},{base_y:.2} {first_x:.2},{base_y:.2}");
-                        rsx! {
-                            if show_area {
-                                polygon {
-                                    key: "area-{s.label}",
-                                    class: "analytics__area {s.class}",
-                                    points: "{area_pts}",
-                                }
-                            }
-                            polyline {
-                                key: "line-{s.label}",
-                                class: "analytics__line {s.class}",
-                                points: "{pts}",
-                                fill: "none",
-                            }
-                            // Hover points: a marker per vertex with a
-                            // native tooltip ("2026-06 · Followers: 1040").
-                            for (i , v) in s.values.iter().enumerate() {
-                                circle {
-                                    key: "pt-{s.label}-{i}",
-                                    class: "analytics__point {s.class}",
-                                    cx: "{line_x(i, s.values.len(), width, CHART_PADDING):.2}",
-                                    cy: "{line_y(*v, min, max, height, CHART_PADDING):.2}",
-                                    r: "2.5",
-                                    title { "{point_tip_prefix(&point_labels, i)}{s.label}: {*v as i64}" }
-                                }
+            // HTML tooltip, positioned over the hovered column (CSS
+            // translateX(-50%) centers it on the % left).
+            if let Some(idx) = hovered {
+                div {
+                    class: "analytics__chart-tooltip",
+                    style: "left: {line_x(idx, n, width, CHART_PADDING) / width * 100.0:.2}%;",
+                    if let Some(l) = point_labels.get(idx) {
+                        div { class: "analytics__tooltip-label", "{l}" }
+                    }
+                    for s in series.iter() {
+                        if let Some(v) = s.values.get(idx) {
+                            div { class: "analytics__tooltip-row",
+                                span { class: "analytics__tooltip-name", "{s.label}" }
+                                span { class: "analytics__tooltip-value", "{*v as i64}" }
                             }
                         }
                     }
@@ -1188,6 +1428,49 @@ mod tests {
         assert_eq!(fmt_count(999), "999");
         assert_eq!(fmt_count(1_500), "1.5k");
         assert_eq!(fmt_count(2_500_000), "2.5M");
+    }
+
+    #[test]
+    fn y_axis_ticks_even_spacing() {
+        // 3 ticks across [0, 1040] → endpoints + midpoint.
+        assert_eq!(y_axis_ticks(0.0, 1040.0, 3), vec![0.0, 520.0, 1040.0]);
+        // First/last always land on the extremes.
+        let ticks = y_axis_ticks(10.0, 70.0, 4);
+        assert_eq!(ticks.first(), Some(&10.0));
+        assert_eq!(ticks.last(), Some(&70.0));
+        assert_eq!(ticks.len(), 4);
+    }
+
+    #[test]
+    fn y_axis_ticks_flat_range_guard() {
+        // min == max → a single tick, no NaN / divide-by-zero.
+        assert_eq!(y_axis_ticks(5.0, 5.0, 3), vec![5.0]);
+        // Inverted range also collapses to one tick.
+        assert_eq!(y_axis_ticks(9.0, 2.0, 3), vec![9.0]);
+        // count < 2 can't span a range → single tick.
+        assert_eq!(y_axis_ticks(0.0, 100.0, 1), vec![0.0]);
+    }
+
+    #[test]
+    fn x_axis_label_indices_subsamples() {
+        // 60 labels, ~6 picks: anchored on 0 and the last index, ascending.
+        let idxs = x_axis_label_indices(60, 6);
+        assert_eq!(idxs.first(), Some(&0));
+        assert_eq!(idxs.last(), Some(&59));
+        assert!(idxs.len() <= 6 && idxs.len() >= 5);
+        // Strictly ascending, unique.
+        assert!(idxs.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    #[test]
+    fn x_axis_label_indices_fewer_than_target() {
+        // Fewer points than the target → every index, in order.
+        assert_eq!(x_axis_label_indices(3, 6), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn x_axis_label_indices_empty() {
+        assert_eq!(x_axis_label_indices(0, 6), Vec::<usize>::new());
     }
 
     fn snap(date: &str, followers: i64) -> MetricSnapshot {
