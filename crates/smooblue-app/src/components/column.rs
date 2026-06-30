@@ -1825,10 +1825,23 @@ async fn fetch_page(
             // the URIs we don't already have cached from a prior poll.
             // For a notification-heavy user this can drop the per-
             // poll get_posts payload from ~30 URIs to ~2.
-            let needed: Vec<String> = collect_subject_uris(&items)
-                .into_iter()
-                .filter(|u| !subjects_cache.contains_key(u))
-                .collect();
+            //
+            // BUT on a refresh poll (cursor None) re-hydrate the whole
+            // page: a cached subject freezes its viewer.like / like_count
+            // at first-fetch time, so liking a reply elsewhere (or in a
+            // prior session, before the in-memory optimistic map exists)
+            // would otherwise never show as liked. Pagination (cursor
+            // Some) keeps the cache — those are older notifications we
+            // aren't re-polling, so stale viewer state there is fine.
+            let all_uris = collect_subject_uris(&items);
+            let needed: Vec<String> = if cur.is_none() {
+                all_uris
+            } else {
+                all_uris
+                    .into_iter()
+                    .filter(|u| !subjects_cache.contains_key(u))
+                    .collect()
+            };
             if !needed.is_empty() {
                 if let Ok(posts) = client.get_posts(&needed).await {
                     for p in posts {
