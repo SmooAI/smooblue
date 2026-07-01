@@ -28,7 +28,7 @@ jobs:
             matrix:
                 os: [ubuntu-latest, macos-latest]
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
@@ -75,7 +75,7 @@ jobs:
         name: Smoke — bundle + launch .app
         runs-on: macos-latest
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
@@ -144,7 +144,7 @@ jobs:
         name: Smoke — build + launch Linux binary
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
 
             - name: Install Rust toolchain
               uses: dtolnay/rust-toolchain@stable
@@ -224,7 +224,7 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v6
+            - uses: actions/checkout@v7
             - uses: dtolnay/rust-toolchain@stable
             - uses: Swatinem/rust-cache@v2
             - name: Install Linux deps
