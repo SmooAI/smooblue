@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.29.1
+
+### Patch Changes
+
+- [#90](https://github.com/SmooAI/smooblue/pull/90) [`5108d74`](https://github.com/SmooAI/smooblue/commit/5108d74cdfc9304c90a21e02146e3f7151979071) Thanks [@brentrager](https://github.com/brentrager)! - Notifications now show your like/repost state on reply, mention, and quote cards. The subject post was hydrated once and cached forever, so liking a reply elsewhere (or after a restart) never reflected — refresh polls now re-hydrate the page so viewer state stays current.
+
 ## 1.29.0
 
 ### Minor Changes
