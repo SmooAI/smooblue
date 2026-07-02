@@ -1588,7 +1588,18 @@ fn spawn_paste_clipboard_image(mut attachments: Signal<Vec<AttachedImage>>) {
         if MAX_IMAGES.saturating_sub(already) == 0 {
             return;
         }
-        let path = match tokio::task::spawn_blocking(read_clipboard_image_to_temp).await {
+        // Read the clipboard on the MAIN thread. macOS NSPasteboard is
+        // not thread-safe — touching it from a tokio worker (as a bare
+        // spawn_blocking(read+encode) did) races the main thread's own
+        // pasteboard access and traps in __NSFastEnumerationMutationHandler.
+        // Dioxus polls spawned futures on the event-loop (main) thread, so
+        // the arboard read here is on-main; only the PNG-encode + file
+        // write, which is the actually-heavy part, goes to a worker.
+        let rgba = match read_clipboard_image() {
+            Ok(img) => img,
+            _ => return,
+        };
+        let path = match tokio::task::spawn_blocking(move || encode_rgba_to_temp(rgba)).await {
             Ok(Ok(p)) => p,
             _ => return,
         };
@@ -1601,16 +1612,21 @@ fn spawn_paste_clipboard_image(mut attachments: Signal<Vec<AttachedImage>>) {
     });
 }
 
-/// Blocking: pull the clipboard image (RGBA8 + dimensions), PNG-encode
-/// it, write to a uniquely-named file under the OS temp dir, and return
-/// the path. Errors propagate as anyhow so the caller can simply discard
-/// any failure (no-clipboard-image being the common case).
-fn read_clipboard_image_to_temp() -> anyhow::Result<PathBuf> {
+/// Pull the clipboard image as raw RGBA8. **Must run on the main thread**
+/// — macOS NSPasteboard is main-thread-only and traps if read off-main.
+/// Errors propagate as anyhow so the caller can discard any failure
+/// (no-clipboard-image being the common case).
+fn read_clipboard_image() -> anyhow::Result<image::RgbaImage> {
     let mut cb = arboard::Clipboard::new()?;
     let img = cb.get_image()?;
-    let rgba =
-        image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
-            .ok_or_else(|| anyhow::anyhow!("clipboard image dims/bytes mismatch"))?;
+    image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
+        .ok_or_else(|| anyhow::anyhow!("clipboard image dims/bytes mismatch"))
+}
+
+/// Blocking: PNG-encode the RGBA and write it to a uniquely-named file
+/// under the OS temp dir, returning the path. Safe off the main thread —
+/// no pasteboard access here.
+fn encode_rgba_to_temp(rgba: image::RgbaImage) -> anyhow::Result<PathBuf> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
