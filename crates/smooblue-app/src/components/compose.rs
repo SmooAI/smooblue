@@ -1046,6 +1046,14 @@ pub fn ComposeSheet() -> Element {
                         class: "{textarea_class}",
                         placeholder: "{placeholder}",
                         autofocus: true,
+                        // `autofocus` alone is unreliable in the webview when
+                        // the compose box mounts on click (it only fires on
+                        // first page load), so focus explicitly on mount.
+                        onmounted: move |evt: Event<MountedData>| {
+                            spawn(async move {
+                                let _ = evt.data().set_focus(true).await;
+                            });
+                        },
                         value: "{text}",
                         oninput: move |e| {
                             let v = e.value();
