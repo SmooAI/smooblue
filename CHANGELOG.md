@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.29.2
+
+### Patch Changes
+
+- [#93](https://github.com/SmooAI/smooblue/pull/93) [`7454556`](https://github.com/SmooAI/smooblue/commit/7454556499b7129017c643ae79ffdd1a8f3a9501) Thanks [@brentrager](https://github.com/brentrager)! - Compose now focuses the message box the moment it opens, so you can start typing immediately without clicking into the field first. The HTML `autofocus` attribute alone didn't fire reliably when the box mounts on click.
+
+- [#93](https://github.com/SmooAI/smooblue/pull/93) [`7454556`](https://github.com/SmooAI/smooblue/commit/7454556499b7129017c643ae79ffdd1a8f3a9501) Thanks [@brentrager](https://github.com/brentrager)! - Fix a crash when pasting an image into the compose box. The clipboard read ran on a background thread, but macOS's pasteboard is main-thread-only and would trap; the read now happens on the main thread while the heavier PNG encode stays off it.
+
 ## 1.29.1
 
 ### Patch Changes
