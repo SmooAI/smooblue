@@ -14,14 +14,14 @@ The full Obsidian vault is at `docs/`. Start at [`docs/Home.md`](docs/Home.md). 
 
 ## Tracking work — pearls
 
-This repo uses `th pearls` for work tracking (Dolt-backed, syncs via git):
+This repo uses `th pearls` for work tracking (one SQLite store per machine, `~/.smooth/pearls.db`):
 
 ```bash
 th pearls ready                              # Issues ready to work
 th pearls create --title="..." --description="..." --type=task --priority=2
 th pearls update <id> --status=in_progress
 th pearls close <id>
-th pearls push                               # Push pearl DB to git
+th pearls sync                               # Sync with the team (Smoo Projects)
 ```
 
 Don't use TodoWrite/ad-hoc markdown lists for multi-turn task tracking — use pearls.
@@ -102,7 +102,7 @@ If a CI check fails after push, fix it in a follow-up commit. Don't leave a red 
 ## Agent Messaging (`th agent` / `th msg`)
 
 You can talk to other agents — in other sessions, other harnesses, even other
-machines — through a shared Dolt-backed mailbox. It's all plain `th` calls, so
+machines — through a shared mailbox at `~/.smooth/mail.db`. It's all plain `th` calls, so
 it works the same whether you're Claude Code, opencode, pi, or a shell loop.
 
 **On session start:**

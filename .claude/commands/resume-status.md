@@ -6,7 +6,7 @@ Symmetric counterpart to `/save-status` in this repo (smooblue — Bluesky AT Pr
 
 ## smooblue-specific context this skill must know
 
-- **Pearls + Jira both in play.** Pearls (`.smooth/dolt/pearls/`) + Jira SMOODEV project. Most smooblue pearls are tagged `SMOODEV-1163` (or a sub-pearl thereof).
+- **Pearls + Jira both in play.** Pearls (`~/.smooth/pearls.db`, via `th pearls`) + Jira SMOODEV project. Most smooblue pearls are tagged `SMOODEV-1163` (or a sub-pearl thereof).
 - **Tauri/Rust + TypeScript dual stack.** A checkpoint may reference Rust crate changes or TS/React changes. Verify both.
 - **OAuth + DPoP nonce concerns** show up frequently in checkpoints — verify the nonce-handling state if relevant.
 - **Releases are macOS .app bundles** built via signed GitHub Actions. "In flight" can mean "merged but not yet in a signed bundle."

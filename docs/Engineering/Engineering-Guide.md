@@ -89,7 +89,7 @@ The user-visible distribution is the macOS `.app` bundle from `scripts/bundle-ma
 
 ## Tracking work — pearls
 
-Pearls (`th pearls`) is the local work-item tracker. Lives at `.smooth/dolt/`, syncs via git (auto-commit hooks set up by `th pearls init`).
+Pearls (`th pearls`) is the local work-item tracker. Lives in the machine-global `~/.smooth/pearls.db`; `th pearls sync` is the team path.
 
 ```bash
 th pearls ready                              # Show issues ready to work
@@ -98,7 +98,7 @@ th pearls show <id>                          # Full view
 th pearls create --title="..." --description="..." --type=task --priority=2
 th pearls update <id> --status=in_progress
 th pearls close <id1> <id2> ...
-th pearls push                               # Push pearl DB to git
+th pearls sync                               # Sync with the team (Smoo Projects)
 ```
 
 Priorities are `0–4` (`0` = critical, `2` = medium, `4` = backlog).
