@@ -13,14 +13,8 @@ dist/
 # Logs
 *.log
 
-# Pearl Dolt store + other .smooth/* state stay out of git. Pearl
-# boards now follow the beads model (pearl th-ad1f41, 2026-06-13):
-# `.smooth/dolt/` is gitignored and syncs via dolt's own
-# `refs/dolt/data` ref pushed alongside normal git refs
-# (`th pearls push` / `th pearls pull`). Matches smooth + smooai which
-# made the same flip; eliminates the noms-binary merge-conflict class.
-# Fresh clones bootstrap via `th pearls init` which clones from
-# refs/dolt/data automatically.
+# .smooth/* state stays out of git. Pearls live in the machine-global
+# ~/.smooth/pearls.db; `th pearls sync` is the team path.
 .smooth/*
 
 # Obsidian — workspace state is per-user; vault content is shared.
@@ -29,6 +23,3 @@ docs/.obsidian/cache
 
 # pnpm + changesets workspace
 node_modules/
-
-# Pearl Dolt store — beads model: synced via refs/dolt/data, not tracked.
-.smooth/dolt/
