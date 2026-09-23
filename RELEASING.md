@@ -16,8 +16,10 @@ automatically.
 3. Review the PR. Approve + merge it.
 4. The next push to `main` triggers the **release** job: tags the
    commit `v0.X.0`, creates a GitHub release with the changelog as
-   the body, builds the macOS `.app` bundle (adhoc-signed), and
-   uploads it as `Smooblue-macos-arm64.zip`.
+   the body, builds the macOS `.app` bundle, Developer ID-signs,
+   notarizes and staples it, and uploads it as
+   `Smooblue-macos-arm64.zip` plus the Sparkle `appcast.xml` that
+   installed apps update from (docs/Operations/Sparkle-Updates.md).
 
 That's it. Two clicks per release (approve + merge).
 
@@ -58,12 +60,12 @@ becomes genuinely useful as a standalone dependency.
 
 - **Source code** — the standard GitHub "Source code (zip)" + "(tar.gz)" archives.
 - **`Smooblue-macos-arm64.zip`** — the bundled `.app`, ready to
-  drag to `/Applications`. **Adhoc-signed only** for now: first-run
-  Gatekeeper warns the user to right-click → Open. Real Apple
-  Developer ID signing + notarization wait on pearl `th-4149eb`
-  (one-time enrollment in the Apple Developer Program). When that
-  lands, `scripts/sign-and-notarize-macos.sh` is wired into the
-  release workflow before the upload step.
+  drag to `/Applications`. Developer ID-signed, notarized and
+  stapled, so it opens with no Gatekeeper prompt. It is also the
+  Sparkle update archive.
+- **`appcast.xml`** — Sparkle feed (one item, EdDSA-signed
+  enclosure). Installed apps read it via
+  `releases/latest/download/appcast.xml`.
 
 ## Releasing a hotfix on a side branch
 

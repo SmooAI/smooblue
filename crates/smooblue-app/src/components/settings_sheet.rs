@@ -181,6 +181,21 @@ pub fn SettingsSheet(open: Signal<bool>) -> Element {
                                 "@brentragertech on Bluesky →"
                             }
                         }
+                        // Sparkle's own "Check for Updates" window when
+                        // the updater is running (a signed release build);
+                        // otherwise the GitHub releases page.
+                        button { class: "settings__action",
+                            onclick: move |_| {
+                                if crate::sparkle::is_active() {
+                                    crate::sparkle::check_for_updates();
+                                } else {
+                                    let _ = crate::safe_open::open_in_browser(
+                                        "https://github.com/SmooAI/smooblue/releases/latest",
+                                    );
+                                }
+                            },
+                            "Check for updates…"
+                        }
                         button { class: "settings__action",
                             onclick: reveal_config_dir,
                             "Reveal config folder in Finder"

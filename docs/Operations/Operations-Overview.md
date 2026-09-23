@@ -11,7 +11,8 @@ How Smooblue gets built, packaged, installed, updated, and logged.
 | Page | What |
 | --- | --- |
 | [[Bundle-and-Install]] | `scripts/bundle-macos.sh` → `dist/Smooblue.app` → `/Applications/` |
-| [[Auto-Updater]] | Hourly launchd job that pulls + rebuilds + reinstalls from `main` |
+| [[Sparkle-Updates]] | Sparkle 2 OTA updates, Developer ID signing + notarization, the signing secrets and key custody |
+| [[Auto-Updater]] | Hourly launchd job that pulls + rebuilds + reinstalls from `main` (developers building from source) |
 | [[Branch-Protection]] | What's enforced on `main` and what bypass paths exist |
 
 ---
@@ -22,8 +23,8 @@ How Smooblue gets built, packaged, installed, updated, and logged.
 | --- | --- | --- |
 | **Direct (current)** | Clone + `bundle-macos.sh` + `cp -R` | Manual; `xattr -dr com.apple.quarantine` once on first install |
 | **Auto-updater** | Per-developer launchd agent | One-time install of `~/Library/LaunchAgents/ai.smoo.smooblue.updater.plist` |
-| **GitHub Releases** | release-plz tags + GH releases | Tags `v1.0.0`-style; no `.app` artifact attached yet (future pearl) |
-| **Notarized** | Apple Developer cert | Not yet — adhoc-signed today |
+| **GitHub Releases** | changesets tags + GH releases | `Smooblue-macos-arm64.zip` (Developer ID, notarized, stapled) + `appcast.xml` + Linux tarball/.deb |
+| **Sparkle (in-app)** | `releases/latest/download/appcast.xml` | Hourly check + Check for Updates…; see [[Sparkle-Updates]] |
 | **Crates.io** | Library crates | `publish = false` workspace-wide; smooblue is an app |
 
 ---

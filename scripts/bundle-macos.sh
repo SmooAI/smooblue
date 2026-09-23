@@ -37,12 +37,57 @@ RESOURCES_DIR="$CONTENTS/Resources"
 ICON_SRC="$REPO_ROOT/assets/icon.svg"
 ICON_DST="$RESOURCES_DIR/Icon.icns"
 BUNDLE_ID="ai.smoo.smooblue"
-VERSION="0.1.0"
-
 # Cargo's release binary lives in the workspace target dir.
 # Resolve it via cargo metadata so we work regardless of CARGO_TARGET_DIR.
-TARGET_DIR="$(cargo metadata --no-deps --format-version=1 --manifest-path "$REPO_ROOT/Cargo.toml" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+METADATA="$(cargo metadata --no-deps --format-version=1 --manifest-path "$REPO_ROOT/Cargo.toml")"
+TARGET_DIR="$(printf '%s' "$METADATA" | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+# The app version — CFBundleShortVersionString AND CFBundleVersion.
+# Sparkle compares CFBundleVersion against the appcast's
+# sparkle:version, so this MUST be the real, monotonically increasing
+# release version (it was a hardcoded "0.1.0", which would have made
+# every installed build look out of date forever).
+VERSION="$(printf '%s' "$METADATA" | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "smooblue-app"))')"
+
+# ── Sparkle 2 (OTA updates) ────────────────────────────────────────
+# Same version SmoothFlow pins. The release tarball carries both the
+# framework we embed and the sign_update / generate_keys tools the
+# release workflow uses, so the two never drift. Cached per machine;
+# the sha256 pin means a swapped tarball fails the build instead of
+# shipping. SMOOBLUE_NO_SPARKLE=1 builds without it (the app then
+# falls back to the GitHub "update available" toast).
+SPARKLE_VERSION="2.9.6"
+SPARKLE_SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+SPARKLE_CACHE="${SMOOBLUE_SPARKLE_CACHE:-$HOME/.cache/smooblue}"
+SPARKLE_DIR="$SPARKLE_CACHE/sparkle-$SPARKLE_VERSION"
+# Feed + public key. The private half of SUPublicEDKey is the
+# SMOOBLUE_SPARKLE_PRIVATE_KEY Actions secret (and the "Smooblue"
+# account in the release manager's login keychain — generate_keys
+# --account Smooblue). Losing it means no installed build can ever
+# take another update; see docs/Operations/Sparkle-Updates.md.
+SPARKLE_FEED_URL="https://github.com/SmooAI/smooblue/releases/latest/download/appcast.xml"
+SPARKLE_PUBLIC_KEY="u2Xv8BPY6WG6l90PQIaWkMtmVkIlNlQ1LKTBltV1JkU="
+
+ensure_sparkle() {
+    if [ -d "$SPARKLE_DIR/Sparkle.framework" ]; then
+        return
+    fi
+    mkdir -p "$SPARKLE_CACHE"
+    local tarball="$SPARKLE_CACHE/Sparkle-$SPARKLE_VERSION.tar.xz"
+    echo "▸ fetching Sparkle $SPARKLE_VERSION"
+    curl -fsSL -o "$tarball" \
+        "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+    local got
+    got="$(shasum -a 256 "$tarball" | awk '{print $1}')"
+    if [ "$got" != "$SPARKLE_SHA256" ]; then
+        echo "error: Sparkle tarball sha256 mismatch (got $got, want $SPARKLE_SHA256)" >&2
+        rm -f "$tarball"
+        exit 1
+    fi
+    rm -rf "$SPARKLE_DIR.tmp"
+    mkdir -p "$SPARKLE_DIR.tmp"
+    tar -xf "$tarball" -C "$SPARKLE_DIR.tmp"
+    mv "$SPARKLE_DIR.tmp" "$SPARKLE_DIR"
+}
 BIN_PATH="$TARGET_DIR/release/smooblue-app"
 
 skip_build=0
@@ -111,6 +156,27 @@ echo "▸ copying binary"
 cp "$BIN_PATH" "$MACOS_DIR/$APP_NAME"
 chmod +x "$MACOS_DIR/$APP_NAME"
 
+# ── Sparkle.framework ──────────────────────────────────────────────
+# Loaded at runtime by crates/smooblue-app/src/sparkle.rs from
+# Contents/Frameworks — nothing links against it. ditto (not cp -R)
+# so the framework's Versions/Current symlinks survive intact;
+# flattening them breaks its code signature.
+SPARKLE_PLIST=""
+if [ "${SMOOBLUE_NO_SPARKLE:-0}" != "1" ]; then
+    ensure_sparkle
+    echo "▸ embedding Sparkle $SPARKLE_VERSION"
+    mkdir -p "$CONTENTS/Frameworks"
+    ditto "$SPARKLE_DIR/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
+    SPARKLE_PLIST="    <key>SUFeedURL</key>
+    <string>$SPARKLE_FEED_URL</string>
+    <key>SUPublicEDKey</key>
+    <string>$SPARKLE_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>3600</integer>"
+fi
+
 # ── Info.plist ─────────────────────────────────────────────────────
 # Highlights:
 #   - LSMinimumSystemVersion 11.0 matches what Dioxus desktop needs
@@ -152,15 +218,17 @@ cat > "$CONTENTS/Info.plist" <<PLIST
     <string>© 2026 Smoo AI · MIT licensed</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.social-networking</string>
+$SPARKLE_PLIST
 </dict>
 </plist>
 PLIST
 
 # ── Adhoc codesign ────────────────────────────────────────────────
 # Lets the binary run on the build machine without TCC complaining
-# about an unsigned bundle. Real Apple-issued signing happens in CI
-# with a Developer ID cert when we wire release automation.
-echo "▸ adhoc codesign"
+# about an unsigned bundle. Release builds are then re-signed with the
+# Developer ID, notarized and stapled by scripts/sign-and-notarize-macos.sh
+# (release.yml does this in CI).
+echo "▸ adhoc codesign (v$VERSION)"
 codesign --force --deep --sign - "$APP_BUNDLE" 2>&1 | sed 's/^/  /' || true
 
 # ── Summary ────────────────────────────────────────────────────────

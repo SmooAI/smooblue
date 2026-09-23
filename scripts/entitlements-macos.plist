@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Developer ID build
+  (scripts/sign-and-notarize-macos.sh). Deliberately empty: smooblue
+  is not sandboxed (network access needs no entitlement), WKWebView's
+  JIT runs in WebKit's own WebContent process rather than ours, and
+  Sparkle.framework is signed with the same team ID, so library
+  validation passes without disable-library-validation. Add a key
+  here only with a note on what broke without it.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

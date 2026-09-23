@@ -20,6 +20,7 @@ pub mod keyboard;
 pub mod ocr;
 pub mod persistence;
 pub mod safe_open;
+pub mod sparkle;
 pub mod state;
 pub mod updates;
 pub mod views;
@@ -120,6 +121,12 @@ pub fn App() -> Element {
     // survives the first 10s on every push, so a repeat of the v1.5.0
     // incident can't land on main.
     use_hook(file_promise::install_on_main_window);
+
+    // Sparkle 2 OTA updates (signed release builds). Main thread, after
+    // NSApp + the app menu exist — which they do by the first render.
+    // A bundle without Sparkle.framework (dev / `cargo run`) is a
+    // logged no-op and the GitHub update toast stays in charge.
+    use_hook(sparkle::start);
 
     // Accessibility — font_scale + column_width. Loaded once from
     // disk; mutated by Cmd+= / Cmd+- / Cmd+0, Cmd+wheel, and the

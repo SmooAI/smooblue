@@ -75,7 +75,9 @@ pub fn DeckShell() -> Element {
     // claim an update against the synthetic version).
     let mut update_banner = use_context::<Signal<UpdateBanner>>();
     use_future(move || async move {
-        if crate::demo::is_active() {
+        // Sparkle owns updates when it's running (its own dialog, its
+        // own schedule); the toast is the fallback for everything else.
+        if crate::demo::is_active() || crate::sparkle::is_active() {
             return;
         }
         // Single-shot: delay 5s so the boot animation finishes

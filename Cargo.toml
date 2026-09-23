@@ -139,6 +139,8 @@ objc2-app-kit = { version = "0.3", features = [
     "NSDragging",
     "NSFilePromiseReceiver",
     "NSEvent",
+    "NSMenu",
+    "NSMenuItem",
 ] }
 block2 = "0.6"
 

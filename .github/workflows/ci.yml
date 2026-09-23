@@ -101,7 +101,11 @@ jobs:
 
                   # Launch detached; capture stdout+stderr for diag.
                   # SMOOBLUE_DEMO=1 → no network, deterministic first render.
-                  SMOOBLUE_DEMO=1 RUST_BACKTRACE=full \
+                  # SMOOBLUE_FORCE_SPARKLE=1 → start the Sparkle updater
+                  # anyway (demo normally skips it), so the embedded
+                  # framework + its msg_send! selectors are exercised on
+                  # every PR, not first discovered by users.
+                  SMOOBLUE_DEMO=1 SMOOBLUE_FORCE_SPARKLE=1 RUST_LOG=info RUST_BACKTRACE=full \
                       "$BIN" > /tmp/smooblue.out 2>&1 &
                   PID=$!
                   echo "▸ launched PID $PID"
@@ -119,6 +123,14 @@ jobs:
                   fi
 
                   echo "✓ Smooblue still alive after 10s — launch succeeded"
+
+                  if ! grep -q "sparkle: updater started" /tmp/smooblue.out; then
+                      echo "::error::Sparkle updater did not start (framework missing, failed to load, or init returned nil)"
+                      grep -i sparkle /tmp/smooblue.out || true
+                      kill -KILL "$PID" 2>/dev/null || true
+                      exit 1
+                  fi
+                  echo "✓ Sparkle updater started"
 
                   # Clean up. SIGTERM first, then SIGKILL after a beat
                   # in case the app installs a handler that takes a
