@@ -1499,17 +1499,15 @@ fn InboxRow(item: crate::inbox::InboxItem) -> Element {
                         .reply_root_ref()
                         .unwrap_or_else(|| (subject.clone(), p.cid.clone()));
                     compose_ctx.with_mut(|w| {
-                        w.reply_to = Some(crate::state::ReplyTarget {
+                        w.prefill = (!draft.trim().is_empty()).then(|| draft.clone());
+                        w.open_reply(crate::state::ReplyTarget {
                             uri: subject.clone(),
                             cid: p.cid.clone(),
                             root_uri,
                             root_cid,
                             handle: handle.clone(),
-                            text: String::new(),
+                            text: p.record.text.clone(),
                         });
-                        w.quote_to = None;
-                        w.prefill = (!draft.trim().is_empty()).then(|| draft.clone());
-                        w.open = true;
                     });
                 }
             }

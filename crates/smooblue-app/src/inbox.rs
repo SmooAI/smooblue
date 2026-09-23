@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 
 /// Schema version embedded in `PRAGMA user_version`. Bump on
 /// every breaking change + add a migration step in [`migrate`].
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 7;
 
 /// Hour-bucket granularity, in seconds. The sort uses
 /// (ts_bucket DESC, follower_count DESC, directness DESC, ts DESC)
@@ -256,6 +256,15 @@ fn db_path() -> Result<PathBuf> {
 }
 
 fn open() -> Result<Connection> {
+    // Demo mode never touches the user's real data: drafts typed while
+    // taking screenshots (or driving the automation bridge) must not
+    // surface in their real composer. An in-memory DB gives demo the
+    // full feature set for the life of the process.
+    if crate::demo::is_active() {
+        let conn = Connection::open_in_memory().context("opening in-memory demo DB")?;
+        migrate(&conn)?;
+        return Ok(conn);
+    }
     let path = db_path()?;
     let conn = Connection::open(&path)
         .with_context(|| format!("opening inbox DB at {}", path.display()))?;
@@ -418,6 +427,36 @@ fn migrate(conn: &Connection) -> Result<()> {
         conn.execute(
             "ALTER TABLE post_metrics ADD COLUMN engagement_fetched_at TEXT",
             [],
+        )?;
+    }
+    if current < 7 {
+        // v7: compose drafts (crate::drafts) and the recently-viewed
+        // navigation history (crate::history). Drafts store their body
+        // as one JSON blob so the composer's shape can evolve without
+        // a migration per field; timestamps are fixed-width RFC 3339
+        // (micros, `Z`) so the TEXT ORDER BY sorts chronologically.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS drafts (
+                id          TEXT PRIMARY KEY,
+                account_did TEXT,
+                updated_at  TEXT NOT NULL,
+                body_json   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS drafts_updated_idx
+                ON drafts(account_did, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS nav_history (
+                kind      TEXT NOT NULL,
+                key       TEXT NOT NULL,
+                title     TEXT NOT NULL,
+                subtitle  TEXT NOT NULL,
+                viewed_at TEXT NOT NULL,
+                PRIMARY KEY (kind, key)
+            );
+            CREATE INDEX IF NOT EXISTS nav_history_viewed_idx
+                ON nav_history(viewed_at DESC);
+            "#,
         )?;
     }
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

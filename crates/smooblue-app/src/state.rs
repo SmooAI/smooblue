@@ -361,11 +361,72 @@ pub struct ComposeContext {
     /// "pop out" button so an in-progress reply isn't lost). The
     /// composer consumes and clears it on open.
     pub prefill: Option<String>,
+    /// One-shot: open this saved draft (by id) instead of picking one
+    /// by target. Set by the "resume draft" chip; consumed on open.
+    pub resume_draft: Option<String>,
 }
 
+impl ComposeContext {
+    /// Open for a new top-level post. The composer resumes the most
+    /// recent unsent top-level draft, if any.
+    pub fn open_new(&mut self) {
+        self.reply_to = None;
+        self.quote_to = None;
+        self.resume_draft = None;
+        self.open = true;
+    }
+
+    /// Open as a reply. Resumes an earlier draft for the same parent.
+    pub fn open_reply(&mut self, target: ReplyTarget) {
+        self.reply_to = Some(target);
+        self.quote_to = None;
+        self.resume_draft = None;
+        self.open = true;
+    }
+
+    /// Open as a quote. Resumes an earlier draft quoting the same post.
+    pub fn open_quote(&mut self, target: QuoteTarget) {
+        self.reply_to = None;
+        self.quote_to = Some(target);
+        self.resume_draft = None;
+        self.open = true;
+    }
+
+    /// Open a specific saved draft; the composer restores its target.
+    pub fn open_draft(&mut self, id: String) {
+        self.resume_draft = Some(id);
+        self.open = true;
+    }
+}
+
+/// Every unsent draft for the active account, newest first. Mirrors the
+/// `drafts` table; refreshed after each composer save so the resume
+/// chip and the drafts list stay current without polling.
+#[derive(Clone, Default, PartialEq)]
+pub struct DraftsIndex(pub Vec<crate::drafts::Draft>);
+
+/// Reload [`DraftsIndex`] for the active account off the UI thread.
+pub fn refresh_drafts_index(mut index: Signal<DraftsIndex>, account_did: Option<String>) {
+    spawn(async move {
+        let list =
+            tokio::task::spawn_blocking(move || crate::drafts::list(account_did.as_deref())).await;
+        match list {
+            Ok(Ok(drafts)) => index.set(DraftsIndex(drafts)),
+            Ok(Err(e)) => tracing::warn!(error = %e, "drafts: list failed"),
+            Err(e) => tracing::warn!(error = %e, "drafts: list task panicked"),
+        }
+    });
+}
+
+/// Bumped whenever the composer publishes something, so open views of
+/// the conversation (the thread sheet) refetch and show the new reply.
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
+pub struct PostedTick(pub u64);
+
 /// Just enough of a parent post to render the quoted context in the
-/// compose sheet and build the reply ref on submit.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// compose sheet and build the reply ref on submit. Serializable
+/// because drafts persist their target.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplyTarget {
     pub uri: String,
     pub cid: String,
@@ -383,7 +444,7 @@ pub struct ReplyTarget {
 /// The post being quoted in a compose. Same shape as ReplyTarget —
 /// kept as its own type so render code can distinguish quote-context
 /// from reply-context at a glance (different visual treatment).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuoteTarget {
     pub uri: String,
     pub cid: String,
@@ -591,10 +652,13 @@ pub fn use_bootstrap() {
             .is_some();
         Signal::new(ComposeContext {
             open,
-            reply_to: None,
-            quote_to: None,
-            prefill: None,
+            ..Default::default()
         })
+    });
+    use_context_provider::<Signal<DraftsIndex>>(|| Signal::new(DraftsIndex::default()));
+    use_context_provider::<Signal<PostedTick>>(|| Signal::new(PostedTick::default()));
+    use_context_provider::<Signal<crate::history::NavHistory>>(|| {
+        Signal::new(crate::history::NavHistory::default())
     });
     use_context_provider::<Signal<ColumnDrag>>(|| Signal::new(ColumnDrag::default()));
     use_context_provider::<Signal<EngagementFocus>>(|| {

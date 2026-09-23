@@ -72,8 +72,10 @@ Everything user-writable lands in `directories::ProjectDirs::from("ai", "Smoo", 
 | `accounts.json` | Index `{ active_did, accounts: [{did, handle}] }` |
 | `columns.json` | Deck layout |
 | `last_handle.txt` | Login pre-fill |
-| `draft.txt` | In-progress compose body (saved on every keystroke) |
+| `draft.txt` | Legacy single compose draft — imported into the SQLite `drafts` table on first launch, then deleted |
 | `theme.txt` | `dark` or `light` |
+
+App data (`ProjectDirs::data_dir()`) holds `smooblue.db` (SQLite): inbox triage, analytics, UI prefs, **compose drafts** and **navigation history** (schema v7), plus `pasted/` for clipboard images a draft may reference. See [[Drafts-and-Navigation-History]].
 
 Auto-updater logs live at `~/Library/Logs/Smooblue/update.log`.
 

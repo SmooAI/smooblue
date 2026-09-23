@@ -11,8 +11,16 @@
 //!   Goes from teal → orange → red as the post approaches the 300
 //!   limit. Tabular-numeric digits so the number doesn't jitter.
 //! - **⌘↵ / Ctrl↵** submits without leaving the textarea.
-//! - **Draft persistence** — the in-progress text + attachments survive
-//!   closing the sheet, only clearing on successful submit.
+//! - **Drafts** — everything (reply / quote target, every post of a
+//!   thread, attached media + alt text) autosaves to [`crate::drafts`]
+//!   and survives closing the sheet or quitting the app; clears only
+//!   on post or discard. Many drafts can exist; the header's "Drafts"
+//!   list switches between them.
+//! - **Threads** — "+ Add post" chains continuation posts, each with
+//!   its own counter, images and "Split into thread". The whole thread
+//!   is validated before anything is published, and a mid-thread
+//!   failure keeps the unposted remainder as a reply to the last live
+//!   post instead of re-posting (duplicating) what already landed.
 //! - Bigger textarea + smoo-orange focus ring (in CSS).
 //! - **Image attachments** — up to 4 per post. Native file picker,
 //!   thumbnail grid, per-image alt-text input. Hooks (in follow-up
@@ -20,16 +28,20 @@
 
 use crate::alt_text::{merge_descriptions, AltSuggestion, AltTextProvider, SmooLlmAltText};
 use crate::auth_refresh::fresh_client;
+use crate::drafts::{Draft, DraftMedia, DraftPost, DraftTarget};
 use crate::icons;
 use crate::image_prep::{prepare_from_path, PreparedImage};
 use crate::ocr;
-use crate::state::ComposeContext;
+use crate::state::{
+    refresh_drafts_index, ComposeContext, DraftsIndex, PostedTick, QuoteTarget, ReplyTarget,
+};
 use dioxus::prelude::*;
 use smooblue_atproto::{
-    ActorProfile, AspectRatio, BlobRef, FacetKind, LinkCard, PostExternal, PostImage, PostVideo,
-    ReplyRef, StrongRef,
+    ActorProfile, AspectRatio, BlobRef, CreatedRecord, FacetKind, LinkCard, PostExternal,
+    PostImage, PostVideo, ReplyRef, StrongRef,
 };
 use smooblue_oauth::Session;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -207,6 +219,66 @@ pub const MAX_VIDEO_BYTES: u64 = 50 * 1024 * 1024;
 
 static ATTACHMENT_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Process-unique id for attachments and continuation posts. Starts at
+/// 1 so it can never collide with [`ROOT_SLOT`].
+fn next_id() -> u64 {
+    ATTACHMENT_ID.fetch_add(1, Ordering::SeqCst)
+}
+
+/// Slot id of the first post in the thread.
+pub const ROOT_SLOT: u64 = 0;
+
+/// A continuation post (2nd, 3rd, … in a self-thread). Its images live
+/// in the shared attachment list under `slot == id`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtraPost {
+    pub id: u64,
+    pub text: String,
+}
+
+impl ExtraPost {
+    fn new(text: String) -> Self {
+        Self {
+            id: next_id(),
+            text,
+        }
+    }
+}
+
+/// MIME type for a video file extension we accept, or `None` if the
+/// extension isn't a supported video.
+fn video_mime(ext: &str) -> Option<&'static str> {
+    match ext {
+        "mp4" | "m4v" => Some("video/mp4"),
+        "mov" => Some("video/quicktime"),
+        "webm" => Some("video/webm"),
+        _ => None,
+    }
+}
+
+fn lower_ext(path: &std::path::Path) -> String {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn is_image_ext(ext: &str) -> bool {
+    matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic")
+}
+
+/// Index of every post (0-based, thread order) whose text is over
+/// [`MAX_LEN`]. Posting is blocked while this is non-empty, so a
+/// too-long post 3 can't fail *after* posts 1 and 2 are already live.
+pub fn over_limit_posts<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
+    texts
+        .into_iter()
+        .enumerate()
+        .filter(|(_, t)| t.chars().count() > MAX_LEN)
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Single attached video. Mutually exclusive with images. Held as
 /// raw bytes in memory until submit; bsky's lexicon caps video at
 /// ~50MB so the in-memory load is fine for normal usage.
@@ -237,6 +309,12 @@ pub enum AttachmentState {
 #[derive(Clone, PartialEq)]
 pub struct AttachedImage {
     pub id: u64,
+    /// Which post in the thread this image belongs to: [`ROOT_SLOT`]
+    /// for the first post, otherwise the [`ExtraPost::id`] of a
+    /// continuation post. One flat list keyed by slot keeps the
+    /// background prep / AI pipeline (which finds images by `id`)
+    /// unchanged for multi-post threads.
+    pub slot: u64,
     pub source_path: PathBuf,
     /// Screen-reader description. Starts empty; the user types it
     /// (and in follow-up pearls, OCR/LLM seed it).
@@ -259,9 +337,10 @@ pub struct AttachedImage {
 }
 
 impl AttachedImage {
-    fn new(path: PathBuf) -> Self {
+    fn new(path: PathBuf, slot: u64) -> Self {
         Self {
-            id: ATTACHMENT_ID.fetch_add(1, Ordering::SeqCst),
+            id: next_id(),
+            slot,
             source_path: path,
             alt: String::new(),
             alt_user_edited: false,
@@ -294,46 +373,534 @@ impl AttachedImage {
     }
 }
 
+/// Every signal the composer's draft actions touch, bundled so the
+/// save / load / switch / post helpers take one `Copy` value instead of
+/// a dozen captured signals.
+#[derive(Clone, Copy)]
+struct Composer {
+    session: Signal<Option<Session>>,
+    reply_to: Signal<Option<ReplyTarget>>,
+    quote_to: Signal<Option<QuoteTarget>>,
+    text: Signal<String>,
+    extras: Signal<Vec<ExtraPost>>,
+    attachments: Signal<Vec<AttachedImage>>,
+    video: Signal<Option<VideoAttachment>>,
+    link_card: Signal<Option<LinkCard>>,
+    link_card_dismissed: Signal<HashSet<String>>,
+    draft_id: Signal<Option<String>>,
+    index: Signal<DraftsIndex>,
+    error: Signal<Option<String>>,
+}
+
+impl Composer {
+    fn account_did(&self) -> Option<String> {
+        self.session.peek().as_ref().map(|s| s.did.clone())
+    }
+
+    fn target(&self) -> DraftTarget {
+        DraftTarget::of(self.reply_to.peek().as_ref(), self.quote_to.peek().as_ref())
+    }
+
+    /// The composer contents as a draft. `id` is empty until something
+    /// has been saved. Failed images are left out (they can't be
+    /// restored either).
+    fn snapshot(&self) -> Draft {
+        let atts = self.attachments.peek();
+        let images_for = |slot: u64| -> Vec<DraftMedia> {
+            atts.iter()
+                .filter(|a| a.slot == slot && !matches!(a.state, AttachmentState::Failed(_)))
+                .map(|a| DraftMedia {
+                    path: a.source_path.clone(),
+                    alt: a.alt.clone(),
+                })
+                .collect()
+        };
+        let mut posts = vec![DraftPost {
+            text: self.text.peek().clone(),
+            images: images_for(ROOT_SLOT),
+            video: self.video.peek().as_ref().map(|v| DraftMedia {
+                path: v.source_path.clone(),
+                alt: v.alt.clone(),
+            }),
+        }];
+        for e in self.extras.peek().iter() {
+            posts.push(DraftPost {
+                text: e.text.clone(),
+                images: images_for(e.id),
+                video: None,
+            });
+        }
+        Draft {
+            id: self.draft_id.peek().clone().unwrap_or_default(),
+            account_did: self.account_did(),
+            updated_at: chrono::Utc::now(),
+            reply_to: self.reply_to.peek().clone(),
+            quote_to: self.quote_to.peek().clone(),
+            posts,
+        }
+    }
+
+    /// Snapshot with an id, allocating (and remembering) one the first
+    /// time there's something worth saving. `None` = nothing to save.
+    fn snapshot_for_save(mut self) -> Option<Draft> {
+        let mut d = self.snapshot();
+        if d.id.is_empty() {
+            if d.is_empty() {
+                return None;
+            }
+            d.id = crate::drafts::new_id();
+            self.draft_id.set(Some(d.id.clone()));
+        }
+        Some(d)
+    }
+
+    /// Save right now on this thread. For the moments that must not
+    /// race a later read — closing the sheet, switching drafts. A
+    /// single small SQLite upsert.
+    fn flush(self) {
+        let Some(d) = self.snapshot_for_save() else {
+            return;
+        };
+        if let Err(e) = crate::drafts::save(&d) {
+            tracing::warn!(error = %e, "compose: draft save failed");
+        }
+        refresh_drafts_index(self.index, self.account_did());
+    }
+
+    /// Save off the UI thread — the debounced keystroke autosave.
+    fn save_in_background(self) {
+        let Some(d) = self.snapshot_for_save() else {
+            return;
+        };
+        let index = self.index;
+        let account = self.account_did();
+        spawn(async move {
+            match tokio::task::spawn_blocking(move || crate::drafts::save(&d)).await {
+                Ok(Err(e)) => tracing::warn!(error = %e, "compose: draft autosave failed"),
+                Err(e) => tracing::warn!(error = %e, "compose: draft autosave panicked"),
+                Ok(Ok(())) => {}
+            }
+            refresh_drafts_index(index, account);
+        });
+    }
+
+    /// Empty every post (the reply / quote target is kept) and detach
+    /// from the saved draft, so the next keystroke starts a new one.
+    fn clear_content(mut self) {
+        self.text.set(String::new());
+        self.extras.set(Vec::new());
+        self.attachments.set(Vec::new());
+        self.video.set(None);
+        self.link_card.set(None);
+        self.link_card_dismissed.write().clear();
+        self.draft_id.set(None);
+        self.error.set(None);
+    }
+
+    /// Replace the composer contents with a saved draft. Media is
+    /// re-attached from disk; files that have since been moved or
+    /// deleted are dropped with a note rather than failing the load.
+    fn load(mut self, d: &Draft) {
+        self.clear_content();
+        self.draft_id.set(Some(d.id.clone()));
+        self.reply_to.set(d.reply_to.clone());
+        self.quote_to.set(d.quote_to.clone());
+        let mut missing = 0usize;
+        let mut to_restore: Vec<(u64, DraftMedia)> = Vec::new();
+        for (i, p) in d.posts.iter().enumerate() {
+            let slot = if i == 0 {
+                self.text.set(p.text.clone());
+                ROOT_SLOT
+            } else {
+                let e = ExtraPost::new(p.text.clone());
+                let id = e.id;
+                self.extras.write().push(e);
+                id
+            };
+            for m in &p.images {
+                if m.path.is_file() {
+                    to_restore.push((slot, m.clone()));
+                } else {
+                    missing += 1;
+                }
+            }
+        }
+        let llm: Option<Arc<dyn AltTextProvider>> =
+            SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+        for (slot, m) in to_restore {
+            let mut att = AttachedImage::new(m.path.clone(), slot);
+            // A saved alt is the user's (or an accepted suggestion) —
+            // don't let a fresh AI pass overwrite it, and don't pay for
+            // one at all when there's already a description.
+            let describe = m.alt.trim().is_empty();
+            att.alt_user_edited = !describe;
+            att.alt = m.alt;
+            let id = att.id;
+            self.attachments.write().push(att);
+            let atts = self.attachments;
+            let llm = llm.clone();
+            spawn(async move {
+                process_attachment(atts, id, m.path, llm, describe).await;
+            });
+        }
+        if let Some(v) = d.posts.first().and_then(|p| p.video.clone()) {
+            if v.path.is_file() {
+                let mut video = self.video;
+                let draft_id = self.draft_id;
+                let expect = d.id.clone();
+                spawn(async move {
+                    let path = v.path.clone();
+                    let Ok(Ok(Some(att))) =
+                        tokio::task::spawn_blocking(move || read_video(&path, v.alt)).await
+                    else {
+                        return;
+                    };
+                    // The user may have switched drafts while we read.
+                    if draft_id.peek().as_deref() == Some(expect.as_str()) {
+                        video.set(Some(att));
+                    }
+                });
+            } else {
+                missing += 1;
+            }
+        }
+        if missing > 0 {
+            self.error.set(Some(format!(
+                "{missing} attachment{} in this draft {} no longer on disk and {} dropped.",
+                if missing == 1 { "" } else { "s" },
+                if missing == 1 { "is" } else { "are" },
+                if missing == 1 { "was" } else { "were" },
+            )));
+        }
+    }
+
+    /// Called when the sheet opens for `reply` / `quote` (both `None`
+    /// = a new post). Work in progress for the same target is kept;
+    /// otherwise it's saved and the newest draft for the requested
+    /// target is resumed — or the composer starts blank.
+    fn open_for(mut self, reply: Option<ReplyTarget>, quote: Option<QuoteTarget>) {
+        let want = DraftTarget::of(reply.as_ref(), quote.as_ref());
+        let current_empty = self.snapshot().is_empty();
+        if want == self.target() && !current_empty {
+            // Same conversation: keep going. Refresh the target itself
+            // (the caller's copy of the parent text is fresher).
+            self.reply_to.set(reply);
+            self.quote_to.set(quote);
+            return;
+        }
+        let current_id = self.draft_id.peek().clone();
+        self.flush();
+        let drafts = crate::drafts::list(self.account_did().as_deref()).unwrap_or_default();
+        let resume = crate::drafts::pick_resume(&drafts, &want)
+            .filter(|d| !(current_empty && current_id.as_deref() == Some(d.id.as_str())))
+            .cloned();
+        match resume {
+            Some(d) => self.load(&d),
+            None => self.clear_content(),
+        }
+        self.reply_to.set(reply);
+        self.quote_to.set(quote);
+    }
+
+    /// Save the current draft and load another one.
+    fn switch_to(mut self, id: &str) {
+        if self.draft_id.peek().as_deref() == Some(id) {
+            return;
+        }
+        self.flush();
+        let found = self
+            .index
+            .peek()
+            .0
+            .iter()
+            .find(|d| d.id == id)
+            .cloned()
+            .or_else(|| crate::drafts::get(id).ok().flatten());
+        match found {
+            Some(d) => self.load(&d),
+            None => self
+                .error
+                .set(Some("That draft no longer exists.".to_string())),
+        }
+    }
+
+    /// Save the current draft and start a blank top-level post.
+    fn start_new(mut self) {
+        self.flush();
+        self.clear_content();
+        self.reply_to.set(None);
+        self.quote_to.set(None);
+    }
+
+    /// Throw the current draft away for good.
+    fn discard(self) {
+        if let Some(id) = self.draft_id.peek().clone() {
+            if let Err(e) = crate::drafts::delete(&id) {
+                tracing::warn!(error = %e, "compose: draft delete failed");
+            }
+        }
+        self.clear_content();
+        refresh_drafts_index(self.index, self.account_did());
+    }
+
+    /// Part of a thread went live and a later post failed. Drop what
+    /// was published and turn the rest into a reply to the last live
+    /// post, so pressing Reply again finishes the thread instead of
+    /// re-posting (duplicating) the part that already landed.
+    fn keep_unposted(
+        mut self,
+        posted: &[(u64, CreatedRecord, String)],
+        root: StrongRef,
+        total: usize,
+        err: &str,
+    ) {
+        let Some((_, last, last_text)) = posted.last() else {
+            return;
+        };
+        let done: HashSet<u64> = posted.iter().map(|(slot, _, _)| *slot).collect();
+        let root_text = self.text.peek().clone();
+        let remaining: Vec<(u64, String)> = std::iter::once((ROOT_SLOT, root_text))
+            .chain(self.extras.peek().iter().map(|e| (e.id, e.text.clone())))
+            .filter(|(slot, _)| !done.contains(slot))
+            .collect();
+        let Some((new_root_slot, new_root_text)) = remaining.first().cloned() else {
+            return;
+        };
+        self.text.set(new_root_text);
+        self.extras.set(
+            remaining[1..]
+                .iter()
+                .map(|(id, text)| ExtraPost {
+                    id: *id,
+                    text: text.clone(),
+                })
+                .collect(),
+        );
+        self.attachments.with_mut(|atts| {
+            atts.retain(|a| !done.contains(&a.slot));
+            for a in atts.iter_mut().filter(|a| a.slot == new_root_slot) {
+                a.slot = ROOT_SLOT;
+            }
+        });
+        if done.contains(&ROOT_SLOT) {
+            self.video.set(None);
+            self.link_card.set(None);
+        }
+        let handle = self
+            .session
+            .peek()
+            .as_ref()
+            .map(|s| s.handle.clone())
+            .unwrap_or_default();
+        self.quote_to.set(None);
+        self.reply_to.set(Some(ReplyTarget {
+            uri: last.uri.clone(),
+            cid: last.cid.clone(),
+            root_uri: root.uri,
+            root_cid: root.cid,
+            handle,
+            text: last_text.clone(),
+        }));
+        self.error.set(Some(format!(
+            "Posted {} of {total}. The rest is saved as a reply to your last post — press Reply to finish the thread. ({err})",
+            posted.len(),
+        )));
+    }
+}
+
+/// One post of a thread, resolved and ready to publish.
+struct OutPost {
+    slot: u64,
+    text: String,
+    images: Vec<(PreparedImage, String)>,
+    video: Option<VideoAttachment>,
+    card: Option<LinkCard>,
+}
+
+/// Upload one post's media and create the record.
+async fn publish_one(
+    client: &smooblue_atproto::AtClient,
+    post: &OutPost,
+    reply: Option<&ReplyRef>,
+    quote: Option<&StrongRef>,
+) -> Result<CreatedRecord, String> {
+    let mut images: Vec<PostImage> = Vec::with_capacity(post.images.len());
+    for (prep, alt) in &post.images {
+        let blob: BlobRef = client
+            .upload_blob(prep.bytes.clone(), &prep.mime)
+            .await
+            .map_err(|e| format!("image upload failed: {e}"))?;
+        images.push(PostImage {
+            blob,
+            alt: alt.clone(),
+            aspect_ratio: Some(AspectRatio {
+                width: prep.width,
+                height: prep.height,
+            }),
+        });
+    }
+    let video = match &post.video {
+        Some(v) => Some(PostVideo {
+            video: client
+                .upload_blob(v.bytes.clone(), &v.mime)
+                .await
+                .map_err(|e| format!("video upload failed: {e}"))?,
+            alt: v.alt.clone(),
+            aspect_ratio: None,
+        }),
+        None => None,
+    };
+    // Facet detection failing (resolveHandle blip) degrades to a plain
+    // text post rather than blocking it.
+    let facets = client
+        .build_facets_from_text(&post.text)
+        .await
+        .unwrap_or_default();
+    // The thumb upload is best-effort; a card without an image still
+    // posts.
+    let external = match &post.card {
+        Some(card) => {
+            let thumb = match card.image_url.as_deref() {
+                Some(u) => client.upload_link_card_thumb(u).await.ok(),
+                None => None,
+            };
+            Some(PostExternal {
+                uri: card.uri.clone(),
+                title: card.title.clone(),
+                description: card.description.clone(),
+                thumb,
+            })
+        }
+        None => None,
+    };
+    client
+        .create_post_full(
+            &post.text,
+            reply,
+            &images,
+            &facets,
+            quote,
+            video.as_ref(),
+            external.as_ref(),
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Demo-mode stand-in for [`publish_one`]. `SMOOBLUE_DEMO_FAIL_POST=N`
+/// fails the Nth post of a submit (1-based), for exercising the
+/// partial-thread recovery path without a network.
+async fn demo_publish(position: usize) -> Result<CreatedRecord, String> {
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let fail_at = std::env::var("SMOOBLUE_DEMO_FAIL_POST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok());
+    if fail_at == Some(position + 1) {
+        return Err("simulated network failure".into());
+    }
+    Ok(CreatedRecord {
+        uri: format!(
+            "at://did:plc:demo/app.bsky.feed.post/demo-{}",
+            crate::drafts::new_id()
+        ),
+        cid: "demo-cid".into(),
+    })
+}
+
+/// Read a video file for attaching, enforcing [`MAX_VIDEO_BYTES`].
+/// Blocking — call from `spawn_blocking`. `Ok(None)` for an
+/// unsupported extension.
+fn read_video(path: &std::path::Path, alt: String) -> Result<Option<VideoAttachment>, String> {
+    let Some(mime) = video_mime(&lower_ext(path)) else {
+        return Ok(None);
+    };
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > MAX_VIDEO_BYTES {
+        return Err(format!(
+            "Video too large ({:.1} MB). Bluesky caps videos at {} MB.",
+            size as f64 / 1_048_576.0,
+            MAX_VIDEO_BYTES / 1_048_576,
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(|_| "Couldn't read the video file.".to_string())?;
+    Ok(Some(VideoAttachment {
+        source_path: path.to_path_buf(),
+        bytes,
+        mime: mime.to_string(),
+        alt,
+    }))
+}
+
+/// Attach image files to one post (`slot`), up to its [`MAX_IMAGES`]
+/// cap, running each through the prep + alt-text pipeline.
+fn attach_images(mut attachments: Signal<Vec<AttachedImage>>, slot: u64, paths: Vec<PathBuf>) {
+    let already = attachments.peek().iter().filter(|a| a.slot == slot).count();
+    let slots = MAX_IMAGES.saturating_sub(already);
+    let llm: Option<Arc<dyn AltTextProvider>> =
+        SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
+    for path in paths.into_iter().take(slots) {
+        let att = AttachedImage::new(path.clone(), slot);
+        let id = att.id;
+        attachments.write().push(att);
+        let llm = llm.clone();
+        spawn(async move {
+            process_attachment(attachments, id, path, llm, true).await;
+        });
+    }
+}
+
+/// "+ Image" picker for one post of the thread.
+fn pick_images_into(attachments: Signal<Vec<AttachedImage>>, slot: u64) {
+    spawn(async move {
+        let already = attachments.peek().iter().filter(|a| a.slot == slot).count();
+        if already >= MAX_IMAGES {
+            return;
+        }
+        let files = tokio::task::spawn_blocking(move || {
+            rfd::FileDialog::new()
+                .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif", "heic"])
+                .set_title("Attach images")
+                .pick_files()
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        attach_images(attachments, slot, files);
+    });
+}
+
 #[component]
 pub fn ComposeSheet() -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let mut ctx = use_context::<Signal<ComposeContext>>();
-    // Load any saved draft so users don't lose work across launches.
-    // Skipped in demo mode (we always want a clean slate for screenshots)
-    // and when a reply is in flight (draft would belong to a top-level
-    // post, not a specific reply target).
-    let mut text = use_signal(|| {
-        if crate::demo::is_active() {
-            return String::new();
-        }
-        crate::persistence::load_draft().unwrap_or_default()
-    });
-    // Consume a one-shot prefill handed off from another surface (the
-    // inbox quick-reply "pop out" button) so an in-progress reply isn't
-    // lost when escalating to the full composer. Runs whenever ctx
-    // changes; clearing prefill makes it idempotent.
-    use_effect(move || {
-        let pf = ctx.read().prefill.clone();
-        if let Some(t) = pf {
-            if !t.is_empty() {
-                text.set(t);
-            }
-            ctx.write().prefill = None;
-        }
-    });
+    let index = use_context::<Signal<DraftsIndex>>();
+    let mut posted_tick = use_context::<Signal<PostedTick>>();
+    // The composer owns its target (reply / quote); `ctx` only carries
+    // the *request* from whoever opened the sheet. That's what lets a
+    // half-written reply survive the user opening "New post" and back.
+    let mut reply_to = use_signal(|| None::<ReplyTarget>);
+    let mut quote_to = use_signal(|| None::<QuoteTarget>);
+    let mut text = use_signal(String::new);
     let attachments = use_signal::<Vec<AttachedImage>>(Vec::new);
-    // Single video attachment (mutually exclusive with images per
-    // the lexicon — bsky records carry one media slot). Holds raw
-    // bytes + mime + an editable alt-text field. Empty until the
-    // user drops or picks a video file.
+    // Single video attachment on the first post (mutually exclusive
+    // with images per the lexicon — bsky records carry one media slot).
     let mut video_attachment = use_signal::<Option<VideoAttachment>>(|| None);
     let mut posting = use_signal(|| false);
+    // (current post, total) while a thread is publishing.
+    let mut progress = use_signal(|| None::<(usize, usize)>);
     let mut error = use_signal(|| None::<String>);
-    // Extra posts that get chained as replies to the root after
-    // submit. Each entry is the body text of one downstream post.
-    // Plain text only — no images / facets / quotes on extras
-    // (keeps the UI focused; the root carries the heavy payload).
-    let mut thread_extras = use_signal::<Vec<String>>(Vec::new);
+    // Continuation posts (2nd, 3rd, …) of a self-thread. Each carries
+    // its own text and — via `AttachedImage::slot` — its own images.
+    let mut thread_extras = use_signal::<Vec<ExtraPost>>(Vec::new);
+    // Id of the saved draft the composer is editing (None until the
+    // first non-empty autosave).
+    let draft_id = use_signal(|| None::<String>);
+    let mut show_drafts = use_signal(|| false);
+    let mut confirm_discard = use_signal(|| false);
+    // A continuation post that should grab focus when it mounts (the
+    // one just added by "+ Add post" or a split).
+    let mut focus_extra = use_signal(|| None::<u64>);
 
     // @mention typeahead state. `mention_query` is the partial after
     // the trailing `@` in the textarea (None when no active mention).
@@ -358,8 +925,86 @@ pub fn ComposeSheet() -> Element {
     // stale-response guard the mention search uses.
     let mut link_card = use_signal::<Option<LinkCard>>(|| None);
     let mut link_card_loading = use_signal(|| false);
-    let mut link_card_dismissed = use_signal::<std::collections::HashSet<String>>(Default::default);
+    let mut link_card_dismissed = use_signal::<HashSet<String>>(Default::default);
     let mut link_card_seq = use_signal::<u64>(|| 0);
+
+    let composer = Composer {
+        session,
+        reply_to,
+        quote_to,
+        text,
+        extras: thread_extras,
+        attachments,
+        video: video_attachment,
+        link_card,
+        link_card_dismissed,
+        draft_id,
+        index,
+        error,
+    };
+
+    // Open / close transitions. On open, resolve what the sheet should
+    // show (keep the work in progress, resume a saved draft for this
+    // target, or start blank) and consume the one-shot `resume_draft`
+    // / `prefill` requests. On close, save immediately — the app may
+    // be quit right after, before a debounced autosave would fire.
+    let mut was_open = use_signal(|| false);
+    use_effect(move || {
+        let c = ctx.read().clone();
+        let prev = *was_open.peek();
+        if c.open != prev {
+            was_open.set(c.open);
+        }
+        if !c.open {
+            if prev {
+                composer.flush();
+                show_drafts.set(false);
+            }
+            return;
+        }
+        let resume = c.resume_draft.clone();
+        let prefill = c.prefill.clone().filter(|p| !p.is_empty());
+        if prev && resume.is_none() && c.prefill.is_none() {
+            return;
+        }
+        if c.resume_draft.is_some() || c.prefill.is_some() {
+            let mut w = ctx.write();
+            w.resume_draft = None;
+            w.prefill = None;
+        }
+        if let Some(id) = resume {
+            composer.switch_to(&id);
+        } else if !prev {
+            composer.open_for(c.reply_to.clone(), c.quote_to.clone());
+        }
+        if let Some(p) = prefill {
+            text.set(p);
+        }
+    });
+
+    // Debounced autosave: any change to what a draft is made of saves
+    // it 400ms after the last edit, off the UI thread.
+    let mut autosave_seq = use_signal(|| 0u64);
+    use_effect(move || {
+        let _ = text.read();
+        let _ = thread_extras.read();
+        let _ = attachments.read();
+        let _ = video_attachment.read();
+        let _ = reply_to.read();
+        let _ = quote_to.read();
+        let seq = {
+            let mut s = autosave_seq.write();
+            *s = s.wrapping_add(1);
+            *s
+        };
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            if *autosave_seq.peek() != seq || *posting.peek() {
+                return;
+            }
+            composer.save_in_background();
+        });
+    });
 
     // Debounced typeahead. `mention_query` change → wait 150ms → if
     // the query is still the same (no further keystrokes have
@@ -469,12 +1114,9 @@ pub fn ComposeSheet() -> Element {
     // Hook runs unconditionally (before the open-check) per Dioxus rules.
     use_hook(|| {
         if let Ok(p) = std::env::var("SMOOBLUE_DEBUG_ATTACH") {
-            let mut attachments = attachments;
             let path = PathBuf::from(p);
             if path.is_file() {
-                spawn(async move {
-                    inject_synthetic_attachment(&mut attachments, path).await;
-                });
+                attach_images(attachments, ROOT_SLOT, vec![path]);
             }
         }
     });
@@ -498,42 +1140,36 @@ pub fn ComposeSheet() -> Element {
         if !drag_active && !has_pending {
             return;
         }
-        let mut atts = attachments;
         let mut ctx_open = ctx;
-        let mut error_for_drop = error;
         // Open compose for either: drag-enter (user sees highlight as
         // they hover) or pending-drop (user sees the attached image).
-        if !ctx_open.read().open {
-            ctx_open.write().open = true;
+        if !ctx_open.peek().open {
+            ctx_open.write().open_new();
         }
         if !has_pending {
             return;
         }
         let drained: Vec<PathBuf> = pending_drops.write().drain(..).collect();
-        spawn(async move {
-            let already = atts.read().len();
-            let slots = MAX_IMAGES.saturating_sub(already);
-            if slots == 0 {
-                error_for_drop.set(Some(format!(
-                    "Already at {MAX_IMAGES} images — dropped screenshot ignored."
-                )));
-                return;
-            }
-            let llm: Option<Arc<dyn AltTextProvider>> =
-                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
-            for path in drained.into_iter().take(slots) {
-                if !path.is_file() {
-                    continue;
-                }
-                let att = AttachedImage::new(path.clone());
-                let id = att.id;
-                atts.write().push(att);
-                let llm_for_image = llm.clone();
-                spawn(async move {
-                    process_attachment(atts, id, path, llm_for_image).await;
-                });
-            }
-        });
+        if video_attachment.peek().is_some() {
+            error.set(Some(
+                "A post can carry a video or images, not both — remove the video to attach images."
+                    .into(),
+            ));
+            return;
+        }
+        let already = attachments
+            .peek()
+            .iter()
+            .filter(|a| a.slot == ROOT_SLOT)
+            .count();
+        if already >= MAX_IMAGES {
+            error.set(Some(format!(
+                "Already at {MAX_IMAGES} images — dropped screenshot ignored."
+            )));
+            return;
+        }
+        let files: Vec<PathBuf> = drained.into_iter().filter(|p| p.is_file()).collect();
+        attach_images(attachments, ROOT_SLOT, files);
     });
 
     let snap = ctx.read().clone();
@@ -541,13 +1177,20 @@ pub fn ComposeSheet() -> Element {
         return rsx! { Fragment {} };
     }
 
-    let reply_to = snap.reply_to.clone();
-    let quote_to = snap.quote_to.clone();
+    let reply_snap = reply_to.read().clone();
+    let quote_snap = quote_to.read().clone();
+    let extras_snap = thread_extras.read().clone();
+    let post_count = 1 + extras_snap.len();
 
     let len = text.read().chars().count();
     let remaining = MAX_LEN as i64 - len as i64;
     let over = remaining < 0;
+    let over_by = -remaining;
     let attachments_snap = attachments.read().clone();
+    let root_attachments = attachments_snap
+        .iter()
+        .filter(|a| a.slot == ROOT_SLOT)
+        .count();
     let has_attachments = !attachments_snap.is_empty();
     let any_preparing = attachments_snap
         .iter()
@@ -556,249 +1199,179 @@ pub fn ComposeSheet() -> Element {
         .iter()
         .any(|a| matches!(a.state, AttachmentState::Failed(_)));
     let has_video = video_attachment.read().is_some();
-    // A post is "empty" only if there's no text AND no attached
-    // media. Image-only / video-only posts are valid on bsky.
-    let empty = text.read().trim().is_empty() && !has_attachments && !has_video;
-    let at_image_cap = attachments_snap.len() >= MAX_IMAGES;
+    let has_card = link_card.read().is_some() && root_attachments == 0 && !has_video;
+    let over_posts = over_limit_posts(
+        std::iter::once(text.read().as_str())
+            .chain(extras_snap.iter().map(|e| e.text.as_str()))
+            .collect::<Vec<_>>(),
+    );
+    // Empty only if no post has text or media. Image-only / video-only
+    // / card-only posts are valid on bsky.
+    let empty = text.read().trim().is_empty()
+        && extras_snap.iter().all(|e| e.text.trim().is_empty())
+        && !has_attachments
+        && !has_video
+        && !has_card;
+    let at_image_cap = root_attachments >= MAX_IMAGES;
 
-    // Submit flow (shared by button click + ⌘↵ keyboard shortcut).
+    // Submit flow (shared by the button and ⌘↵ in any post). Posts
+    // the whole thread in order: post N replies to post N-1, and all
+    // share one root (the replied-to thread's root when this is a
+    // reply, else the first post). Blank continuation posts are
+    // skipped. Everything is validated up front so a too-long post 3
+    // can't fail after 1 and 2 are live.
     let do_submit = move || {
-        let len_now = text.read().chars().count();
-        if len_now > MAX_LEN {
+        if *posting.peek() {
             return;
         }
-        let attachments_now = attachments.read().clone();
-        let no_text = text.read().trim().is_empty();
-        if no_text && attachments_now.is_empty() {
+        let atts_now = attachments.peek().clone();
+        if atts_now.iter().any(|a| {
+            matches!(
+                a.state,
+                AttachmentState::Preparing | AttachmentState::Failed(_)
+            )
+        }) {
             return;
         }
-        let body = text.read().clone();
-        let sess = session.read().clone();
-        let video_snap = video_attachment.read().clone();
-        let card_snap = link_card.read().clone();
-        let quote = ctx.read().quote_to.as_ref().map(|q| StrongRef {
-            uri: q.uri.clone(),
-            cid: q.cid.clone(),
-        });
-        // root = the thread root carried on the ReplyTarget (the
-        // ancestor root for a deep reply, or the parent itself for a
-        // top-level one); parent = the post being replied to. Setting
-        // root = parent here orphaned deep replies — see th-f603e2.
-        let reply = ctx.read().reply_to.as_ref().map(|p| ReplyRef {
-            root: StrongRef {
-                uri: p.root_uri.clone(),
-                cid: p.root_cid.clone(),
-            },
-            parent: StrongRef {
-                uri: p.uri.clone(),
-                cid: p.cid.clone(),
-            },
-        });
-        // Only Ready attachments get sent. If any are still preparing,
-        // the button is disabled, so this branch only runs when all are
-        // either Ready or Failed (and we filter Failed out).
-        let to_upload: Vec<(PreparedImage, String)> = attachments_now
-            .into_iter()
-            .filter_map(|a| match a.state {
-                AttachmentState::Ready(p) => Some((p, a.alt)),
-                _ => None,
-            })
-            .collect();
-
-        posting.set(true);
-        error.set(None);
-        let mut posting = posting;
-        let mut text = text;
-        let mut attachments = attachments;
-        let mut error = error;
-        let mut ctx = ctx;
-        spawn(async move {
-            if crate::demo::is_active() || sess.is_none() {
-                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-                posting.set(false);
-                text.set(String::new());
-                let _ = crate::persistence::save_draft("");
-                attachments.set(Vec::new());
-                video_attachment.set(None);
-                link_card.set(None);
-                link_card_dismissed.write().clear();
-                let mut w = ctx.write();
-                w.reply_to = None;
-                w.quote_to = None;
-                w.open = false;
-                return;
-            }
-            let Some(client) = fresh_client(session).await else {
-                posting.set(false);
-                error.set(Some("Session expired — please sign in again.".into()));
-                return;
-            };
-
-            // Upload each prepared image, building up a PostImage list.
-            // We stop at the first failure so the user doesn't get a
-            // half-attached post.
-            let mut images: Vec<PostImage> = Vec::with_capacity(to_upload.len());
-            for (prep, alt) in to_upload {
-                let blob: BlobRef = match client.upload_blob(prep.bytes.clone(), &prep.mime).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        posting.set(false);
-                        error.set(Some(format!("Image upload failed: {e}")));
-                        return;
-                    }
-                };
-                images.push(PostImage {
-                    blob,
-                    alt,
-                    aspect_ratio: Some(AspectRatio {
-                        width: prep.width,
-                        height: prep.height,
-                    }),
-                });
-            }
-
-            // Upload the video blob if present. Mutually exclusive
-            // with images per the lexicon — if both were somehow
-            // attached we'd hit a 400 on the embed step.
-            let video_post: Option<PostVideo> = if let Some(v) = video_snap {
-                match client.upload_blob(v.bytes, &v.mime).await {
-                    Ok(blob) => Some(PostVideo {
-                        video: blob,
-                        alt: v.alt,
-                        aspect_ratio: None,
-                    }),
-                    Err(e) => {
-                        posting.set(false);
-                        error.set(Some(format!("Video upload failed: {e}")));
-                        return;
-                    }
-                }
+        let root_text = text.peek().clone();
+        let extras_now = thread_extras.peek().clone();
+        let over_any = !over_limit_posts(
+            std::iter::once(root_text.as_str())
+                .chain(extras_now.iter().map(|e| e.text.as_str()))
+                .collect::<Vec<_>>(),
+        )
+        .is_empty();
+        if over_any {
+            return;
+        }
+        let video_now = video_attachment.peek().clone();
+        let card_now = link_card.peek().clone();
+        let mut plan: Vec<OutPost> = Vec::new();
+        let slots = std::iter::once((ROOT_SLOT, root_text))
+            .chain(extras_now.into_iter().map(|e| (e.id, e.text)));
+        for (slot, body) in slots {
+            let images: Vec<(PreparedImage, String)> = atts_now
+                .iter()
+                .filter(|a| a.slot == slot)
+                .filter_map(|a| match &a.state {
+                    AttachmentState::Ready(p) => Some((p.clone(), a.alt.clone())),
+                    _ => None,
+                })
+                .collect();
+            let video = if slot == ROOT_SLOT {
+                video_now.clone()
             } else {
                 None
             };
-
-            // Detect @mentions / links / #hashtags + resolve handles
-            // to DIDs before posting. Failure here (network blip on
-            // resolveHandle) silently degrades to a plain-text post
-            // rather than blocking the user — they'd much rather
-            // their post go through than see "couldn't resolve
-            // @alice, please retry."
-            let facets = client
-                .build_facets_from_text(&body)
-                .await
-                .unwrap_or_default();
-            // Build the link-card embed only when nothing else owns the
-            // media slot (images / video). Uploading the thumb is
-            // best-effort — a failed thumb still posts the card, just
-            // without the image.
-            let external: Option<PostExternal> = if images.is_empty() && video_post.is_none() {
-                if let Some(card) = card_snap {
-                    let thumb = match card.image_url.as_deref() {
-                        Some(u) => client.upload_link_card_thumb(u).await.ok(),
-                        None => None,
-                    };
-                    Some(PostExternal {
-                        uri: card.uri,
-                        title: card.title,
-                        description: card.description,
-                        thumb,
+            // The link card rides on the first post, and only when no
+            // image / video owns its single media slot.
+            let card = if slot == ROOT_SLOT && images.is_empty() && video.is_none() {
+                card_now.clone()
+            } else {
+                None
+            };
+            if body.trim().is_empty() && images.is_empty() && video.is_none() && card.is_none() {
+                continue;
+            }
+            plan.push(OutPost {
+                slot,
+                text: body,
+                images,
+                video,
+                card,
+            });
+        }
+        if plan.is_empty() {
+            return;
+        }
+        let reply = reply_to.peek().clone();
+        let quote = quote_to.peek().clone();
+        posting.set(true);
+        error.set(None);
+        spawn(async move {
+            let total = plan.len();
+            let client = if crate::demo::is_active() {
+                None
+            } else {
+                match fresh_client(session).await {
+                    Some(c) => Some(c),
+                    None => {
+                        posting.set(false);
+                        error.set(Some("Session expired — please sign in again.".into()));
+                        return;
+                    }
+                }
+            };
+            // root = the thread root carried on the ReplyTarget (the
+            // ancestor root for a deep reply). Setting root = parent
+            // orphaned deep replies — see th-f603e2.
+            let mut root_ref = reply.as_ref().map(|r| StrongRef {
+                uri: r.root_uri.clone(),
+                cid: r.root_cid.clone(),
+            });
+            let mut parent_ref = reply.as_ref().map(|r| StrongRef {
+                uri: r.uri.clone(),
+                cid: r.cid.clone(),
+            });
+            let mut posted: Vec<(u64, CreatedRecord, String)> = Vec::new();
+            let mut failure: Option<String> = None;
+            for (i, post) in plan.iter().enumerate() {
+                progress.set(Some((i + 1, total)));
+                let reply_ref = match (&root_ref, &parent_ref) {
+                    (Some(root), Some(parent)) => Some(ReplyRef {
+                        root: root.clone(),
+                        parent: parent.clone(),
+                    }),
+                    _ => None,
+                };
+                let quote_ref = if i == 0 {
+                    quote.as_ref().map(|q| StrongRef {
+                        uri: q.uri.clone(),
+                        cid: q.cid.clone(),
                     })
                 } else {
                     None
-                }
-            } else {
-                None
-            };
-            let result = client
-                .create_post_full(
-                    &body,
-                    reply.as_ref(),
-                    &images,
-                    &facets,
-                    quote.as_ref(),
-                    video_post.as_ref(),
-                    external.as_ref(),
-                )
-                .await;
-            let root_record = match result {
-                Ok(rec) => rec,
-                Err(e) => {
-                    posting.set(false);
-                    error.set(Some(format!("Couldn't post: {e}")));
-                    return;
-                }
-            };
-
-            // Thread continuation — chain each non-empty extra as a
-            // reply with root = first post, parent = previous post.
-            // If any one fails mid-thread we surface the error but
-            // keep the root + any successful intermediate posts:
-            // partial threads are better than reverted threads (we
-            // can't atomically roll back a published post anyway).
-            let extras_snap = thread_extras.read().clone();
-            let mut prev: smooblue_atproto::CreatedRecord = root_record.clone();
-            let mut thread_error: Option<String> = None;
-            for chunk in extras_snap.iter().filter(|c| !c.trim().is_empty()) {
-                let reply_chain = smooblue_atproto::ReplyRef {
-                    root: smooblue_atproto::StrongRef {
-                        uri: root_record.uri.clone(),
-                        cid: root_record.cid.clone(),
-                    },
-                    parent: smooblue_atproto::StrongRef {
-                        uri: prev.uri.clone(),
-                        cid: prev.cid.clone(),
-                    },
                 };
-                // Re-run facet detection per chunk so mentions /
-                // links / tags work in continuation posts too.
-                let chunk_facets = client
-                    .build_facets_from_text(chunk)
-                    .await
-                    .unwrap_or_default();
-                match client
-                    .create_post_full(
-                        chunk,
-                        Some(&reply_chain),
-                        &[],
-                        &chunk_facets,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await
-                {
+                let result = match &client {
+                    Some(c) => publish_one(c, post, reply_ref.as_ref(), quote_ref.as_ref()).await,
+                    None => demo_publish(i).await,
+                };
+                match result {
                     Ok(rec) => {
-                        prev = rec;
+                        let this = StrongRef {
+                            uri: rec.uri.clone(),
+                            cid: rec.cid.clone(),
+                        };
+                        if root_ref.is_none() {
+                            root_ref = Some(this.clone());
+                        }
+                        parent_ref = Some(this);
+                        posted.push((post.slot, rec, post.text.clone()));
                     }
                     Err(e) => {
-                        thread_error = Some(format!(
-                            "Posted the first {} of {} — couldn't post the rest: {e}",
-                            extras_snap.iter().position(|c| c == chunk).unwrap_or(0) + 1,
-                            extras_snap.len() + 1,
-                        ));
+                        failure = Some(e);
                         break;
                     }
                 }
             }
-
             posting.set(false);
-            if let Some(msg) = thread_error {
-                error.set(Some(msg));
-            } else {
-                text.set(String::new());
-                thread_extras.set(Vec::new());
-                video_attachment.set(None);
-                // Drop the persisted draft now that the post is
-                // live — nothing left to recover.
-                let _ = crate::persistence::save_draft("");
-                attachments.set(Vec::new());
-                video_attachment.set(None);
-                link_card.set(None);
-                link_card_dismissed.write().clear();
-                let mut w = ctx.write();
-                w.reply_to = None;
-                w.quote_to = None;
-                w.open = false;
+            progress.set(None);
+            if !posted.is_empty() {
+                posted_tick.with_mut(|t| t.0 = t.0.wrapping_add(1));
+            }
+            match (failure, root_ref) {
+                (None, _) => {
+                    // All live — nothing left to recover.
+                    composer.discard();
+                    reply_to.set(None);
+                    quote_to.set(None);
+                    ctx.write().open = false;
+                }
+                (Some(e), _) if posted.is_empty() => {
+                    error.set(Some(format!("Couldn't post: {e}")));
+                }
+                (Some(e), Some(root)) => composer.keep_unposted(&posted, root, total, &e),
+                (Some(e), None) => error.set(Some(format!("Couldn't post: {e}"))),
             }
         });
     };
@@ -806,62 +1379,75 @@ pub fn ComposeSheet() -> Element {
     let mut do_submit_btn = do_submit;
     let mut do_submit_kbd = do_submit;
 
-    let close = move |_evt| {
-        let mut w = ctx.write();
-        w.reply_to = None;
-        w.quote_to = None;
-        w.open = false;
-        thread_extras.set(Vec::new());
-    };
-
-    // "+ Image" picker — sync rfd in spawn_blocking, then prep on a
-    // background blocking task (JPEG re-encode is CPU-bound).
-    let pick_images = move |_| {
-        let mut attachments = attachments;
-        spawn(async move {
-            let already = attachments.read().len();
-            let remaining_slots = MAX_IMAGES.saturating_sub(already);
-            if remaining_slots == 0 {
+    // Split an over-long post into as many posts as it needs, right
+    // after itself in the thread.
+    let split_post = move |slot: u64| {
+        let body = if slot == ROOT_SLOT {
+            text.peek().clone()
+        } else {
+            match thread_extras.peek().iter().find(|e| e.id == slot) {
+                Some(e) => e.text.clone(),
+                None => return,
+            }
+        };
+        let mut chunks = crate::drafts::split_for_thread(&body, MAX_LEN).into_iter();
+        let Some(first) = chunks.next() else {
+            return;
+        };
+        let rest: Vec<ExtraPost> = chunks.map(ExtraPost::new).collect();
+        if rest.is_empty() {
+            return;
+        }
+        let insert_at = if slot == ROOT_SLOT {
+            text.set(first);
+            0
+        } else {
+            let mut list = thread_extras.write();
+            let Some(pos) = list.iter().position(|e| e.id == slot) else {
                 return;
-            }
-            let files = tokio::task::spawn_blocking(move || {
-                rfd::FileDialog::new()
-                    .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif", "heic"])
-                    .set_title("Attach images")
-                    .pick_files()
-            })
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-            // Resolve once per pick — the env-derived endpoint can't
-            // change mid-session anyway.
-            let llm: Option<Arc<dyn AltTextProvider>> =
-                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
-            for path in files.into_iter().take(remaining_slots) {
-                let att = AttachedImage::new(path.clone());
-                let id = att.id;
-                attachments.write().push(att);
-                let atts = attachments;
-                let llm_for_image = llm.clone();
-                spawn(async move {
-                    process_attachment(atts, id, path, llm_for_image).await;
-                });
-            }
-        });
+            };
+            list[pos].text = first;
+            pos + 1
+        };
+        let mut list = thread_extras.write();
+        for (offset, post) in rest.into_iter().enumerate() {
+            list.insert(insert_at + offset, post);
+        }
     };
 
-    let placeholder = if reply_to.is_some() {
+    let close = move |_evt| {
+        ctx.write().open = false;
+    };
+
+    let add_post = move |_| {
+        let post = ExtraPost::new(String::new());
+        focus_extra.set(Some(post.id));
+        thread_extras.write().push(post);
+    };
+
+    let placeholder = if reply_snap.is_some() {
         "Write your reply…"
     } else {
         "What's up?"
     };
-    let title_text = if reply_to.is_some() {
+    let base_title = if reply_snap.is_some() {
         "Reply"
+    } else if quote_snap.is_some() {
+        "Quote post"
     } else {
         "New post"
     };
-    let button_text = if reply_to.is_some() { "Reply" } else { "Post" };
+    let title_text = if post_count > 1 {
+        format!("{base_title} · thread of {post_count}")
+    } else {
+        base_title.to_string()
+    };
+    let button_text = match (reply_snap.is_some(), post_count > 1) {
+        (true, false) => "Reply",
+        (true, true) => "Reply with thread",
+        (false, false) => "Post",
+        (false, true) => "Post thread",
+    };
 
     let textarea_class = if over {
         "input input--lg compose__textarea compose__textarea--over"
@@ -869,7 +1455,19 @@ pub fn ComposeSheet() -> Element {
         "input input--lg compose__textarea"
     };
 
-    let post_disabled = empty || over || any_preparing || any_failed || *posting.read();
+    let post_disabled =
+        empty || !over_posts.is_empty() || any_preparing || any_failed || *posting.read();
+
+    // Drafts other than the one on screen — what the "Drafts" button
+    // offers to switch to.
+    let current_id = draft_id.read().clone();
+    let other_drafts = index
+        .read()
+        .0
+        .iter()
+        .filter(|d| Some(&d.id) != current_id.as_ref())
+        .count();
+    let saved = current_id.is_some() && !empty;
 
     // Drag-and-drop: accept image files dropped anywhere on the
     // compose sheet. Same pipeline as the +Image picker — push an
@@ -897,98 +1495,66 @@ pub fn ComposeSheet() -> Element {
             return;
         };
         let names = file_engine.files();
-        let mut attachments_for_drop = attachments;
         spawn(async move {
-            let already = attachments_for_drop.read().len();
-            let slots = MAX_IMAGES.saturating_sub(already);
-            if slots == 0 {
-                return;
-            }
-            let llm: Option<Arc<dyn AltTextProvider>> =
-                SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
-            for name in names.into_iter().take(slots) {
+            let mut images = Vec::new();
+            for name in names {
                 // file_engine.files() returns paths on desktop;
                 // skip anything that isn't a readable file.
                 let path = PathBuf::from(&name);
                 if !path.is_file() {
                     continue;
                 }
-                let ext = path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .map(|s| s.to_ascii_lowercase())
-                    .unwrap_or_default();
-                // Video: replaces any prior video attachment (only
-                // one video per post per the lexicon). Loaded fully
-                // into memory — bsky caps video at ~50MB which is
-                // fine to hold; bigger files will OOM the renderer
-                // before we even hit the upload step (caller's
-                // responsibility to crop / compress).
-                if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm") {
-                    // Size-gate BEFORE reading so a 4 GB drop can't
-                    // OOM the renderer. bsky's own ceiling is 50 MB —
-                    // anything bigger would 413 from the AppView
-                    // even if we did manage to upload it. Surface a
-                    // clear error toast instead of silently dropping.
-                    let size = match std::fs::metadata(&path) {
-                        Ok(m) => m.len(),
-                        Err(_) => continue,
-                    };
-                    if size > MAX_VIDEO_BYTES {
-                        error.set(Some(format!(
-                            "Video too large ({:.1} MB). Bluesky caps videos at {} MB.",
-                            size as f64 / 1_048_576.0,
-                            MAX_VIDEO_BYTES / 1_048_576,
-                        )));
+                let ext = lower_ext(&path);
+                // Video: replaces any prior video attachment (only one
+                // video per post per the lexicon). Size-gated BEFORE
+                // reading so a 4 GB drop can't OOM the renderer, and
+                // read off the renderer thread.
+                if video_mime(&ext).is_some() {
+                    if attachments.peek().iter().any(|a| a.slot == ROOT_SLOT) {
+                        error.set(Some(
+                            "A post can carry a video or images, not both — remove the images to attach a video."
+                                .into(),
+                        ));
                         break;
                     }
-                    let mime = match ext.as_str() {
-                        "mp4" | "m4v" => "video/mp4",
-                        "mov" => "video/quicktime",
-                        "webm" => "video/webm",
-                        _ => "application/octet-stream",
-                    }
-                    .to_string();
                     let path_for_read = path.clone();
-                    // Read off the renderer thread — even 50 MB of
-                    // disk I/O stutters the UI when done synchronously.
-                    let bytes =
-                        match tokio::task::spawn_blocking(move || std::fs::read(&path_for_read))
-                            .await
-                        {
-                            Ok(Ok(b)) => b,
-                            _ => {
-                                error.set(Some("Couldn't read the dropped video file.".into()));
-                                break;
-                            }
-                        };
-                    video_attachment.set(Some(VideoAttachment {
-                        source_path: path,
-                        bytes,
-                        mime,
-                        alt: String::new(),
-                    }));
-                    // One video per post — don't process more dropped
-                    // files; if the user dropped an image alongside
-                    // we'd otherwise mix media types.
+                    match tokio::task::spawn_blocking(move || {
+                        read_video(&path_for_read, String::new())
+                    })
+                    .await
+                    {
+                        Ok(Ok(Some(v))) => video_attachment.set(Some(v)),
+                        Ok(Err(msg)) => error.set(Some(msg)),
+                        _ => error.set(Some("Couldn't read the dropped video file.".into())),
+                    }
+                    // One video per post — don't mix media types.
                     break;
                 }
-                if !matches!(
-                    ext.as_str(),
-                    "jpg" | "jpeg" | "png" | "webp" | "gif" | "heic"
-                ) {
-                    continue;
+                if is_image_ext(&ext) {
+                    images.push(path);
                 }
-                let att = AttachedImage::new(path.clone());
-                let id = att.id;
-                attachments_for_drop.write().push(att);
-                let atts = attachments_for_drop;
-                let llm_for_image = llm.clone();
-                spawn(async move {
-                    process_attachment(atts, id, path, llm_for_image).await;
-                });
             }
+            if images.is_empty() {
+                return;
+            }
+            if video_attachment.peek().is_some() {
+                error.set(Some(
+                    "A post can carry a video or images, not both — remove the video to attach images."
+                        .into(),
+                ));
+                return;
+            }
+            attach_images(attachments, ROOT_SLOT, images);
         });
+    };
+
+    let index_snap = index.read().0.clone();
+    let attach_title = if has_video {
+        "Remove the video to attach images"
+    } else if at_image_cap {
+        "Image limit reached (4 max)"
+    } else {
+        "Attach image"
     };
 
     rsx! {
@@ -1017,22 +1583,76 @@ pub fn ComposeSheet() -> Element {
                 ondrop: on_drop,
                 div { class: "compose__head",
                     span { class: "compose__title", "{title_text}" }
+                    if saved {
+                        span { class: "compose__saved",
+                            title: "Everything you type is kept as a draft until it's posted or discarded.",
+                            icons::Check { size: icons::Size::Sm }
+                            "Draft saved"
+                        }
+                    }
+                    if other_drafts > 0 || *show_drafts.read() {
+                        button {
+                            class: if *show_drafts.read() { "compose__head-btn compose__head-btn--active" } else { "compose__head-btn" },
+                            title: "Your saved drafts",
+                            onclick: move |_| {
+                                let open = *show_drafts.peek();
+                                show_drafts.set(!open);
+                            },
+                            "Drafts"
+                            if other_drafts > 0 {
+                                span { class: "compose__head-count", "{other_drafts}" }
+                            }
+                        }
+                    }
+                    if !empty {
+                        button { class: "compose__head-btn",
+                            title: "Start a new post — this one stays in Drafts",
+                            onclick: move |_| {
+                                composer.start_new();
+                                show_drafts.set(false);
+                            },
+                            icons::Plus { size: icons::Size::Sm }
+                            "New"
+                        }
+                    }
                     button { class: "compose__close",
-                        title: "Close (Esc)",
+                        title: "Close (Esc) — your draft is saved",
                         onclick: close,
                         icons::X { size: icons::Size::Sm }
                     }
                 }
-                if let Some(parent) = reply_to.as_ref() {
+                if *show_drafts.read() {
+                    DraftsList {
+                        drafts: index_snap,
+                        current: current_id.clone(),
+                        on_open: move |id: String| {
+                            composer.switch_to(&id);
+                            show_drafts.set(false);
+                        },
+                        on_delete: move |id: String| {
+                            if draft_id.peek().as_deref() == Some(id.as_str()) {
+                                composer.discard();
+                            } else {
+                                if let Err(e) = crate::drafts::delete(&id) {
+                                    tracing::warn!(error = %e, "compose: draft delete failed");
+                                }
+                                refresh_drafts_index(index, composer.account_did());
+                            }
+                        },
+                    }
+                } else {
+                if let Some(parent) = reply_snap.as_ref() {
                     div { class: "compose__reply-context",
                         div { class: "compose__reply-author",
                             "Replying to "
                             span { class: "compose__reply-handle", "@{parent.handle}" }
                         }
-                        p { class: "compose__reply-text", "{parent.text}" }
+                        if !parent.text.is_empty() {
+                            p { class: "compose__reply-text", "{parent.text}" }
+                        }
                     }
                 }
-                if let Some(q) = quote_to.as_ref() {
+                if let Some(q) = quote_snap.as_ref() {
                     div { class: "compose__quote-context",
                         div { class: "compose__reply-author",
                             "Quoting "
@@ -1042,6 +1662,9 @@ pub fn ComposeSheet() -> Element {
                     }
                 }
                 div { class: "compose__textarea-wrap",
+                    if post_count > 1 {
+                        span { class: "compose__thread-label compose__thread-label--root", "1/{post_count}" }
+                    }
                     textarea {
                         class: "{textarea_class}",
                         placeholder: "{placeholder}",
@@ -1057,24 +1680,11 @@ pub fn ComposeSheet() -> Element {
                         value: "{text}",
                         oninput: move |e| {
                             let v = e.value();
-                            // Update the signal first — the textarea must
-                            // reflect the keystroke immediately.
-                            text.set(v.clone());
                             // Drive the @mention popover off the same
                             // event so we don't need a second listener.
                             mention_query.set(active_mention_prefix(&v).map(String::from));
-                            // Move the file write OFF the render thread.
-                            // Was blocking inline before, causing visible
-                            // keystroke lag on long drafts / slower disks
-                            // (every keystroke = create_dir_all + write).
-                            // spawn_blocking is safe + cheap; a few
-                            // redundant writes per second is fine, the
-                            // file just gets overwritten with the latest.
-                            if !crate::demo::is_active() {
-                                tokio::task::spawn_blocking(move || {
-                                    let _ = crate::persistence::save_draft(&v);
-                                });
-                            }
+                            // The autosave effect picks the change up.
+                            text.set(v);
                         },
                         onkeydown: move |e| {
                             let popover_open = mention_query.peek().is_some()
@@ -1101,6 +1711,9 @@ pub fn ComposeSheet() -> Element {
                                     }
                                     Key::Escape => {
                                         e.prevent_default();
+                                        // Close only the popover, not the
+                                        // whole sheet.
+                                        e.stop_propagation();
                                         mention_query.set(None);
                                         mention_results.set(Vec::new());
                                         return;
@@ -1122,16 +1735,9 @@ pub fn ComposeSheet() -> Element {
                                                 let snap = text.peek();
                                                 replace_mention_prefix(&snap, &actor.handle)
                                             };
-                                            text.set(new_text.clone());
+                                            text.set(new_text);
                                             mention_query.set(None);
                                             mention_results.set(Vec::new());
-                                            if !crate::demo::is_active() {
-                                                tokio::task::spawn_blocking(move || {
-                                                    let _ = crate::persistence::save_draft(
-                                                        &new_text,
-                                                    );
-                                                });
-                                            }
                                         }
                                         return;
                                     }
@@ -1152,7 +1758,7 @@ pub fn ComposeSheet() -> Element {
                             // Solves macOS's screenshot-floater drag, which
                             // hands Wry an unresolvable NSFilePromise.
                             if cmd && e.key().to_string() == "v" {
-                                spawn_paste_clipboard_image(attachments);
+                                spawn_paste_clipboard_image(attachments, ROOT_SLOT);
                             }
                         },
                     }
@@ -1184,16 +1790,9 @@ pub fn ComposeSheet() -> Element {
                                                     let snap = text.peek();
                                                     replace_mention_prefix(&snap, &handle)
                                                 };
-                                                text.set(new_text.clone());
+                                                text.set(new_text);
                                                 mention_query.set(None);
                                                 mention_results.set(Vec::new());
-                                                if !crate::demo::is_active() {
-                                                    tokio::task::spawn_blocking(move || {
-                                                        let _ = crate::persistence::save_draft(
-                                                            &new_text,
-                                                        );
-                                                    });
-                                                }
                                             },
                                             div { class: "compose__mention-avatar",
                                                 if let Some(av) = actor.avatar.as_ref() {
@@ -1217,8 +1816,21 @@ pub fn ComposeSheet() -> Element {
                         }
                     }
                 }
-                if has_attachments {
-                    AttachmentGrid { attachments }
+                if over {
+                    div { class: "compose__split-row",
+                        span { "This post is {over_by} characters over." }
+                        button { class: "compose__split",
+                            title: "Break this post into a thread at sentence and word boundaries",
+                            onclick: move |_| {
+                                let mut split = split_post;
+                                split(ROOT_SLOT);
+                            },
+                            "Split into thread"
+                        }
+                    }
+                }
+                if root_attachments > 0 {
+                    AttachmentGrid { attachments, slot: ROOT_SLOT }
                 }
                 if let Some(v) = video_attachment.read().clone() {
                     div { class: "compose__video-tile",
@@ -1258,7 +1870,7 @@ pub fn ComposeSheet() -> Element {
                 // attach for the first URL in the post. Hidden once
                 // images / a video are attached (they own the media
                 // slot, so the card won't be sent). The × dismisses it.
-                if attachments_snap.is_empty() && !has_video {
+                if root_attachments == 0 && !has_video {
                     if let Some(card) = link_card.read().clone() {
                         div { class: "compose__link-card",
                             if let Some(img) = card.image_url.as_ref() {
@@ -1291,54 +1903,64 @@ pub fn ComposeSheet() -> Element {
                         }
                     }
                 }
-                // Thread extras — only shown when at least one extra
-                // has been added. Each is a smaller textarea with a
-                // remove (×) button. Plain text only (intentional).
-                if !thread_extras.read().is_empty() {
+                // Continuation posts of the thread. Each is a full post:
+                // its own counter, split, images, and paste target.
+                if !extras_snap.is_empty() {
                     div { class: "compose__thread",
-                        for (idx, extra) in thread_extras.read().clone().into_iter().enumerate() {
-                            div { class: "compose__thread-row",
-                                key: "extra-{idx}",
-                                span { class: "compose__thread-label", "{idx + 2}/" }
-                                textarea {
-                                    class: "input compose__thread-text",
-                                    placeholder: "Continue the thread…",
-                                    value: "{extra}",
-                                    oninput: move |e| {
-                                        let v = e.value();
-                                        if let Some(slot) = thread_extras.write().get_mut(idx) {
-                                            *slot = v;
-                                        }
-                                    },
-                                }
-                                button { class: "compose__thread-remove",
-                                    title: "Remove",
-                                    onclick: move |_| {
-                                        thread_extras.write().remove(idx);
-                                    },
-                                    icons::X { size: icons::Size::Sm }
-                                }
+                        for (idx, extra) in extras_snap.iter().cloned().enumerate() {
+                            ExtraPostEditor {
+                                key: "{extra.id}",
+                                position: idx + 2,
+                                total: post_count,
+                                post: extra.clone(),
+                                extras: thread_extras,
+                                attachments,
+                                focus_extra,
+                                on_submit: move |_: ()| {
+                                    let mut submit = do_submit;
+                                    submit();
+                                },
+                                on_split: move |slot: u64| {
+                                    let mut split = split_post;
+                                    split(slot);
+                                },
                             }
                         }
                     }
                 }
                 div { class: "compose__bar",
-                    if reply_to.is_none() && quote_to.is_none() {
-                        button { class: "compose__thread-add",
-                            title: "Add another post to chain as a self-thread",
-                            onclick: move |_| {
-                                thread_extras.write().push(String::new());
-                            },
-                            icons::Plus { size: icons::Size::Sm }
-                            " Thread"
-                        }
+                    button { class: "compose__thread-add",
+                        title: "Add another post to this thread",
+                        onclick: add_post,
+                        icons::Plus { size: icons::Size::Sm }
+                        " Add post"
                     }
                     button {
-                        class: if at_image_cap { "compose__attach compose__attach--disabled" } else { "compose__attach" },
-                        title: if at_image_cap { "Image limit reached (4 max)" } else { "Attach image" },
-                        disabled: at_image_cap,
-                        onclick: pick_images,
+                        class: if at_image_cap || has_video { "compose__attach compose__attach--disabled" } else { "compose__attach" },
+                        title: "{attach_title}",
+                        disabled: at_image_cap || has_video,
+                        onclick: move |_| pick_images_into(attachments, ROOT_SLOT),
                         icons::ImageIcon { size: icons::Size::Sm }
+                    }
+                    if !empty {
+                        button {
+                            class: if *confirm_discard.read() { "compose__discard compose__discard--confirm" } else { "compose__discard" },
+                            title: "Discard this draft",
+                            onclick: move |_| {
+                                if *confirm_discard.peek() {
+                                    confirm_discard.set(false);
+                                    composer.discard();
+                                } else {
+                                    confirm_discard.set(true);
+                                    spawn(async move {
+                                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                        confirm_discard.set(false);
+                                    });
+                                }
+                            },
+                            icons::Trash2 { size: icons::Size::Sm }
+                            if *confirm_discard.read() { " Discard?" }
+                        }
                     }
                     ProgressRing { used: len, max: MAX_LEN }
                     span {
@@ -1354,14 +1976,191 @@ pub fn ComposeSheet() -> Element {
                         disabled: post_disabled,
                         onclick: move |_| do_submit_btn(),
                         if *posting.read() {
-                            if has_attachments { "Uploading…" } else { "Posting…" }
+                            match *progress.read() {
+                                Some((i, n)) if n > 1 => rsx! { "Posting {i}/{n}…" },
+                                _ if has_attachments || has_video => rsx! { "Uploading…" },
+                                _ => rsx! { "Posting…" },
+                            }
                         } else {
                             "{button_text}"
                         }
                     }
                 }
+                if over_posts.iter().any(|&i| i > 0) {
+                    div { class: "compose__error",
+                        {
+                            let which: Vec<String> = over_posts
+                                .iter()
+                                .filter(|&&i| i > 0)
+                                .map(|i| (i + 1).to_string())
+                                .collect();
+                            let noun = if which.len() == 1 { "Post" } else { "Posts" };
+                            format!("{noun} {} over {MAX_LEN} characters — shorten or split before posting.", which.join(", "))
+                        }
+                    }
+                }
                 if let Some(msg) = &*error.read() {
                     div { class: "compose__error", "{msg}" }
+                }
+                }
+            }
+        }
+    }
+}
+
+/// One continuation post (2nd, 3rd, …) in the thread composer.
+#[component]
+fn ExtraPostEditor(
+    position: usize,
+    total: usize,
+    post: ExtraPost,
+    extras: Signal<Vec<ExtraPost>>,
+    attachments: Signal<Vec<AttachedImage>>,
+    focus_extra: Signal<Option<u64>>,
+    on_submit: EventHandler<()>,
+    on_split: EventHandler<u64>,
+) -> Element {
+    let id = post.id;
+    let len = post.text.chars().count();
+    let remaining = MAX_LEN as i64 - len as i64;
+    let over = remaining < 0;
+    let over_by = -remaining;
+    let image_count = attachments.read().iter().filter(|a| a.slot == id).count();
+    let mut extras_w = extras;
+    let mut attachments_w = attachments;
+    let mut focus = focus_extra;
+    rsx! {
+        div { class: "compose__thread-post",
+            div { class: "compose__thread-row",
+                span { class: "compose__thread-label", "{position}/{total}" }
+                textarea {
+                    class: if over { "input compose__thread-text compose__textarea--over" } else { "input compose__thread-text" },
+                    placeholder: "Continue the thread…",
+                    value: "{post.text}",
+                    onmounted: move |evt: Event<MountedData>| {
+                        if *focus.peek() == Some(id) {
+                            focus.set(None);
+                            spawn(async move {
+                                let _ = evt.data().set_focus(true).await;
+                            });
+                        }
+                    },
+                    oninput: move |e| {
+                        let v = e.value();
+                        if let Some(slot) = extras_w.write().iter_mut().find(|p| p.id == id) {
+                            slot.text = v;
+                        }
+                    },
+                    onkeydown: move |e| {
+                        let cmd = e.modifiers().meta() || e.modifiers().ctrl();
+                        if cmd && e.key() == Key::Enter {
+                            on_submit.call(());
+                            return;
+                        }
+                        if cmd && e.key().to_string() == "v" {
+                            spawn_paste_clipboard_image(attachments, id);
+                        }
+                    },
+                }
+                div { class: "compose__thread-tools",
+                    span {
+                        class: if over { "compose__thread-count compose__counter--over" } else { "compose__thread-count" },
+                        "{remaining}"
+                    }
+                    button {
+                        class: if image_count >= MAX_IMAGES { "compose__attach compose__attach--disabled" } else { "compose__attach" },
+                        title: if image_count >= MAX_IMAGES { "Image limit reached (4 max)" } else { "Attach image to this post" },
+                        disabled: image_count >= MAX_IMAGES,
+                        onclick: move |_| pick_images_into(attachments, id),
+                        icons::ImageIcon { size: icons::Size::Sm }
+                    }
+                    button { class: "compose__thread-remove",
+                        title: "Remove this post from the thread",
+                        onclick: move |_| {
+                            extras_w.write().retain(|p| p.id != id);
+                            attachments_w.write().retain(|a| a.slot != id);
+                        },
+                        icons::X { size: icons::Size::Sm }
+                    }
+                }
+            }
+            if over {
+                div { class: "compose__split-row",
+                    span { "{over_by} characters over." }
+                    button { class: "compose__split",
+                        onclick: move |_| on_split.call(id),
+                        "Split into thread"
+                    }
+                }
+            }
+            if image_count > 0 {
+                AttachmentGrid { attachments, slot: id }
+            }
+        }
+    }
+}
+
+/// The compose sheet's saved-drafts list.
+#[component]
+fn DraftsList(
+    drafts: Vec<Draft>,
+    current: Option<String>,
+    on_open: EventHandler<String>,
+    on_delete: EventHandler<String>,
+) -> Element {
+    // Two-step delete: first click arms the row, second deletes.
+    let mut armed = use_signal(|| None::<String>);
+    if drafts.is_empty() {
+        return rsx! {
+            div { class: "compose__drafts-empty",
+                "No saved drafts. Anything you start writing is kept here until you post or discard it."
+            }
+        };
+    }
+    rsx! {
+        div { class: "compose__drafts",
+            for d in drafts {
+                {
+                    let id_open = d.id.clone();
+                    let id_delete = d.id.clone();
+                    let is_current = current.as_deref() == Some(d.id.as_str());
+                    let is_armed = armed.read().as_deref() == Some(d.id.as_str());
+                    let preview = d.preview(140);
+                    let label = d.label();
+                    let ts = d.updated_at.to_rfc3339();
+                    rsx! {
+                        div { key: "{d.id}",
+                            class: if is_current { "compose__draft compose__draft--current" } else { "compose__draft" },
+                            button { class: "compose__draft-body",
+                                title: "Open this draft",
+                                onclick: move |_| on_open.call(id_open.clone()),
+                                div { class: "compose__draft-meta",
+                                    span { class: "compose__draft-label", "{label}" }
+                                    if is_current {
+                                        span { class: "compose__draft-badge", "editing" }
+                                    }
+                                    span { class: "compose__draft-time",
+                                        icons::TimeAgo { text_at_render: String::new(), source_ts: Some(ts) }
+                                    }
+                                }
+                                span { class: "compose__draft-preview", "{preview}" }
+                            }
+                            button {
+                                class: if is_armed { "compose__draft-delete compose__draft-delete--armed" } else { "compose__draft-delete" },
+                                title: if is_armed { "Click again to delete" } else { "Delete draft" },
+                                onclick: move |_| {
+                                    if is_armed {
+                                        armed.set(None);
+                                        on_delete.call(id_delete.clone());
+                                    } else {
+                                        armed.set(Some(id_delete.clone()));
+                                    }
+                                },
+                                icons::Trash2 { size: icons::Size::Sm }
+                                if is_armed { " Delete?" }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1370,9 +2169,15 @@ pub fn ComposeSheet() -> Element {
 
 /// Thumbnail grid for attached images. Each tile has a preview, an
 /// alt-text textarea, and a small "X" to remove.
+/// Only the images of one post (`slot`) in the thread are shown.
 #[component]
-fn AttachmentGrid(attachments: Signal<Vec<AttachedImage>>) -> Element {
-    let snapshot = attachments.read().clone();
+fn AttachmentGrid(attachments: Signal<Vec<AttachedImage>>, slot: u64) -> Element {
+    let snapshot: Vec<AttachedImage> = attachments
+        .read()
+        .iter()
+        .filter(|a| a.slot == slot)
+        .cloned()
+        .collect();
     rsx! {
         div { class: "compose__attachments",
             for att in snapshot {
@@ -1565,27 +2370,15 @@ fn AttachmentTile(att: AttachedImage, attachments: Signal<Vec<AttachedImage>>) -
     }
 }
 
-/// Debug-only: synthesize an AttachedImage from a path on disk, run
-/// the same pipeline as the real picker. Used by
-/// SMOOBLUE_DEBUG_ATTACH for screenshots.
-async fn inject_synthetic_attachment(attachments: &mut Signal<Vec<AttachedImage>>, path: PathBuf) {
-    let llm: Option<Arc<dyn AltTextProvider>> =
-        SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
-    let att = AttachedImage::new(path.clone());
-    let id = att.id;
-    attachments.write().push(att);
-    process_attachment(*attachments, id, path, llm).await;
-}
-
 /// Spawn the clipboard-paste image attach. Reads the clipboard on a
 /// blocking thread, PNG-encodes the raw RGBA, drops it in `$TMPDIR`,
 /// then funnels through the same `process_attachment` pipeline drag-drop
 /// and the file picker use. Silent no-op when the clipboard holds no
 /// image — the textarea's native paste handler still runs for text.
-fn spawn_paste_clipboard_image(mut attachments: Signal<Vec<AttachedImage>>) {
+fn spawn_paste_clipboard_image(attachments: Signal<Vec<AttachedImage>>, slot: u64) {
     spawn(async move {
-        let already = attachments.read().len();
-        if MAX_IMAGES.saturating_sub(already) == 0 {
+        let already = attachments.peek().iter().filter(|a| a.slot == slot).count();
+        if already >= MAX_IMAGES {
             return;
         }
         // Read the clipboard on the MAIN thread. macOS NSPasteboard is
@@ -1603,12 +2396,7 @@ fn spawn_paste_clipboard_image(mut attachments: Signal<Vec<AttachedImage>>) {
             Ok(Ok(p)) => p,
             _ => return,
         };
-        let llm: Option<Arc<dyn AltTextProvider>> =
-            SmooLlmAltText::from_env().map(|p| Arc::new(p) as Arc<dyn AltTextProvider>);
-        let att = AttachedImage::new(path.clone());
-        let id = att.id;
-        attachments.write().push(att);
-        process_attachment(attachments, id, path, llm).await;
+        attach_images(attachments, slot, vec![path]);
     });
 }
 
@@ -1623,15 +2411,21 @@ fn read_clipboard_image() -> anyhow::Result<image::RgbaImage> {
         .ok_or_else(|| anyhow::anyhow!("clipboard image dims/bytes mismatch"))
 }
 
-/// Blocking: PNG-encode the RGBA and write it to a uniquely-named file
-/// under the OS temp dir, returning the path. Safe off the main thread —
-/// no pasteboard access here.
+/// Blocking: PNG-encode the RGBA and write it to a uniquely-named file,
+/// returning the path. Safe off the main thread — no pasteboard access
+/// here. Pasted images go under the app's data dir (not `$TMPDIR`,
+/// which macOS sweeps) because a draft holding one may be resumed days
+/// later.
 fn encode_rgba_to_temp(rgba: image::RgbaImage) -> anyhow::Result<PathBuf> {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("smooblue-paste-{nanos}.png"));
+    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
+        .map(|d| d.data_dir().join("pasted"))
+        .unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("smooblue-paste-{nanos}.png"));
     rgba.save_with_format(&path, image::ImageFormat::Png)?;
     Ok(path)
 }
@@ -1641,12 +2435,17 @@ fn encode_rgba_to_temp(rgba: image::RgbaImage) -> anyhow::Result<PathBuf> {
 /// finishes, write the result into the slot AND recompute the merged
 /// alt text (unless the user has already typed). Idempotent if either
 /// task fails — we just leave the slot's field empty.
+///
+/// `describe = false` skips the LLM + OCR pass entirely — used when
+/// restoring a draft image that already has alt text.
 async fn process_attachment(
     attachments: Signal<Vec<AttachedImage>>,
     id: u64,
     path: PathBuf,
     llm: Option<Arc<dyn AltTextProvider>>,
+    describe: bool,
 ) {
+    let llm = if describe { llm } else { None };
     let mut atts = attachments;
     let path_for_prep = path.clone();
     let prep_result = tokio::task::spawn_blocking(move || prepare_from_path(&path_for_prep)).await;
@@ -1663,7 +2462,7 @@ async fn process_attachment(
         ),
     };
     let has_llm = llm.is_some();
-    let cfg_ocr = cfg!(target_os = "macos");
+    let cfg_ocr = describe && cfg!(target_os = "macos");
     if let Some(slot) = atts.write().iter_mut().find(|a| a.id == id) {
         slot.state = state;
         if ready_bytes.is_some() && has_llm {
@@ -1676,6 +2475,9 @@ async fn process_attachment(
     let Some((bytes, mime)) = ready_bytes else {
         return;
     };
+    if !describe {
+        return;
+    }
 
     // Kick off LLM + OCR in parallel. Two tokio joins so either can
     // complete independently and update the alt incrementally.

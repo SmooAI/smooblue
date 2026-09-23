@@ -256,6 +256,36 @@ pub fn Trash2(size: Size) -> Element {
 }
 
 #[component]
+pub fn ArrowLeft(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdArrowLeft } }
+}
+
+#[component]
+pub fn ArrowRight(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdArrowRight } }
+}
+
+#[component]
+pub fn History(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdHistory } }
+}
+
+#[component]
+pub fn PenLine(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdPenLine } }
+}
+
+#[component]
+pub fn RotateCcw(size: Size) -> Element {
+    let px = size.px();
+    rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdRotateCcw } }
+}
+
+#[component]
 pub fn ArrowUp(size: Size) -> Element {
     let px = size.px();
     rsx! { Icon { width: px, height: px, fill: "currentColor", icon: ld_icons::LdArrowUp } }

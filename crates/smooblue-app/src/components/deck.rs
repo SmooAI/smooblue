@@ -2,11 +2,21 @@
 //! (compose) + the global compose sheet + the search-column add sheet.
 
 use crate::components::{
-    column::Column, compose::ComposeSheet, engagement::EngagementSheet, lightbox::LightboxSheet,
-    messages_sheet::MessagesSheet, post::PostMenu, profile::ProfileSheet,
-    profile_edit_sheet::ProfileEditSheet, report_sheet::ReportSheet,
-    saved_feeds_sheet::SavedFeedsSheet, search_sheet::SearchSheet, settings_sheet::SettingsSheet,
-    sidebar::Sidebar, thread::ThreadSheet,
+    column::Column,
+    compose::ComposeSheet,
+    engagement::EngagementSheet,
+    history_sheet::{DraftResumeChip, HistorySheet, ReopenToast},
+    lightbox::LightboxSheet,
+    messages_sheet::MessagesSheet,
+    post::PostMenu,
+    profile::ProfileSheet,
+    profile_edit_sheet::ProfileEditSheet,
+    report_sheet::ReportSheet,
+    saved_feeds_sheet::SavedFeedsSheet,
+    search_sheet::SearchSheet,
+    settings_sheet::SettingsSheet,
+    sidebar::Sidebar,
+    thread::ThreadSheet,
 };
 use crate::icons;
 use crate::keyboard::{self, KeyContext};
@@ -26,6 +36,7 @@ pub fn DeckShell() -> Element {
     let search_open = use_signal(|| false);
     let saved_feeds_open = use_signal(|| false);
     let settings_open = use_signal(|| false);
+    let history_open = use_signal(|| false);
 
     // Bundle every signal the vim keyboard handler needs so we
     // don't have to thread a dozen args through the onkeydown
@@ -45,7 +56,27 @@ pub fn DeckShell() -> Element {
         settings_open,
         lightbox: use_context::<Signal<LightboxFocus>>(),
         analytics_expanded: use_context::<Signal<crate::state::AnalyticsExpanded>>(),
+        nav: use_context::<Signal<crate::history::NavHistory>>(),
+        history_open,
     };
+
+    // Drafts index for the active account (resume chip + the
+    // composer's Drafts list). Reloads when the account changes; the
+    // first load also imports a pre-multi-draft `draft.txt`.
+    let session_for_drafts = key_ctx.session;
+    let drafts_index = use_context::<Signal<crate::state::DraftsIndex>>();
+    use_effect(move || {
+        let did = session_for_drafts.read().as_ref().map(|s| s.did.clone());
+        spawn(async move {
+            if !crate::demo::is_active() {
+                let res = tokio::task::spawn_blocking(crate::drafts::import_legacy_draft).await;
+                if let Ok(Err(e)) = res {
+                    tracing::warn!(error = %e, "drafts: legacy import failed");
+                }
+            }
+            crate::state::refresh_drafts_index(drafts_index, did);
+        });
+    });
 
     // Chord-timeout: clear PendingChord after 1.5s so a stray `g`
     // doesn't sit there waiting forever for the second key. Bsky's
@@ -104,11 +135,7 @@ pub fn DeckShell() -> Element {
         }
     });
 
-    let open_compose = move |_| {
-        let mut w = compose_ctx.write();
-        w.reply_to = None;
-        w.open = true;
-    };
+    let open_compose = move |_| compose_ctx.write().open_new();
 
     // "Update available" toast. Bottom-left, dismissible, links to
     // the GitHub release page. Auto-installer is a future pearl —
@@ -173,6 +200,9 @@ pub fn DeckShell() -> Element {
                         KbdRow { keys: "g g", action: "Top of column" }
                         KbdRow { keys: "G", action: "Bottom of column" }
                         KbdRow { keys: "Space + 1–9", action: "Focus column N" }
+                        KbdRow { keys: "⌘[  ·  ⌘]", action: "Back / forward in a thread or profile" }
+                        KbdRow { keys: "⌘⇧T", action: "Reopen the thread or profile you just closed" }
+                        KbdRow { keys: "⌘Y", action: "History — recently viewed threads & profiles" }
 
                         // Section: Add / open columns
                         h3 { class: "kbd-help__section", "Go to column" }
@@ -185,8 +215,8 @@ pub fn DeckShell() -> Element {
                         // Section: Compose
                         h3 { class: "kbd-help__section", "Compose" }
                         KbdRow { keys: "n  ·  Space + n", action: "New post" }
-                        KbdRow { keys: "⌘↵", action: "Submit post (inside compose)" }
-                        KbdRow { keys: "Esc", action: "Close any sheet" }
+                        KbdRow { keys: "⌘↵", action: "Post (the whole thread, inside compose)" }
+                        KbdRow { keys: "Esc", action: "Close any sheet — drafts are kept" }
 
                         // Section: Quick actions
                         h3 { class: "kbd-help__section", "Quick actions" }
@@ -325,12 +355,13 @@ pub fn DeckShell() -> Element {
             onkeydown: onkeydown,
             ondragover: on_window_dragover,
             ondrop: on_window_drop,
-            Sidebar { search_open, saved_feeds_open, settings_open }
+            Sidebar { search_open, saved_feeds_open, settings_open, history_open }
             div { class: "deck-columns",
                 for spec in columns {
                     Column { key: "{spec.id}", spec: spec.clone() }
                 }
             }
+            DraftResumeChip {}
             button {
                 class: "fab",
                 title: "New post",
@@ -349,9 +380,11 @@ pub fn DeckShell() -> Element {
             PostMenu {}
             LightboxSheet {}
             ProfileEditSheet {}
+            HistorySheet { open: history_open }
             KeyboardHelpSheet {}
             crate::components::AnalyticsModal {}
             UpdateToast {}
+            ReopenToast {}
         }
     }
 }

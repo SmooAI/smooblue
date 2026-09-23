@@ -19,6 +19,7 @@ pub fn Sidebar(
     search_open: Signal<bool>,
     saved_feeds_open: Signal<bool>,
     settings_open: Signal<bool>,
+    history_open: Signal<bool>,
 ) -> Element {
     let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let session = use_context::<Signal<Option<Session>>>();
@@ -68,6 +69,8 @@ pub fn Sidebar(
     let open_saved_feeds = move |_| sf_open.set(true);
     let mut st_open = settings_open;
     let open_settings = move |_| st_open.set(true);
+    let mut hist_open = history_open;
+    let open_history = move |_| hist_open.set(true);
     // Sidebar Profile button now opens the user's own ProfileSheet
     // (banner + bio + counts + Follow yourself? no) — much richer
     // than just adding an AuthorFeed column. The sheet has an
@@ -127,6 +130,7 @@ pub fn Sidebar(
             // trending topics, popular feeds, AND a paste-a-URI box).
             // Search is its own button above — they're different intents.
             RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_saved_feeds }
+            RailBtn { label: "History (⌘Y)", active: false, kind: RailKind::History, badge: 0, onclick: open_history }
             div { class: "rail__spacer" }
             // Profile slot — real avatar when we've resolved one,
             // generic User glyph as fallback until the get_profile
@@ -166,6 +170,7 @@ pub enum RailKind {
     Analytics,
     Bookmark,
     Add,
+    History,
     Profile,
     Settings,
 }
@@ -206,6 +211,7 @@ fn RailBtn(
                 RailKind::Analytics => rsx! { icons::ChartColumn { size: icons::Size::Md } },
                 RailKind::Bookmark => rsx! { icons::Bookmark { size: icons::Size::Md } },
                 RailKind::Add => rsx! { icons::Plus { size: icons::Size::Md } },
+                RailKind::History => rsx! { icons::History { size: icons::Size::Md } },
                 RailKind::Profile => rsx! { icons::User { size: icons::Size::Md } },
                 RailKind::Settings => rsx! { icons::Settings { size: icons::Size::Md } },
             }
