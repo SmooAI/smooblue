@@ -60,13 +60,16 @@ All return real `smooblue_atproto::feed::*` types so the UI code can't tell it's
 | --- | --- |
 | `SMOOBLUE_DEBUG_OPEN_COMPOSE=1` | Boot straight into the compose sheet (screenshot the empty composer) |
 | `SMOOBLUE_DEBUG_ATTACH=/path/to/image.jpg` | Inject a synthetic image attachment on compose mount (skip the file picker) |
+| `SMOOBLUE_DEMO_FAIL_POST=N` | Make the Nth post of a compose submit fail (1-based) — exercises the partial-thread recovery path |
+
+Demo mode opens the app SQLite database **in memory**, so drafts, history, and anything else stored there work for the life of the process without reading or writing the user's real data.
 
 ---
 
 ## When demo mode masks real behavior
 
 - **OAuth refresh** — bypassed entirely. Test the refresh path against a real account.
-- **Anything that writes to the user's repo** (posts, profile edits, mutes, blocks) — demo mode just sleeps 400ms and closes the sheet. The bsky AppView's actual error responses are not exercised.
+- **Anything that writes to the user's repo** (posts, profile edits, mutes, blocks) — demo mode just sleeps and pretends it worked (compose simulates each post of a thread, see `SMOOBLUE_DEMO_FAIL_POST`). The bsky AppView's actual error responses are not exercised.
 - **Network failure modes** — there are no errors in demo mode. Test transient failures against a real PDS by toggling Wi-Fi mid-fetch.
 
 ---

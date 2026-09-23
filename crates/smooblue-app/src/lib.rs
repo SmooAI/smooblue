@@ -11,7 +11,9 @@ pub mod automation;
 pub mod components;
 pub mod demo;
 pub mod diag_log;
+pub mod drafts;
 pub mod file_promise;
+pub mod history;
 pub mod icons;
 pub mod image_prep;
 pub mod inbox;
@@ -95,6 +97,28 @@ const INLINE_VIDEO_AUTOPAUSE_JS: &str = r#"
         }
     });
     mo.observe(document.body, { childList: true, subtree: true });
+})();
+"#;
+
+/// JS that remembers each thread sheet's scroll offset, keyed by the
+/// focused post's URI (`data-uri` on `.thread__body`). Scroll events
+/// don't bubble, so it listens in the capture phase. Read back by
+/// `thread::RESTORE_OR_FOCUS_JS` when a thread is reopened, so going
+/// back to a long thread lands where you left it. In-memory, capped.
+const THREAD_SCROLL_MEMORY_JS: &str = r#"
+(function() {
+    if (window.__smoobThreadScroll) return;
+    const mem = new Map();
+    window.__smoobThreadScroll = mem;
+    document.addEventListener('scroll', (e) => {
+        const t = e.target;
+        if (!t || !t.classList || !t.classList.contains('thread__body')) return;
+        const uri = t.dataset.uri;
+        if (!uri) return;
+        mem.delete(uri);
+        mem.set(uri, t.scrollTop);
+        if (mem.size > 300) mem.delete(mem.keys().next().value);
+    }, true);
 })();
 "#;
 
@@ -277,6 +301,7 @@ pub fn App() -> Element {
     rsx! {
         style { "{STYLES}" }
         script { "{INLINE_VIDEO_AUTOPAUSE_JS}" }
+        script { "{THREAD_SCROLL_MEMORY_JS}" }
         div {
             id: "main",
             // Subscribes App to the automation kick signal so its writes

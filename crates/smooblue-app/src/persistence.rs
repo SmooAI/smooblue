@@ -15,7 +15,7 @@
 //!   accounts.json           ← which accounts exist + which is active
 //!   columns.json            ← deck layout
 //!   last_handle.txt         ← login pre-fill (non-secret)
-//!   draft.txt               ← in-progress compose
+//!   draft.txt               ← legacy compose draft (imported into SQLite `drafts`)
 //!   theme.txt               ← dark / light
 
 use smooblue_oauth::Session;
@@ -210,22 +210,13 @@ pub fn load_last_handle() -> Option<String> {
     }
 }
 
-/// Persist the in-progress compose draft so it survives quitting the
-/// app mid-post. Called on every keystroke (file write is cheap; the
-/// draft is at most 300 chars). Empty input clears the file rather
-/// than writing an empty draft we'd then load back on next boot.
-pub fn save_draft(text: &str) -> Result<(), String> {
-    let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
-        .ok_or_else(|| "no config dir".to_string())?;
-    std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
-    let path = dir.config_dir().join(DRAFT_FILE);
-    if text.is_empty() {
-        // Best-effort cleanup; ignore "not found" because that's the
-        // very state we wanted anyway.
-        let _ = std::fs::remove_file(&path);
-        return Ok(());
+/// Remove the legacy single-slot `draft.txt` once
+/// [`crate::drafts::import_legacy_draft`] has moved it into the
+/// drafts table. Best-effort — a missing file is the goal state.
+pub fn clear_legacy_draft() {
+    if let Some(dir) = directories::ProjectDirs::from("ai", "Smoo", "smooblue") {
+        let _ = std::fs::remove_file(dir.config_dir().join(DRAFT_FILE));
     }
-    std::fs::write(path, text).map_err(|e| e.to_string())
 }
 
 /// Load any saved draft, or `None` if there isn't one (or the file

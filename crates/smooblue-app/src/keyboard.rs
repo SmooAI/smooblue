@@ -20,12 +20,16 @@
 //! | `<space>f` | saved feeds |
 //! | `?` or `<space>?` | keyboard-shortcut help overlay |
 //! | `Esc` | close any open modal |
+//! | `Cmd-[` / `Cmd-]` | back / forward in the thread or profile sheet |
+//! | `Cmd-Shift-T` | reopen the thread / profile sheet you just closed |
+//! | `Cmd-Y` | history: recently viewed threads and profiles |
 //!
 //! Shortcuts are suppressed when any modal sheet is open (compose,
 //! search, profile, thread, engagement, settings, saved-feeds) —
 //! the modal's own input fields get the keystrokes instead. `Esc`
 //! is the universal close.
 
+use crate::history::{self, NavHistory, NavKind};
 use crate::state::{
     add_column_unique, AnalyticsExpanded, ColumnSpec, ComposeContext, EngagementFocus, FocusedItem,
     KeyboardHelp, LightboxFocus, PendingChord, ProfileFocus, ThreadFocus,
@@ -51,6 +55,8 @@ pub struct KeyContext {
     pub settings_open: Signal<bool>,
     pub lightbox: Signal<LightboxFocus>,
     pub analytics_expanded: Signal<AnalyticsExpanded>,
+    pub nav: Signal<NavHistory>,
+    pub history_open: Signal<bool>,
 }
 
 /// `true` when any modal sheet is open. Used to skip vim shortcuts
@@ -66,6 +72,7 @@ pub fn any_modal_open(ctx: &KeyContext) -> bool {
         || *ctx.settings_open.read()
         || ctx.help.read().0
         || ctx.analytics_expanded.read().0
+        || *ctx.history_open.read()
 }
 
 /// Close whichever modal is on top. Esc handler.
@@ -84,19 +91,35 @@ pub fn close_top_modal(ctx: &mut KeyContext) {
         ctx.analytics_expanded.set(AnalyticsExpanded(false));
         return;
     }
+    // Compose paints above every other sheet (see
+    // `.modal__backdrop--compose`), so it's the first to close —
+    // otherwise Esc while typing a reply over a thread would close the
+    // thread hidden underneath.
+    if ctx.compose.read().open {
+        // The draft is autosaved; only the sheet goes away.
+        ctx.compose.write().open = false;
+        return;
+    }
+    if *ctx.history_open.read() {
+        ctx.history_open.set(false);
+        return;
+    }
     // Innermost-first close order — engagement / profile / thread
     // can stack on top of each other; the most-recently-opened wins.
     if ctx.engagement.read().0.is_some() {
         ctx.engagement.set(EngagementFocus(None));
         return;
     }
-    if ctx.profile.read().0.is_some() {
-        ctx.profile.set(ProfileFocus(None));
-        return;
-    }
-    if ctx.thread.read().0.is_some() {
-        ctx.thread.set(ThreadFocus(None));
-        return;
+    match history::topmost(ctx.nav, ctx.thread, ctx.profile) {
+        Some(NavKind::Profile) => {
+            ctx.profile.set(ProfileFocus(None));
+            return;
+        }
+        Some(NavKind::Thread) => {
+            ctx.thread.set(ThreadFocus(None));
+            return;
+        }
+        None => {}
     }
     if *ctx.settings_open.read() {
         ctx.settings_open.set(false);
@@ -108,12 +131,37 @@ pub fn close_top_modal(ctx: &mut KeyContext) {
     }
     if *ctx.search_open.read() {
         ctx.search_open.set(false);
-        return;
     }
-    if ctx.compose.read().open {
-        let mut w = ctx.compose.write();
-        w.open = false;
-        w.reply_to = None;
+}
+
+/// ⌘-shortcuts that work over the thread / profile sheets: back,
+/// forward, reopen-last-closed, and history. Not while composing —
+/// ⌘[ / ⌘] must not yank the thread out from under a reply in progress.
+fn dispatch_nav(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
+    if !(modifiers.meta() || modifiers.ctrl()) || ctx.compose.read().open {
+        return false;
+    }
+    let Key::Character(c) = key else {
+        return false;
+    };
+    match c.as_str() {
+        "[" | "]" => {
+            let Some(kind) = history::topmost(ctx.nav, ctx.thread, ctx.profile) else {
+                return false;
+            };
+            history::step(ctx.nav, ctx.thread, ctx.profile, kind, c == "]");
+            true
+        }
+        "t" | "T" if modifiers.shift() => {
+            history::reopen_last(ctx.nav, ctx.thread, ctx.profile);
+            true
+        }
+        "y" | "Y" => {
+            let open = *ctx.history_open.peek();
+            ctx.history_open.set(!open);
+            true
+        }
+        _ => false,
     }
 }
 
@@ -123,6 +171,10 @@ pub fn dispatch(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
     // Esc closes modals from anywhere — even when typing in compose.
     if *key == Key::Escape {
         close_top_modal(ctx);
+        return true;
+    }
+
+    if dispatch_nav(ctx, key, modifiers) {
         return true;
     }
 
@@ -181,9 +233,7 @@ pub fn dispatch(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
             }
             // <space>n = new post
             (" ", Key::Character(c)) if c == "n" => {
-                let mut w = ctx.compose.write();
-                w.reply_to = None;
-                w.open = true;
+                ctx.compose.write().open_new();
                 return true;
             }
             // <space>/ = search (matches the "leader-slash" convention)
@@ -291,9 +341,7 @@ pub fn dispatch(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
                 true
             }
             "n" => {
-                let mut w = ctx.compose.write();
-                w.reply_to = None;
-                w.open = true;
+                ctx.compose.write().open_new();
                 true
             }
             // Single-key actions on the focused post are wired by

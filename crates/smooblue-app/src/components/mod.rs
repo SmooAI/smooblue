@@ -4,6 +4,7 @@ pub mod compose;
 pub mod deck;
 pub mod embed;
 pub mod engagement;
+pub mod history_sheet;
 pub mod lightbox;
 pub mod messages_sheet;
 pub mod notification_card;
