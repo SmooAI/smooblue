@@ -48,7 +48,7 @@ These are the same names as `SmooAI/smooth`'s `smoothflow-publish.yml`. GitHub s
 
 Without `MACOS_CERT_P12`, releases ship the ad-hoc zip as before, with no appcast (a warning, not a failure). A signed build **without** `NOTARY_KEY_P8` fails the release on purpose: a signed but un-notarized update would ship.
 
-Set values with `gh secret set NAME -R SmooAI/smooblue --body "$(cat file)"`. The command substitution strips the trailing newline, which byte-comparing consumers need.
+**`scripts/set-release-secrets.sh` sets all seven** from the release manager's Mac. It needs the Developer ID identity in the login keychain, an `AuthKey_*.p8` in `~/.appstoreconnect/private_keys`, and the "Smooblue" Sparkle key. It re-packs *only* the Developer ID identity into the `.p12`, so the Apple Distribution identity stays out. macOS will prompt once to allow the key export. Nothing is printed, and the temp files are removed. Re-run it to rotate.
 
 ### The Sparkle key: don't lose it
 
