@@ -54,6 +54,7 @@ cssclasses:
 
 - **Add a new column type** — [[Engineering/Adding-a-Column-Type]]
 - **Add an XRPC endpoint to the client** — [[Engineering/Adding-an-XRPC-Endpoint]]
+- **Drafts, thread composing, back/forward + History** — [[Engineering/Drafts-and-Navigation-History]]
 - **Land a fix** — [[Engineering/Engineering-Guide#Workflow]]
 
 ### Ideas / research

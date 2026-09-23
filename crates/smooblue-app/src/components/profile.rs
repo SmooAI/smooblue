@@ -18,8 +18,11 @@ use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
 use crate::components::report_sheet::ReportTarget;
 use crate::demo;
+use crate::history::{use_nav_tracker, NavHistory, NavKind};
 use crate::icons;
-use crate::state::{add_column_unique, ColumnSpec, ProfileEditOpen, ProfileFocus, ReportFocus};
+use crate::state::{
+    add_column_unique, ColumnSpec, ProfileEditOpen, ProfileFocus, ReportFocus, ThreadFocus,
+};
 use dioxus::prelude::*;
 use smooblue_atproto::{ActorProfile, FeedItem, PostAuthor};
 use smooblue_oauth::Session;
@@ -37,6 +40,8 @@ struct ProfileData {
 pub fn ProfileSheet() -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let mut focus = use_context::<Signal<ProfileFocus>>();
+    let thread_focus = use_context::<Signal<ThreadFocus>>();
+    let nav = use_context::<Signal<NavHistory>>();
     let mut cols = use_context::<Signal<Vec<ColumnSpec>>>();
     let snap = focus.read().0.clone();
 
@@ -72,6 +77,34 @@ pub fn ProfileSheet() -> Element {
         }
     });
 
+    // Back / forward trail + "reopen what I just closed".
+    use_nav_tracker(NavKind::Profile, move || focus.read().0.clone());
+
+    // Remember who was looked at, for the History sheet. Keyed by DID
+    // so the same person opened by handle and by DID is one row.
+    let mut recorded = use_signal(|| None::<String>);
+    use_effect(move || {
+        let Some(Ok(d)) = &*data.read() else {
+            return;
+        };
+        let p = &d.profile;
+        if recorded.peek().as_deref() == Some(p.did.as_str()) {
+            return;
+        }
+        recorded.set(Some(p.did.clone()));
+        let name = p
+            .display_name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| p.handle.clone());
+        crate::history::record_in_background(
+            NavKind::Profile,
+            p.did.clone(),
+            name,
+            format!("@{}", p.handle),
+        );
+    });
+
     if snap.is_none() {
         return rsx! { Fragment {} };
     }
@@ -87,13 +120,30 @@ pub fn ProfileSheet() -> Element {
     let close = move |_| {
         focus.set(ProfileFocus(None));
     };
+    let can_back = nav.read().profile.can_go_back();
+    let go_back = move |_| {
+        crate::history::step(nav, thread_focus, focus, NavKind::Profile, false);
+    };
+    // A thread opened from inside this profile paints above it.
+    let backdrop_style = if thread_focus.read().0.is_some() && nav.read().thread_above_profile() {
+        "z-index: 49;"
+    } else {
+        ""
+    };
 
     rsx! {
-        div { class: "modal__backdrop", onclick: close,
+        div { class: "modal__backdrop", style: "{backdrop_style}", onclick: close,
             div { class: "modal__sheet profile__sheet",
                 onclick: move |e| e.stop_propagation(),
+                if can_back {
+                    button { class: "profile__back",
+                        title: "Back (⌘[)",
+                        onclick: go_back,
+                        icons::ArrowLeft { size: icons::Size::Sm }
+                    }
+                }
                 button { class: "profile__close",
-                    title: "Close (Esc)",
+                    title: "Close (Esc) — ⌘⇧T reopens",
                     onclick: close,
                     icons::X { size: icons::Size::Sm }
                 }

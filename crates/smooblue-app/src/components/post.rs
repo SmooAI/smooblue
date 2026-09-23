@@ -151,15 +151,12 @@ pub fn PostCard(
     let text_quote = text.clone();
     let open_quote_compose = move |evt: MouseEvent| {
         evt.stop_propagation();
-        let mut w = compose_ctx.write();
-        w.reply_to = None;
-        w.quote_to = Some(crate::state::QuoteTarget {
+        compose_ctx.write().open_quote(crate::state::QuoteTarget {
             uri: post_uri_quote.clone(),
             cid: post_cid_quote.clone(),
             handle: handle_quote.clone(),
             text: text_quote.clone(),
         });
-        w.open = true;
     };
 
     // Click an avatar → open the profile sheet (modal with banner +
@@ -320,8 +317,7 @@ pub fn PostCard(
         .reply_root_ref()
         .unwrap_or_else(|| (post_uri.clone(), post_cid.clone()));
     let mut open_reply = move |_evt: MouseEvent| {
-        let mut w = compose_ctx.write();
-        w.reply_to = Some(ReplyTarget {
+        compose_ctx.write().open_reply(ReplyTarget {
             uri: post_uri_reply.clone(),
             cid: post_cid_reply.clone(),
             root_uri: reply_root_uri.clone(),
@@ -329,7 +325,6 @@ pub fn PostCard(
             handle: handle_reply.clone(),
             text: text_reply.clone(),
         });
-        w.open = true;
     };
 
     let like_class = if is_liked {

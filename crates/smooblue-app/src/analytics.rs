@@ -1441,10 +1441,11 @@ mod tests {
                 )?;
                 assert_eq!(n, 1, "index {idx} must exist");
             }
-            // user_version must be the unified 6 (v6 added
-            // post_metrics.engagement_fetched_at).
+            // user_version must be the unified latest (v6 added
+            // post_metrics.engagement_fetched_at; v7 the drafts +
+            // nav_history tables).
             let ver: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-            assert_eq!(ver, 6);
+            assert_eq!(ver, 7);
             Ok(())
         })
         .expect("schema checks");

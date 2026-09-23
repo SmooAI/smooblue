@@ -16,13 +16,17 @@
 //! Posts inside the thread are real PostCard instances, so likes /
 //! reposts / replies / avatar-click-opens-profile all work the same as
 //! in feed columns. Clicking a post inside the thread re-focuses to
-//! that post (mutates the same `ThreadFocus` signal).
+//! that post (mutates the same `ThreadFocus` signal). Each hop is
+//! recorded in [`crate::history`], so the header's ← / → (and ⌘[ / ⌘])
+//! walk back through the replies you clicked, and ⌘⇧T reopens a thread
+//! closed by a stray backdrop click — scrolled to where you left it.
 
 use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
 use crate::demo;
+use crate::history::{use_nav_tracker, NavHistory, NavKind};
 use crate::icons;
-use crate::state::ThreadFocus;
+use crate::state::{PostedTick, ProfileFocus, ThreadFocus};
 use dioxus::prelude::*;
 use smooblue_atproto::ThreadView;
 use smooblue_oauth::Session;
@@ -44,16 +48,25 @@ const DEPTH: u32 = 6;
 pub fn ThreadSheet() -> Element {
     let session = use_context::<Signal<Option<Session>>>();
     let mut focus = use_context::<Signal<ThreadFocus>>();
+    let profile_focus = use_context::<Signal<ProfileFocus>>();
+    let nav = use_context::<Signal<NavHistory>>();
+    let posted = use_context::<Signal<PostedTick>>();
     let snap = focus.read().0.clone();
     // Closed: render nothing. Hooks below run unconditionally per
     // Dioxus rules, so we put the early-return after them.
     let uri_opt = snap.clone();
 
+    // Back / forward trail + "reopen what I just closed".
+    use_nav_tracker(NavKind::Thread, move || focus.read().0.clone());
+
     // Reactive: read focus inside the resource so clicking through
-    // to a different post inside the thread re-fires the fetch.
+    // to a different post inside the thread re-fires the fetch. The
+    // PostedTick read makes a reply you just sent from this thread
+    // show up without closing and reopening it.
     let thread = use_resource(move || {
         let session_sig = session;
         let uri = focus.read().0.clone();
+        let _ = posted.read();
         async move {
             let Some(uri) = uri else {
                 return Err::<ThreadView, String>("no focus".into());
@@ -71,12 +84,50 @@ pub fn ThreadSheet() -> Element {
         }
     });
 
-    if uri_opt.is_none() {
+    // Remember what was read, for the History sheet.
+    let mut recorded = use_signal(|| None::<String>);
+    use_effect(move || {
+        let Some(Ok(ThreadView::Post { post, .. })) = &*thread.read() else {
+            return;
+        };
+        if recorded.peek().as_deref() == Some(post.uri.as_str()) {
+            return;
+        }
+        recorded.set(Some(post.uri.clone()));
+        let author = post
+            .author
+            .display_name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| format!("@{}", post.author.handle));
+        crate::history::record_in_background(
+            NavKind::Thread,
+            post.uri.clone(),
+            author,
+            crate::history::snippet(&post.record.text, 160),
+        );
+    });
+
+    let Some(uri) = uri_opt else {
         return rsx! { Fragment {} };
-    }
+    };
 
     let close = move |_| {
         focus.set(ThreadFocus(None));
+    };
+    let can_back = nav.read().thread.can_go_back();
+    let can_forward = nav.read().thread.can_go_forward();
+    let go_back = move |_| {
+        crate::history::step(nav, focus, profile_focus, NavKind::Thread, false);
+    };
+    let go_forward = move |_| {
+        crate::history::step(nav, focus, profile_focus, NavKind::Thread, true);
+    };
+    let author_handle = match &*thread.read_unchecked() {
+        Some(Ok(ThreadView::Post { post, .. })) if post.uri == uri => {
+            Some(post.author.handle.clone())
+        }
+        _ => None,
     };
 
     rsx! {
@@ -84,14 +135,41 @@ pub fn ThreadSheet() -> Element {
             div { class: "modal__sheet thread__sheet",
                 onclick: move |e| e.stop_propagation(),
                 div { class: "thread__head",
-                    span { class: "thread__title", "Thread" }
+                    button {
+                        class: "thread__nav",
+                        title: "Back (⌘[)",
+                        disabled: !can_back,
+                        onclick: go_back,
+                        icons::ArrowLeft { size: icons::Size::Sm }
+                    }
+                    button {
+                        class: "thread__nav",
+                        title: "Forward (⌘])",
+                        disabled: !can_forward,
+                        onclick: go_forward,
+                        icons::ArrowRight { size: icons::Size::Sm }
+                    }
+                    span { class: "thread__title",
+                        "Thread"
+                        if let Some(h) = author_handle {
+                            span { class: "thread__title-handle", " · @{h}" }
+                        }
+                    }
                     button { class: "thread__close",
-                        title: "Close (Esc)",
+                        title: "Close (Esc) — ⌘⇧T reopens",
                         onclick: close,
                         icons::X { size: icons::Size::Sm }
                     }
                 }
-                div { class: "thread__body",
+                // Keyed by URI (a one-item keyed list, since rsx only
+                // allows keys on list items) so each thread gets a fresh
+                // scroll box: reusing one would carry the previous
+                // thread's scroll offset over, and the scroll-memory
+                // listener would file it under the new URI.
+                for body_uri in std::iter::once(uri.clone()) {
+                div { key: "{body_uri}",
+                    class: "thread__body",
+                    "data-uri": "{body_uri}",
                     match &*thread.read_unchecked() {
                         Some(Ok(t)) => rsx! { ThreadBody { thread: t.clone() } },
                         Some(Err(e)) => {
@@ -105,6 +183,7 @@ pub fn ThreadSheet() -> Element {
                             div { class: "thread__loading", "Loading thread…" }
                         },
                     }
+                }
                 }
             }
         }
@@ -166,10 +245,13 @@ fn FocusedRow(node: ThreadView) -> Element {
     // right because there's already a visible content swap on
     // sheet-open — the smooth glide reads as "the app is taking
     // you to the post," not as a janky reflow.
-    let on_mount = move |evt: Event<MountedData>| {
-        spawn(async move {
-            let _ = evt.data().scroll_to(ScrollBehavior::Smooth).await;
-        });
+    //
+    // Coming BACK to a thread (back button, ⌘⇧T, History) restores the
+    // scroll position you left it at instead — that's the whole point
+    // of returning to a long thread. Positions are kept by the
+    // `THREAD_SCROLL_MEMORY_JS` listener installed in `App`.
+    let on_mount = move |_evt: Event<MountedData>| {
+        let _ = dioxus::document::eval(RESTORE_OR_FOCUS_JS);
     };
     match node {
         ThreadView::Post { post, .. } => rsx! {
@@ -189,13 +271,44 @@ fn FocusedRow(node: ThreadView) -> Element {
     }
 }
 
+/// JS for a freshly-mounted focused post: restore the saved scroll
+/// offset for this thread (keyed by the body's `data-uri`) if there is
+/// one, else glide the focused post into view. Re-applies the restore
+/// once after images above have had a moment to load and shift layout.
+const RESTORE_OR_FOCUS_JS: &str = r#"(function() {
+    const body = document.querySelector('.thread__body');
+    const mem = window.__smoobThreadScroll;
+    const saved = body && mem ? mem.get(body.dataset.uri) : undefined;
+    if (saved !== undefined && saved > 0) {
+        body.scrollTop = saved;
+        setTimeout(() => {
+            if (Math.abs(body.scrollTop - saved) > 4) body.scrollTop = saved;
+        }, 350);
+        return true;
+    }
+    const el = document.querySelector('.thread__focused, .thread__placeholder--focused');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return false;
+})()"#;
+
 #[component]
 fn ReplyTree(node: ThreadView, depth: usize) -> Element {
     if depth >= MAX_VISIBLE_DEPTH {
+        // Too deep to indent further: re-root the sheet on this reply
+        // so its own subtree gets the full width. (This used to be a
+        // dead "Continue thread →" label with no click handler.)
+        let target = match &node {
+            ThreadView::Post { post, .. } => Some(post.uri.clone()),
+            _ => None,
+        };
+        let mut focus = use_context::<Signal<ThreadFocus>>();
         return rsx! {
-            div { class: "thread__continue",
-                style: "margin-left: {REPLY_INDENT_PX * MAX_VISIBLE_DEPTH as u32}px;",
-                "Continue thread →"
+            if let Some(uri) = target {
+                button { class: "thread__continue",
+                    style: "margin-left: {REPLY_INDENT_PX * MAX_VISIBLE_DEPTH as u32}px;",
+                    onclick: move |_| focus.set(ThreadFocus(Some(uri.clone()))),
+                    "Continue thread →"
+                }
             }
         };
     }
