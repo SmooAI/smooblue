@@ -3,9 +3,11 @@
 //! signal if a newer release exists so the deck can render a small
 //! "update available" toast with a link to the release page.
 //!
-//! No auto-install — the user reads the changelog + downloads the
-//! new .app on their own time. Adding auto-update would require a
-//! signed updater binary (Sparkle-style) which is a separate pearl.
+//! This is the *fallback*. Signed macOS release builds carry Sparkle
+//! 2 ([`crate::sparkle`]), which checks, downloads, verifies and
+//! installs updates itself; the deck skips this check whenever Sparkle
+//! is running. The toast still covers `cargo run` / local bundles
+//! without the framework, and Linux.
 //!
 //! Failure is silent: if the GitHub API is down / rate-limited /
 //! the repo's been moved, we just don't show the banner. No reason

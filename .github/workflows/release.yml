@@ -39,11 +39,86 @@ jobs:
             - name: Build macOS .app bundle
               run: ./scripts/bundle-macos.sh
 
+            # ── Developer ID + notarization + Sparkle (OTA updates) ──
+            # Same secret names as SmooAI/smooth's smoothflow-publish.yml
+            # (GitHub secrets are per-repo, so they're set here too):
+            #   MACOS_CERT_P12        base64 Developer ID Application .p12
+            #   MACOS_CERT_PASSWORD   its export password
+            #   MACOS_SIGN_IDENTITY   "Developer ID Application: Smoo LLC (DTX9733844)"
+            #   NOTARY_KEY_P8         base64 App Store Connect API key (.p8)
+            #   NOTARY_KEY_ID / NOTARY_ISSUER
+            #   SMOOBLUE_SPARKLE_PRIVATE_KEY  generate_keys --account Smooblue -x
+            # Without the cert the release ships the ad-hoc zip exactly as
+            # before (and no appcast — installed apps just see no update).
+            # See docs/Operations/Sparkle-Updates.md.
+            - name: Import Developer ID certificate
+              id: signing
+              env:
+                  CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+                  CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+              run: |
+                  if [[ -z "${CERT_P12:-}" ]]; then
+                      echo "::warning::MACOS_CERT_P12 not set — shipping the ad-hoc signed build with no Sparkle appcast."
+                      echo "signed=false" >> "$GITHUB_OUTPUT"
+                      exit 0
+                  fi
+                  KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+                  PASS="$(openssl rand -hex 16)"
+                  security create-keychain -p "$PASS" "$KEYCHAIN"
+                  security set-keychain-settings -lut 21600 "$KEYCHAIN"
+                  security unlock-keychain -p "$PASS" "$KEYCHAIN"
+                  echo -n "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+                  security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+                  rm -f "$RUNNER_TEMP/cert.p12"
+                  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASS" "$KEYCHAIN" >/dev/null
+                  security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+                  echo "signed=true" >> "$GITHUB_OUTPUT"
+
+            # Inside-out signing, notarize + staple the .app (not just an
+            # archive — Sparkle installs the .app), then zip the stapled
+            # app as dist/Smooblue-macos-arm64.zip.
+            - name: Sign, notarize + staple
+              if: steps.signing.outputs.signed == 'true'
+              env:
+                  SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+                  NOTARY_KEY_B64: ${{ secrets.NOTARY_KEY_P8 }}
+                  NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+                  NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+              run: |
+                  if [[ -z "${NOTARY_KEY_B64:-}" ]]; then
+                      echo "::error::NOTARY_KEY_P8 not set — refusing to publish a signed but un-notarized app."
+                      exit 1
+                  fi
+                  echo -n "$NOTARY_KEY_B64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+                  NOTARY_KEY="$RUNNER_TEMP/notary.p8" ./scripts/sign-and-notarize-macos.sh
+                  rm -f "$RUNNER_TEMP/notary.p8"
+
             # ditto so resource forks + symlinks survive the zip round-trip.
-            - name: Zip .app
+            - name: Zip .app (ad-hoc fallback)
+              if: steps.signing.outputs.signed != 'true'
               run: |
                   cd dist
                   ditto -c -k --sequesterRsrc --keepParent Smooblue.app Smooblue-macos-arm64.zip
+
+            # EdDSA-sign the zip with Sparkle's sign_update and write the
+            # one-item appcast. Installed apps read it from
+            # releases/latest/download/appcast.xml.
+            - name: Build Sparkle appcast
+              if: steps.signing.outputs.signed == 'true'
+              env:
+                  SPARKLE_KEY: ${{ secrets.SMOOBLUE_SPARKLE_PRIVATE_KEY }}
+              run: |
+                  if [[ -z "${SPARKLE_KEY:-}" ]]; then
+                      echo "::warning::SMOOBLUE_SPARKLE_PRIVATE_KEY not set — notarized build ships, but no appcast (no OTA for this release)."
+                      exit 0
+                  fi
+                  printf '%s' "$SPARKLE_KEY" > "$RUNNER_TEMP/sparkle.key"
+                  python3 scripts/make-appcast.py \
+                      --version "${GITHUB_REF_NAME#v}" \
+                      --zip dist/Smooblue-macos-arm64.zip \
+                      --url "https://github.com/SmooAI/smooblue/releases/download/${GITHUB_REF_NAME}/Smooblue-macos-arm64.zip" \
+                      --key-file "$RUNNER_TEMP/sparkle.key"
+                  rm -f "$RUNNER_TEMP/sparkle.key"
 
             # Wrap the per-version CHANGELOG section with install /
             # upgrade / downloads sections so the release page itself
@@ -70,6 +145,39 @@ jobs:
                   fi
                   gh release upload "$GITHUB_REF_NAME" \
                       dist/Smooblue-macos-arm64.zip --clobber
+                  # The appcast goes up only after the zip it points at.
+                  if [[ -f dist/appcast.xml ]]; then
+                      gh release upload "$GITHUB_REF_NAME" dist/appcast.xml --clobber
+                  fi
+
+            # Re-verify what users will actually download — the published
+            # asset, not the in-workflow copy (SmoothFlow's lesson: a
+            # ticket on the wrong artifact passes every local check).
+            - name: Verify the published update
+              if: steps.signing.outputs.signed == 'true'
+              run: |
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  BASE="https://github.com/SmooAI/smooblue/releases/download/${GITHUB_REF_NAME}"
+                  WORK="$RUNNER_TEMP/verify"
+                  mkdir -p "$WORK"
+                  curl -fsSL --retry 5 --retry-delay 4 "$BASE/Smooblue-macos-arm64.zip" -o "$WORK/app.zip"
+                  ditto -x -k "$WORK/app.zip" "$WORK"
+                  APP="$WORK/Smooblue.app"
+                  codesign --verify --strict --deep --verbose=2 "$APP"
+                  xcrun stapler validate "$APP"
+                  spctl --assess --type execute --verbose=2 "$APP"
+                  test "$(defaults read "$APP/Contents/Info" CFBundleVersion)" = "$VERSION"
+                  test -d "$APP/Contents/Frameworks/Sparkle.framework"
+                  if curl -fsSL --retry 5 --retry-delay 4 "$BASE/appcast.xml" -o "$WORK/appcast.xml"; then
+                      grep -q "<sparkle:version>${VERSION}</sparkle:version>" "$WORK/appcast.xml"
+                      python3 scripts/make-appcast.py --zip "$WORK/app.zip" --check "$WORK/appcast.xml" --app "$APP"
+                  else
+                      echo "::warning::no appcast.xml on this release"
+                  fi
+
+            - name: Clean up signing keychain
+              if: always() && steps.signing.outputs.signed == 'true'
+              run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
     # Build the Linux x86_64 binary on ubuntu-latest. Webkit-gtk +
     # friends are runtime deps the end-user installs (the binary

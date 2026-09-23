@@ -23,3 +23,6 @@ docs/.obsidian/cache
 
 # pnpm + changesets workspace
 node_modules/
+
+# Python bytecode from scripts/make-appcast.py
+__pycache__/

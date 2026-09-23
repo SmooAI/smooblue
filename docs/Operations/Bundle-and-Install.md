@@ -39,17 +39,9 @@ There's no `--skip-build` flag — the script always rebuilds. Use `cargo build 
 
 ---
 
-## Why adhoc-signed
+## Local builds are ad-hoc signed; releases are notarized
 
-Apple Developer notarization needs a paid Developer Program membership + a Developer ID Application certificate + a notarization service round-trip. Worth doing for public distribution; not worth it for "the four of us run this internally." First-run experience for users today:
-
-1. Double-click → Gatekeeper bars launch
-2. Right-click → Open → "Open" → confirm
-3. Subsequent launches are unrestricted
-
-The `xattr -dr com.apple.quarantine` after `cp` shortcuts the dance for developers installing from source.
-
-Notarization is a future pearl. See [[../Decisions/ADR-Index]] when it lands.
+`bundle-macos.sh` ad-hoc signs so the bundle runs on the machine that built it; the `xattr -dr com.apple.quarantine` after `cp` covers a source install. Release builds are re-signed with the Developer ID, notarized and stapled by `scripts/sign-and-notarize-macos.sh` in `release.yml`, and update themselves through Sparkle. The bundle embeds `Sparkle.framework` (set `SMOOBLUE_NO_SPARKLE=1` to leave it out). See [[Sparkle-Updates]].
 
 ---
 

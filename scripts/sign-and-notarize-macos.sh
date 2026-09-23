@@ -1,149 +1,119 @@
 #!/usr/bin/env bash
-# Code-sign + notarize Smooblue.app for distribution outside the
-# App Store. Skeleton wired for the Developer ID + notarytool flow —
-# enrol in the Apple Developer Program first, then run this.
+# Developer ID-sign, notarize and staple dist/Smooblue.app, then zip it
+# for release + Sparkle. Run after scripts/bundle-macos.sh. Same shape
+# as SmoothFlow's build-release.sh (smooth repo) — see
+# docs/Operations/Sparkle-Updates.md.
 #
-# Required env (all from Apple Developer setup):
-#   APPLE_DEV_ID_CERT   — cert name as it appears in Keychain, e.g.
-#                         "Developer ID Application: Smoo AI Inc (XXXXXXXXXX)"
-#                         (find with: security find-identity -p codesigning -v)
-#   APPLE_NOTARY_PROFILE — keychain profile created via:
-#                         xcrun notarytool store-credentials APPLE_NOTARY_PROFILE \
-#                             --apple-id "you@smoo.ai" \
-#                             --team-id "XXXXXXXXXX" \
-#                             --password "<app-specific-password>"
+#   1. Sign INSIDE-OUT, never --deep: Sparkle's XPC services, Autoupdate
+#      and Updater.app, then the framework, then the app. --deep re-signs
+#      nested code with the outer options and breaks Sparkle's helpers.
+#   2. Notarize the .app (zipped for submission) and STAPLE THE .app.
+#      Sparkle installs the app, not whatever archive carried it, so the
+#      ticket has to live in the .app or Gatekeeper phones home on first
+#      launch (SmoothFlow shipped three releases with the ticket on the
+#      DMG only — th-9c3f4e).
+#   3. Re-zip the stapled app → dist/Smooblue-macos-arm64.zip: the
+#      release asset, the Homebrew cask download and the Sparkle
+#      enclosure are all this one file.
 #
-# Optional env:
-#   APP_BUNDLE  — path to .app to sign (default: dist/Smooblue.app)
-#   MAKE_DMG    — set =1 to also produce a notarized .dmg
+# Signing identity (first match wins):
+#   SIGN_IDENTITY            e.g. "Developer ID Application: Smoo LLC (DTX9733844)"
+#   (else) the first "Developer ID Application" identity in the keychain
+#
+# Notary auth (first match wins; SKIP_NOTARIZE=1 signs only):
+#   NOTARY_KEY + NOTARY_KEY_ID + NOTARY_ISSUER   App Store Connect API key (CI)
+#   NOTARY_PROFILE                               notarytool keychain profile
 #
 # Usage:
-#   APPLE_DEV_ID_CERT="…" APPLE_NOTARY_PROFILE="smoo-notary" \
-#       scripts/sign-and-notarize-macos.sh
-#
-# This is structurally the same flow Apple documents:
-#   sign → submit to notarytool → wait → staple → verify
-# Stapling embeds the notarization ticket in the bundle so Gatekeeper
-# sees it offline (no first-launch network requirement for the user).
+#   scripts/bundle-macos.sh && scripts/sign-and-notarize-macos.sh
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_BUNDLE="${APP_BUNDLE:-$REPO_ROOT/dist/Smooblue.app}"
 DIST_DIR="$REPO_ROOT/dist"
-
-if [ -z "${APPLE_DEV_ID_CERT:-}" ]; then
-    cat >&2 <<EOF
-error: APPLE_DEV_ID_CERT not set.
-
-To list available signing identities:
-    security find-identity -p codesigning -v
-
-You should see something like:
-    1) ABC123…  "Developer ID Application: Smoo AI Inc (XXXXXXXXXX)"
-
-Then re-run with:
-    APPLE_DEV_ID_CERT="Developer ID Application: Smoo AI Inc (XXXXXXXXXX)" \\
-        APPLE_NOTARY_PROFILE="smoo-notary" \\
-        scripts/sign-and-notarize-macos.sh
-EOF
-    exit 1
-fi
-
-if [ -z "${APPLE_NOTARY_PROFILE:-}" ]; then
-    cat >&2 <<EOF
-error: APPLE_NOTARY_PROFILE not set.
-
-One-time setup (stores credentials in the macOS keychain):
-    xcrun notarytool store-credentials smoo-notary \\
-        --apple-id "you@smoo.ai" \\
-        --team-id "XXXXXXXXXX" \\
-        --password "<app-specific-password from appleid.apple.com>"
-
-Then re-run with APPLE_NOTARY_PROFILE=smoo-notary.
-EOF
-    exit 1
-fi
+ZIP_OUT="${ZIP_OUT:-$DIST_DIR/Smooblue-macos-arm64.zip}"
+ENTITLEMENTS="$REPO_ROOT/scripts/entitlements-macos.plist"
 
 if [ ! -d "$APP_BUNDLE" ]; then
     echo "error: $APP_BUNDLE not found. Run scripts/bundle-macos.sh first." >&2
     exit 1
 fi
 
-ENTITLEMENTS="$REPO_ROOT/scripts/entitlements-macos.plist"
-# Hardened runtime entitlements — Apple requires this for notarization.
-# We only need the bare minimum: allow JIT for WebKit (Dioxus desktop
-# embeds wry which uses WKWebView, which uses JIT internally) plus
-# unsigned-executable-memory for the same reason.
-if [ ! -f "$ENTITLEMENTS" ]; then
-    cat > "$ENTITLEMENTS" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>com.apple.security.cs.allow-jit</key>
-    <true/>
-    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
-    <key>com.apple.security.network.client</key>
-    <true/>
-</dict>
-</plist>
-PLIST
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+    SIGN_IDENTITY="$(security find-identity -v -p codesigning \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n1)"
 fi
+if [ -z "$SIGN_IDENTITY" ]; then
+    echo "error: no Developer ID Application identity (set SIGN_IDENTITY)." >&2
+    exit 1
+fi
+echo "▸ signing as: $SIGN_IDENTITY"
 
-echo "▸ codesign --deep --force --options runtime"
-codesign --deep --force --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    --sign "$APPLE_DEV_ID_CERT" \
-    --timestamp \
-    "$APP_BUNDLE"
-
-echo "▸ verifying signature"
-codesign --verify --verbose=4 "$APP_BUNDLE"
-spctl --assess --type execute --verbose=4 "$APP_BUNDLE" 2>&1 | sed 's/^/  /' || {
-    echo "  (spctl rejected — expected pre-notarization, fine for now)"
+sign() {
+    codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$@"
 }
 
-# notarytool wants a .zip OR a .pkg/.dmg, not a raw .app.
-ZIP_PATH="$DIST_DIR/Smooblue-notary.zip"
-echo "▸ zipping for notary submission → $ZIP_PATH"
-rm -f "$ZIP_PATH"
-ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_PATH"
-
-echo "▸ submitting to Apple notary (this can take 2–15 min)"
-xcrun notarytool submit "$ZIP_PATH" \
-    --keychain-profile "$APPLE_NOTARY_PROFILE" \
-    --wait
-
-echo "▸ stapling ticket to the bundle"
-xcrun stapler staple "$APP_BUNDLE"
-xcrun stapler validate "$APP_BUNDLE"
-
-echo "▸ final spctl check (should pass now)"
-spctl --assess --type execute --verbose=4 "$APP_BUNDLE" 2>&1 | sed 's/^/  /'
-
-# Re-zip the now-stapled bundle for distribution.
-DIST_ZIP="$DIST_DIR/Smooblue.zip"
-rm -f "$DIST_ZIP"
-ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$DIST_ZIP"
-rm -f "$ZIP_PATH"
-
-if [ "${MAKE_DMG:-0}" = "1" ]; then
-    DMG_PATH="$DIST_DIR/Smooblue.dmg"
-    echo "▸ creating DMG → $DMG_PATH"
-    rm -f "$DMG_PATH"
-    hdiutil create -volname "Smooblue" -srcfolder "$APP_BUNDLE" \
-        -ov -format UDZO "$DMG_PATH"
-    # DMGs need their own codesign + notary round.
-    codesign --force --sign "$APPLE_DEV_ID_CERT" --timestamp "$DMG_PATH"
-    xcrun notarytool submit "$DMG_PATH" \
-        --keychain-profile "$APPLE_NOTARY_PROFILE" --wait
-    xcrun stapler staple "$DMG_PATH"
-    echo "✓ DMG: $DMG_PATH"
+# ── 1. Inside-out signing ──────────────────────────────────────────
+FW="$APP_BUNDLE/Contents/Frameworks/Sparkle.framework"
+if [ -d "$FW" ]; then
+    echo "▸ signing Sparkle.framework (inside-out)"
+    V="$FW/Versions/B"
+    # Order and flags follow Sparkle's "Code signing" docs. Downloader
+    # keeps its own entitlements (it needs network client access).
+    sign "$V/XPCServices/Installer.xpc"
+    sign --preserve-metadata=entitlements "$V/XPCServices/Downloader.xpc"
+    sign "$V/Autoupdate"
+    sign "$V/Updater.app"
+    sign "$FW"
 fi
 
+echo "▸ signing Smooblue.app"
+sign --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
+
+echo "▸ verifying signature"
+codesign --verify --strict --deep --verbose=2 "$APP_BUNDLE"
+
+# ── 2. Notarize + staple the .app ──────────────────────────────────
+notary_args=()
+if [ -n "${NOTARY_KEY:-}" ]; then
+    : "${NOTARY_KEY_ID:?NOTARY_KEY_ID required with NOTARY_KEY}"
+    : "${NOTARY_ISSUER:?NOTARY_ISSUER required with NOTARY_KEY}"
+    notary_args=(--key "$NOTARY_KEY" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+elif [ -n "${NOTARY_PROFILE:-}" ]; then
+    notary_args=(--keychain-profile "$NOTARY_PROFILE")
+fi
+
+if [ "${SKIP_NOTARIZE:-0}" = "1" ]; then
+    echo "▸ SKIP_NOTARIZE=1 — signed only (Gatekeeper will still query Apple on first launch)"
+elif [ ${#notary_args[@]} -eq 0 ]; then
+    echo "error: no notary credentials (NOTARY_KEY/NOTARY_KEY_ID/NOTARY_ISSUER or NOTARY_PROFILE)," >&2
+    echo "       or set SKIP_NOTARIZE=1 to sign only." >&2
+    exit 1
+else
+    SUBMIT_ZIP="$DIST_DIR/Smooblue-notary-submit.zip"
+    rm -f "$SUBMIT_ZIP"
+    ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$SUBMIT_ZIP"
+    echo "▸ submitting to Apple notary (usually 1–10 min)"
+    xcrun notarytool submit "$SUBMIT_ZIP" "${notary_args[@]}" --wait --timeout 30m \
+        | tee "$DIST_DIR/notary-submit.log"
+    rm -f "$SUBMIT_ZIP"
+    if ! grep -q "status: Accepted" "$DIST_DIR/notary-submit.log"; then
+        id="$(sed -n 's/^ *id: \(.*\)$/\1/p' "$DIST_DIR/notary-submit.log" | head -n1)"
+        [ -n "$id" ] && xcrun notarytool log "$id" "${notary_args[@]}" || true
+        echo "error: notarization was not accepted" >&2
+        exit 1
+    fi
+    echo "▸ stapling the .app"
+    xcrun stapler staple "$APP_BUNDLE"
+    xcrun stapler validate "$APP_BUNDLE"
+    echo "▸ Gatekeeper assessment"
+    spctl --assess --type execute --verbose=2 "$APP_BUNDLE"
+fi
+
+# ── 3. Release / Sparkle archive ───────────────────────────────────
+rm -f "$ZIP_OUT"
+ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ZIP_OUT"
 echo ""
-echo "✓ Notarized: $APP_BUNDLE"
-echo "✓ Ship: $DIST_ZIP"
+echo "✓ Signed$([ "${SKIP_NOTARIZE:-0}" = "1" ] || echo ", notarized and stapled"): $APP_BUNDLE"
+echo "✓ Archive: $ZIP_OUT"
