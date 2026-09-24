@@ -59,6 +59,15 @@ Drafts are scoped per account. Legacy imported drafts have no account and show f
 
 ## Navigation history
 
+### The rail's navigation group
+
+Back, forward, reopen and History sit as buttons at the top of the left rail, right under the logo:
+- **← / →** step back and forward in whichever thread or profile is on top.
+- **Reopen** (↺) is lit whenever something you closed can be brought back.
+- **History** (🕘) opens the recently viewed list.
+
+The group sits above the sheet backdrop (`.rail__nav` has z-index 55, the backdrop 50). So while a thread or profile is open, it stays sharp, clickable, and floats on its own surface. It sits below the compose sheet (60), so navigating can't pull a thread out from under a reply you're writing. The keyboard shortcuts below do the same things.
+
 ### Back and forward
 
 `crate::history::NavStacks` gives the thread and profile sheets browser-style back/forward. Clicking a reply, an embedded quote, or a History entry inside an open thread pushes the previous post. Use **←** and **→** in the thread header (profile: ← top-left), or **⌘[** and **⌘]**. Reopening a sheet fresh from the deck starts a new trail.
