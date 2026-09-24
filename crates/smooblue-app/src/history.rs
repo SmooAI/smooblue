@@ -1,23 +1,19 @@
-//! Navigation history — back / forward inside the thread and profile
-//! sheets, "reopen what I just closed", and a persisted list of
-//! recently viewed threads and profiles.
+//! Navigation history — browser-style back / forward across the deck
+//! and the thread / profile sheets, "reopen what I just closed", and a
+//! persisted list of recently viewed threads and profiles.
 //!
 //! Both sheets are modals over the deck, and a modal is easy to lose:
 //! one stray click on the backdrop and a 200-reply thread you were
-//! halfway through is gone, along with the chain of replies you had
-//! clicked through to get there. The in-memory [`NavStacks`] give each
-//! sheet browser-style back / forward; the [`ClosedSheet`] snapshot
-//! lets ⌘⇧T (or the "Reopen" toast) put the sheet back exactly as it
-//! was; and the `nav_history` table (schema v7) backs the History
-//! sheet so a thread from yesterday is still one click away.
+//! halfway through is gone. [`NavHistory`] keeps one timeline of what
+//! was on screen (the deck included) for ← / →; its `last_closed` backs
+//! the Reopen button, ⌘⇧T and the reopen toast; and the `nav_history`
+//! table (schema v7) backs the History sheet so a thread from
+//! yesterday is still one click away.
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
-/// Deepest back stack we keep per sheet. Plenty for clicking through a
-/// thread; bounded so an hour of browsing doesn't grow it forever.
-const MAX_STACK: usize = 100;
 /// Rows kept in `nav_history`; older ones are pruned on insert.
 const MAX_HISTORY_ROWS: i64 = 500;
 
@@ -44,141 +40,105 @@ impl NavKind {
     }
 }
 
-/// Back / forward stacks for one sheet. Keys are what the sheet's
-/// focus signal holds (a post AT-URI or an actor DID / handle).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NavStacks {
-    pub back: Vec<String>,
-    pub forward: Vec<String>,
-    /// Set by [`go_back`](Self::go_back) / [`go_forward`](Self::go_forward)
-    /// (and by a reopen) to the key being navigated to, so the focus
-    /// change that follows isn't recorded as a fresh navigation.
-    pending: Option<String>,
-}
+/// Oldest timeline entries are dropped past this many. Plenty for a
+/// session of reading; bounded so it can't grow forever.
+const MAX_TIMELINE: usize = 200;
 
-impl NavStacks {
-    pub fn can_go_back(&self) -> bool {
-        !self.back.is_empty()
-    }
-
-    pub fn can_go_forward(&self) -> bool {
-        !self.forward.is_empty()
-    }
-
-    /// Step back from `current`. Returns the key to focus next.
-    pub fn go_back(&mut self, current: &str) -> Option<String> {
-        let target = self.back.pop()?;
-        self.forward.push(current.to_string());
-        self.pending = Some(target.clone());
-        Some(target)
-    }
-
-    /// Step forward from `current`. Returns the key to focus next.
-    pub fn go_forward(&mut self, current: &str) -> Option<String> {
-        let target = self.forward.pop()?;
-        self.back.push(current.to_string());
-        self.pending = Some(target.clone());
-        Some(target)
-    }
-
-    /// Mark `key` as an expected focus change (used when restoring a
-    /// closed sheet, whose stacks come back with it).
-    pub fn expect(&mut self, key: &str) {
-        self.pending = Some(key.to_string());
-    }
-
-    /// Record a focus change from `prev` to `next`. Returns the key of
-    /// the sheet that just closed (`Some → None`), so the caller can
-    /// snapshot it for "reopen".
-    pub fn observe(&mut self, prev: Option<&str>, next: Option<&str>) -> Option<String> {
-        if let (Some(n), Some(p)) = (next, self.pending.as_deref()) {
-            if n == p {
-                self.pending = None;
-                return None;
-            }
-        }
-        self.pending = None;
-        match (prev, next) {
-            (Some(a), Some(b)) if a != b => {
-                if self.back.last().map(String::as_str) != Some(a) {
-                    self.back.push(a.to_string());
-                }
-                if self.back.len() > MAX_STACK {
-                    self.back.remove(0);
-                }
-                self.forward.clear();
-                None
-            }
-            (None, Some(_)) => {
-                // Fresh open from the deck — an unrelated trail.
-                self.back.clear();
-                self.forward.clear();
-                None
-            }
-            (Some(a), None) => Some(a.to_string()),
-            _ => None,
-        }
-    }
-}
-
-/// A sheet the user closed, with the trail they took through it, so
-/// it can be reopened exactly as it was.
+/// What's on screen: the deck (no sheet), or the thread / profile
+/// sheet on top, by key (post AT-URI / actor DID-or-handle).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClosedSheet {
-    pub kind: NavKind,
-    pub key: String,
-    pub stacks: NavStacks,
+pub enum View {
+    Deck,
+    Thread(String),
+    Profile(String),
 }
 
-/// App-wide navigation state (a Dioxus context signal).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+impl View {
+    pub fn kind(&self) -> Option<NavKind> {
+        match self {
+            View::Deck => None,
+            View::Thread(_) => Some(NavKind::Thread),
+            View::Profile(_) => Some(NavKind::Profile),
+        }
+    }
+}
+
+/// App-wide, browser-style navigation (a Dioxus context signal).
+///
+/// One **timeline** of everything shown, with the deck itself as a
+/// stop on it — not a per-sheet stack. That's what makes back/forward
+/// useful in real use: you open a thread from a column, close it, open
+/// a profile, open a post from it… and ← walks back through exactly
+/// that, including "back to the deck" and "back into the thread I just
+/// closed". (The first cut kept a back stack per sheet that reset on
+/// every open from the deck, so ← only ever lit up after clicking
+/// between replies *inside* one thread.)
+///
+/// [`observe`](Self::observe) is fed the two sheets' focus after every
+/// change; anything not caused by [`go_back`](Self::go_back) /
+/// [`go_forward`](Self::go_forward) is a new visit (truncating the
+/// forward half, as a browser does).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NavHistory {
-    pub thread: NavStacks,
-    pub profile: NavStacks,
-    /// Most recently closed sheet, for ⌘⇧T / the reopen toast.
-    pub last_closed: Option<ClosedSheet>,
-    /// Bumped on every close so the toast re-shows even when the same
-    /// thread is closed twice in a row.
+    timeline: Vec<View>,
+    cursor: usize,
+    /// The view a back / forward is taking us to, so the focus change
+    /// it causes isn't recorded as a fresh visit.
+    pending: Option<View>,
+    /// Most recently *closed* sheet (backdrop, ×, Esc — not a back /
+    /// forward), for the Reopen button, ⌘⇧T and the reopen toast.
+    pub last_closed: Option<View>,
+    /// Bumped on every such close so the toast re-shows even when the
+    /// same thread is closed twice in a row.
     pub closed_seq: u64,
-    /// When each sheet last came to the front (opened or navigated).
-    /// Thread and profile sheets can stack either way round — a post
-    /// clicked inside a profile opens a thread *over* it — so paint
-    /// order and Esc follow this, not a fixed DOM order.
+    prev_thread: Option<String>,
+    prev_profile: Option<String>,
+    /// When each sheet last came to the front. Thread and profile
+    /// sheets stack either way round (a post clicked inside a profile
+    /// opens a thread *over* it), so paint order + Esc follow this.
     raise_seq: u64,
     thread_raised: u64,
     profile_raised: u64,
 }
 
+impl Default for NavHistory {
+    fn default() -> Self {
+        Self {
+            timeline: vec![View::Deck],
+            cursor: 0,
+            pending: None,
+            last_closed: None,
+            closed_seq: 0,
+            prev_thread: None,
+            prev_profile: None,
+            raise_seq: 0,
+            thread_raised: 0,
+            profile_raised: 0,
+        }
+    }
+}
+
 impl NavHistory {
-    pub fn stacks_mut(&mut self, kind: NavKind) -> &mut NavStacks {
-        match kind {
-            NavKind::Thread => &mut self.thread,
-            NavKind::Profile => &mut self.profile,
-        }
+    pub fn current(&self) -> &View {
+        &self.timeline[self.cursor]
     }
 
-    pub fn stacks(&self, kind: NavKind) -> &NavStacks {
-        match kind {
-            NavKind::Thread => &self.thread,
-            NavKind::Profile => &self.profile,
-        }
+    pub fn can_go_back(&self) -> bool {
+        self.cursor > 0
     }
 
-    /// Feed a focus change for `kind`. On close, the trail is moved
-    /// into `last_closed` and the live stacks reset.
-    pub fn observe(&mut self, kind: NavKind, prev: Option<&str>, next: Option<&str>) {
-        if next.is_some() && next != prev {
-            self.raise_seq += 1;
-            match kind {
-                NavKind::Thread => self.thread_raised = self.raise_seq,
-                NavKind::Profile => self.profile_raised = self.raise_seq,
-            }
-        }
-        if let Some(key) = self.stacks_mut(kind).observe(prev, next) {
-            let stacks = std::mem::take(self.stacks_mut(kind));
-            self.last_closed = Some(ClosedSheet { kind, key, stacks });
-            self.closed_seq = self.closed_seq.wrapping_add(1);
-        }
+    pub fn can_go_forward(&self) -> bool {
+        self.cursor + 1 < self.timeline.len()
+    }
+
+    /// The view ← would show (for tooltips).
+    pub fn back_target(&self) -> Option<&View> {
+        self.cursor.checked_sub(1).map(|i| &self.timeline[i])
+    }
+
+    /// The view → would show (for tooltips).
+    pub fn forward_target(&self) -> Option<&View> {
+        self.timeline.get(self.cursor + 1)
     }
 
     /// Whether the thread sheet was brought forward more recently than
@@ -187,15 +147,91 @@ impl NavHistory {
         self.thread_raised > self.profile_raised
     }
 
-    /// Take the last-closed snapshot and restore its stacks, primed so
-    /// the upcoming focus change isn't treated as a fresh open. The
-    /// caller sets the sheet's focus signal to the returned key.
-    pub fn take_reopen(&mut self) -> Option<(NavKind, String)> {
-        let closed = self.last_closed.take()?;
-        let mut stacks = closed.stacks;
-        stacks.expect(&closed.key);
-        *self.stacks_mut(closed.kind) = stacks;
-        Some((closed.kind, closed.key))
+    /// The view on top for these sheet focuses.
+    fn top(&self, thread: Option<&str>, profile: Option<&str>) -> View {
+        match (thread, profile) {
+            (Some(t), Some(_)) if self.thread_above_profile() => View::Thread(t.to_string()),
+            (_, Some(p)) => View::Profile(p.to_string()),
+            (Some(t), None) => View::Thread(t.to_string()),
+            (None, None) => View::Deck,
+        }
+    }
+
+    /// Feed the current focus of both sheets (blank keys count as
+    /// closed). Updates stacking order, the timeline and last-closed.
+    pub fn observe(&mut self, thread: Option<&str>, profile: Option<&str>) {
+        let thread = thread.filter(|k| !k.trim().is_empty());
+        let profile = profile.filter(|k| !k.trim().is_empty());
+        if thread.is_some() && thread != self.prev_thread.as_deref() {
+            self.raise_seq += 1;
+            self.thread_raised = self.raise_seq;
+        }
+        if profile.is_some() && profile != self.prev_profile.as_deref() {
+            self.raise_seq += 1;
+            self.profile_raised = self.raise_seq;
+        }
+        let top = self.top(thread, profile);
+        let via_nav = self.pending.take().is_some_and(|p| p == top);
+        if !via_nav {
+            // A sheet that went away on its own is a "close" worth
+            // offering back. Profile is checked last so, if both close
+            // at once, the one that was on top wins.
+            if let (Some(t), None) = (self.prev_thread.clone(), thread) {
+                self.last_closed = Some(View::Thread(t));
+                self.closed_seq = self.closed_seq.wrapping_add(1);
+            }
+            if let (Some(p), None) = (self.prev_profile.clone(), profile) {
+                self.last_closed = Some(View::Profile(p));
+                self.closed_seq = self.closed_seq.wrapping_add(1);
+            }
+            self.visit(top);
+        }
+        self.prev_thread = thread.map(str::to_string);
+        self.prev_profile = profile.map(str::to_string);
+    }
+
+    /// Record a fresh visit: drop the forward half, append, bound.
+    fn visit(&mut self, view: View) {
+        if self.timeline[self.cursor] == view {
+            return;
+        }
+        self.timeline.truncate(self.cursor + 1);
+        self.timeline.push(view);
+        if self.timeline.len() > MAX_TIMELINE {
+            self.timeline.remove(0);
+        }
+        self.cursor = self.timeline.len() - 1;
+    }
+
+    /// Step back. Returns the view to show; the caller applies it.
+    pub fn go_back(&mut self) -> Option<View> {
+        let target = self.back_target()?.clone();
+        self.cursor -= 1;
+        self.pending = Some(target.clone());
+        Some(target)
+    }
+
+    /// Step forward. Returns the view to show; the caller applies it.
+    pub fn go_forward(&mut self) -> Option<View> {
+        let target = self.forward_target()?.clone();
+        self.cursor += 1;
+        self.pending = Some(target.clone());
+        Some(target)
+    }
+
+    /// The closed sheet to reopen, if it isn't already open again. The
+    /// caller shows it as a fresh visit.
+    pub fn take_reopen(&mut self, thread_open: bool, profile_open: bool) -> Option<View> {
+        let still_closed = match self.last_closed.as_ref()? {
+            View::Thread(_) => !thread_open,
+            View::Profile(_) => !profile_open,
+            View::Deck => false,
+        };
+        if still_closed {
+            self.last_closed.take()
+        } else {
+            None
+        }
     }
 }
 
@@ -204,8 +240,8 @@ impl NavHistory {
 use crate::state::{ProfileFocus, ThreadFocus};
 use dioxus::prelude::*;
 
-/// The sheet on top — the one the keyboard's back / forward and Esc
-/// act on when both the thread and profile sheets are open.
+/// The sheet on top — the one Esc closes first when both the thread
+/// and profile sheets are open.
 pub fn topmost(
     nav: Signal<NavHistory>,
     thread: Signal<ThreadFocus>,
@@ -219,53 +255,64 @@ pub fn topmost(
     }
 }
 
-/// Step one sheet back (or forward). Returns whether anything moved.
-pub fn step(
-    mut nav: Signal<NavHistory>,
-    mut thread: Signal<ThreadFocus>,
-    mut profile: Signal<ProfileFocus>,
-    kind: NavKind,
-    forward: bool,
-) -> bool {
-    let current = match kind {
-        NavKind::Thread => thread.peek().0.clone(),
-        NavKind::Profile => profile.peek().0.clone(),
+/// Make `view` what's on screen: exactly that sheet open (or none, for
+/// the deck).
+fn show(view: View, mut thread: Signal<ThreadFocus>, mut profile: Signal<ProfileFocus>) {
+    let (t, p) = match view {
+        View::Deck => (None, None),
+        View::Thread(k) => (Some(k), None),
+        View::Profile(k) => (None, Some(k)),
     };
-    let Some(current) = current else {
-        return false;
-    };
-    let target = {
-        let mut n = nav.write();
-        let stacks = n.stacks_mut(kind);
-        if forward {
-            stacks.go_forward(&current)
-        } else {
-            stacks.go_back(&current)
-        }
-    };
-    let Some(target) = target else {
-        return false;
-    };
-    match kind {
-        NavKind::Thread => thread.set(ThreadFocus(Some(target))),
-        NavKind::Profile => profile.set(ProfileFocus(Some(target))),
+    if thread.peek().0 != t {
+        thread.set(ThreadFocus(t));
     }
-    true
+    if profile.peek().0 != p {
+        profile.set(ProfileFocus(p));
+    }
 }
 
-/// Reopen the most recently closed thread / profile sheet with its
-/// back / forward trail intact. Returns whether anything reopened.
+/// ← / → (buttons, ⌘[ / ⌘]). Returns whether anything moved.
+pub fn step(
+    mut nav: Signal<NavHistory>,
+    thread: Signal<ThreadFocus>,
+    profile: Signal<ProfileFocus>,
+    forward: bool,
+) -> bool {
+    let target = {
+        let mut n = nav.write();
+        if forward {
+            n.go_forward()
+        } else {
+            n.go_back()
+        }
+    };
+    match target {
+        Some(view) => {
+            show(view, thread, profile);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Reopen the most recently closed thread / profile (button, ⌘⇧T,
+/// toast). Returns whether anything reopened.
 pub fn reopen_last(
     mut nav: Signal<NavHistory>,
     mut thread: Signal<ThreadFocus>,
     mut profile: Signal<ProfileFocus>,
 ) -> bool {
-    let Some((kind, key)) = nav.write().take_reopen() else {
+    let thread_open = thread.peek().0.is_some();
+    let profile_open = profile.peek().0.is_some();
+    let Some(view) = nav.write().take_reopen(thread_open, profile_open) else {
         return false;
     };
-    match kind {
-        NavKind::Thread => thread.set(ThreadFocus(Some(key))),
-        NavKind::Profile => profile.set(ProfileFocus(Some(key))),
+    // Reopen stacks the sheet back on top of whatever is open, rather
+    // than replacing it — a fresh visit, not a jump.
+    match view {
+        View::Thread(k) => thread.set(ThreadFocus(Some(k))),
+        View::Profile(k) => profile.set(ProfileFocus(Some(k))),
+        View::Deck => {}
     }
     true
 }
@@ -283,24 +330,27 @@ pub fn open_entry(
     }
 }
 
-/// Mirror a sheet's focus signal into [`NavHistory`]. Call once per
-/// sheet component, with a reader for its focus key.
-pub fn use_nav_tracker(kind: NavKind, read_focus: impl Fn() -> Option<String> + 'static) {
+/// Mirror both sheets' focus into [`NavHistory`]. Mount once (the
+/// deck shell): one observer sees both signals together, so a back /
+/// forward that changes both lands as a single step.
+pub fn use_nav_observer() {
     let mut nav = use_context::<Signal<NavHistory>>();
-    let mut prev = use_signal(|| None::<String>);
+    let thread = use_context::<Signal<ThreadFocus>>();
+    let profile = use_context::<Signal<ProfileFocus>>();
     use_effect(move || {
-        // A blank key is a click site that forgot to fill the focus;
-        // the sheet closes itself at once. Treat it as "closed" so it
-        // never becomes a back entry or a "Reopen" target.
-        let next = read_focus().filter(|k| !k.trim().is_empty());
-        let before = prev.peek().clone();
-        if before == next {
-            return;
-        }
-        prev.set(next.clone());
-        nav.write()
-            .observe(kind, before.as_deref(), next.as_deref());
+        let t = thread.read().0.clone();
+        let p = profile.read().0.clone();
+        nav.write().observe(t.as_deref(), p.as_deref());
     });
+}
+
+/// Short tooltip label for a view ("the deck", "a thread", …).
+pub fn describe(view: &View) -> &'static str {
+    match view {
+        View::Deck => "the deck",
+        View::Thread(_) => "a thread",
+        View::Profile(_) => "a profile",
+    }
 }
 
 /// Record a viewed thread / profile in the persisted history, off the
@@ -444,89 +494,137 @@ mod tests {
     use super::*;
     use crate::inbox::{install_fresh_test_db, TEST_DB_GUARD};
 
-    #[test]
-    fn clicking_through_builds_a_back_stack_and_back_forward_walk_it() {
-        let mut s = NavStacks::default();
-        s.observe(None, Some("a"));
-        s.observe(Some("a"), Some("b"));
-        s.observe(Some("b"), Some("c"));
-        assert_eq!(s.back, vec!["a", "b"]);
+    fn t(k: &str) -> View {
+        View::Thread(k.into())
+    }
+    fn p(k: &str) -> View {
+        View::Profile(k.into())
+    }
 
-        let t = s.go_back("c").unwrap();
-        assert_eq!(t, "b");
-        // The focus change the back button causes must not re-push.
-        s.observe(Some("c"), Some("b"));
-        assert_eq!(s.back, vec!["a"]);
-        assert_eq!(s.forward, vec!["c"]);
-
-        let t = s.go_forward("b").unwrap();
-        assert_eq!(t, "c");
-        s.observe(Some("b"), Some("c"));
-        assert_eq!(s.back, vec!["a", "b"]);
-        assert!(s.forward.is_empty());
+    /// Replay a back/forward the way the signal layer does: step, then
+    /// observe the focus it produces.
+    fn apply(nav: &mut NavHistory, view: View) {
+        let (th, pr) = match &view {
+            View::Deck => (None, None),
+            View::Thread(k) => (Some(k.clone()), None),
+            View::Profile(k) => (None, Some(k.clone())),
+        };
+        nav.observe(th.as_deref(), pr.as_deref());
     }
 
     #[test]
-    fn a_new_click_after_going_back_drops_the_forward_trail() {
-        let mut s = NavStacks::default();
-        s.observe(None, Some("a"));
-        s.observe(Some("a"), Some("b"));
-        s.go_back("b");
-        s.observe(Some("b"), Some("a"));
-        assert!(s.can_go_forward());
-        s.observe(Some("a"), Some("x"));
-        assert!(!s.can_go_forward());
-        assert_eq!(s.back, vec!["a"]);
-    }
-
-    #[test]
-    fn fresh_open_resets_and_close_reports_the_key() {
-        let mut s = NavStacks::default();
-        s.observe(None, Some("a"));
-        s.observe(Some("a"), Some("b"));
-        assert_eq!(s.observe(Some("b"), None), Some("b".to_string()));
-        s.observe(None, Some("z"));
-        assert!(!s.can_go_back());
-    }
-
-    #[test]
-    fn close_then_reopen_restores_the_trail() {
+    fn opening_one_thread_from_the_deck_already_enables_back() {
+        // The real-use complaint: open a thread from a column → ← was
+        // disabled. Now ← goes back to the deck.
         let mut nav = NavHistory::default();
-        nav.observe(NavKind::Thread, None, Some("a"));
-        nav.observe(NavKind::Thread, Some("a"), Some("b"));
-        nav.observe(NavKind::Thread, Some("b"), None);
-        assert_eq!(nav.closed_seq, 1);
-        assert!(!nav.thread.can_go_back());
+        assert!(!nav.can_go_back());
+        nav.observe(Some("a"), None);
+        assert!(nav.can_go_back());
+        assert_eq!(nav.back_target(), Some(&View::Deck));
+    }
 
-        let (kind, key) = nav.take_reopen().unwrap();
-        assert_eq!((kind, key.as_str()), (NavKind::Thread, "b"));
-        // The reopen's own None → Some("b") must not wipe the trail.
-        nav.observe(NavKind::Thread, None, Some("b"));
-        assert_eq!(nav.thread.back, vec!["a"]);
-        assert!(nav.last_closed.is_none());
+    #[test]
+    fn back_walks_across_separate_opens_and_closes() {
+        let mut nav = NavHistory::default();
+        nav.observe(Some("a"), None); // open thread a from a column
+        nav.observe(None, None); // close it
+        nav.observe(None, Some("bob")); // open a profile
+        nav.observe(Some("b"), Some("bob")); // a post inside the profile
+        assert_eq!(nav.current(), &t("b"));
+
+        let v = nav.go_back().unwrap();
+        assert_eq!(v, p("bob"));
+        apply(&mut nav, v);
+        let v = nav.go_back().unwrap();
+        assert_eq!(v, View::Deck);
+        apply(&mut nav, v);
+        // …and back into the thread that was closed before all that.
+        let v = nav.go_back().unwrap();
+        assert_eq!(v, t("a"));
+        apply(&mut nav, v);
+        assert!(nav.can_go_back()); // to the initial deck
+        assert!(nav.can_go_forward());
+
+        // Forward retraces without rewriting history.
+        let v = nav.go_forward().unwrap();
+        assert_eq!(v, View::Deck);
+        apply(&mut nav, v);
+        assert_eq!(nav.forward_target(), Some(&p("bob")));
+    }
+
+    #[test]
+    fn a_new_visit_after_going_back_drops_the_forward_half() {
+        let mut nav = NavHistory::default();
+        nav.observe(Some("a"), None);
+        nav.observe(Some("b"), None);
+        let v = nav.go_back().unwrap();
+        apply(&mut nav, v);
+        assert!(nav.can_go_forward());
+        nav.observe(Some("x"), None);
+        assert!(!nav.can_go_forward());
+        assert_eq!(nav.back_target(), Some(&t("a")));
+    }
+
+    #[test]
+    fn closing_offers_reopen_but_navigating_away_does_not() {
+        let mut nav = NavHistory::default();
+        nav.observe(Some("a"), None);
+        nav.observe(None, None); // backdrop click
+        assert_eq!(nav.last_closed, Some(t("a")));
+        assert_eq!(nav.closed_seq, 1);
+        assert_eq!(nav.take_reopen(false, false), Some(t("a")));
+
+        // ← from a thread back to the deck is navigation, not a "close".
+        let mut nav = NavHistory::default();
+        nav.observe(Some("a"), None);
+        let v = nav.go_back().unwrap();
+        apply(&mut nav, v);
+        assert_eq!(nav.last_closed, None);
+        assert_eq!(nav.closed_seq, 0);
+    }
+
+    #[test]
+    fn reopen_is_offered_only_while_the_sheet_is_still_closed() {
+        let mut nav = NavHistory::default();
+        nav.observe(Some("a"), None);
+        nav.observe(None, None);
+        assert_eq!(nav.take_reopen(true, false), None);
+        assert_eq!(nav.take_reopen(false, false), Some(t("a")));
+        assert_eq!(nav.take_reopen(false, false), None);
     }
 
     #[test]
     fn most_recently_raised_sheet_is_on_top() {
         let mut nav = NavHistory::default();
-        nav.observe(NavKind::Profile, None, Some("did:plc:a"));
+        nav.observe(None, Some("did:plc:a"));
         assert!(!nav.thread_above_profile());
+        assert_eq!(nav.current(), &p("did:plc:a"));
         // A post clicked inside the profile opens a thread over it.
-        nav.observe(NavKind::Thread, None, Some("at://p"));
+        nav.observe(Some("at://p"), Some("did:plc:a"));
         assert!(nav.thread_above_profile());
-        // An avatar clicked in that thread brings the profile back up.
-        nav.observe(NavKind::Profile, Some("did:plc:a"), Some("did:plc:b"));
+        assert_eq!(nav.current(), &t("at://p"));
+        // An avatar clicked in that thread brings a profile back up.
+        nav.observe(Some("at://p"), Some("did:plc:b"));
         assert!(!nav.thread_above_profile());
+        assert_eq!(nav.current(), &p("did:plc:b"));
     }
 
     #[test]
-    fn stacks_are_bounded() {
-        let mut s = NavStacks::default();
-        s.observe(None, Some("0"));
-        for i in 0..(MAX_STACK + 20) {
-            s.observe(Some(&i.to_string()), Some(&(i + 1).to_string()));
+    fn blank_keys_count_as_closed_and_never_become_entries() {
+        let mut nav = NavHistory::default();
+        nav.observe(None, Some("  "));
+        assert!(!nav.can_go_back());
+        assert_eq!(nav.last_closed, None);
+    }
+
+    #[test]
+    fn timeline_is_bounded() {
+        let mut nav = NavHistory::default();
+        for i in 0..(MAX_TIMELINE + 50) {
+            nav.observe(Some(&i.to_string()), None);
         }
-        assert_eq!(s.back.len(), MAX_STACK);
+        assert_eq!(nav.timeline.len(), MAX_TIMELINE);
+        assert_eq!(nav.cursor, MAX_TIMELINE - 1);
     }
 
     #[test]

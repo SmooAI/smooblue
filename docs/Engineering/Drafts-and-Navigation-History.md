@@ -62,7 +62,7 @@ Drafts are scoped per account. Legacy imported drafts have no account and show f
 ### The rail's navigation group
 
 Back, forward, reopen and History sit as buttons at the top of the left rail, right under the logo:
-- **← / →** step back and forward in whichever thread or profile is on top.
+- **← / →** step back and forward along the timeline (see below). Their tooltips say where they go ("Back to a thread").
 - **Reopen** (↺) is lit whenever something you closed can be brought back.
 - **History** (🕘) opens the recently viewed list.
 
@@ -70,7 +70,18 @@ The group sits above the sheet backdrop (`.rail__nav` has z-index 55, the backdr
 
 ### Back and forward
 
-`crate::history::NavStacks` gives the thread and profile sheets browser-style back/forward. Clicking a reply, an embedded quote, or a History entry inside an open thread pushes the previous post. Use **←** and **→** in the thread header (profile: ← top-left), or **⌘[** and **⌘]**. Reopening a sheet fresh from the deck starts a new trail.
+`crate::history::NavHistory` keeps **one browser-style timeline** of what was on screen: the deck, the thread sheet and the profile sheet. It is not a per-sheet stack. Every change to either sheet's focus is a visit (one observer, `use_nav_observer`, mounted in `DeckShell`). Visits include opening a post from a column, clicking a reply or an embedded quote, opening a profile from a thread, closing a sheet (a return to the deck), and opening a History entry. **←** steps back along the timeline and **→** steps forward, exactly as in a browser. A new visit after going back drops the forward half.
+
+In practice:
+- Open a thread from a column and ← is already live; it goes back to the deck.
+- At the deck, ← reopens the thread you just closed.
+- Open a thread, close it, open another, and ← walks back through both.
+
+Showing a timeline entry makes exactly that sheet the visible one. A back or forward is not recorded as a new visit (the `pending` view), and it doesn't count as a "close".
+
+The first version kept a separate back stack per sheet that reset on every fresh open. So ← only ever lit up after clicking between replies *inside* one thread; in real use it never did.
+
+Controls: the rail's ← →, the ← → in the thread header (and ← on the profile banner), and **⌘[** / **⌘]**. All of them work from the deck too.
 
 ### Reopen what you closed
 

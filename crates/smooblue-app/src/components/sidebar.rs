@@ -230,7 +230,7 @@ fn RailBtn(
 /// ⌘[ / ⌘] / ⌘⇧T / ⌘Y shortcuts ([`crate::keyboard`]).
 #[component]
 fn NavGroup(history_open: Signal<bool>) -> Element {
-    use crate::history::{self, NavHistory, NavKind};
+    use crate::history::{self, NavHistory, View};
     use crate::state::ThreadFocus;
 
     let nav = use_context::<Signal<NavHistory>>();
@@ -241,30 +241,28 @@ fn NavGroup(history_open: Signal<bool>) -> Element {
     let thread_open = thread.read().0.is_some();
     let profile_open = profile.read().0.is_some();
     let n = nav.read();
-    // Back / forward act on the sheet on top (profile or thread,
-    // whichever was raised last) — the same one ⌘[ / ⌘] drive.
-    let top = match (thread_open, profile_open) {
-        (true, true) if n.thread_above_profile() => Some(NavKind::Thread),
-        (_, true) => Some(NavKind::Profile),
-        (true, false) => Some(NavKind::Thread),
-        (false, false) => None,
-    };
-    let can_back = top.is_some_and(|k| n.stacks(k).can_go_back());
-    let can_forward = top.is_some_and(|k| n.stacks(k).can_go_forward());
+    // One timeline across the deck and both sheets (crate::history), so
+    // ← is live as soon as you've opened anything — and at the deck it
+    // steps back into what you just closed.
+    let can_back = n.can_go_back();
+    let can_forward = n.can_go_forward();
+    let back_title = n
+        .back_target()
+        .map(|v| format!("Back to {} (⌘[)", history::describe(v)))
+        .unwrap_or_else(|| "Back (⌘[)".into());
+    let forward_title = n
+        .forward_target()
+        .map(|v| format!("Forward to {} (⌘])", history::describe(v)))
+        .unwrap_or_else(|| "Forward (⌘])".into());
     // Reopen: something was closed and it isn't already back open.
-    let reopen = n.last_closed.as_ref().and_then(|c| {
-        let open_again = match c.kind {
-            NavKind::Thread => thread_open,
-            NavKind::Profile => profile_open,
-        };
-        (!open_again).then_some(c.kind)
-    });
-    drop(n);
-    let reopen_title = match reopen {
-        Some(NavKind::Thread) => "Reopen the thread you closed (⌘⇧T)",
-        Some(NavKind::Profile) => "Reopen the profile you closed (⌘⇧T)",
-        None => "Reopen — nothing closed yet (⌘⇧T)",
+    let reopen_title = match n.last_closed.as_ref() {
+        Some(View::Thread(_)) if !thread_open => Some("Reopen the thread you closed (⌘⇧T)"),
+        Some(View::Profile(_)) if !profile_open => Some("Reopen the profile you closed (⌘⇧T)"),
+        _ => None,
     };
+    drop(n);
+    let can_reopen = reopen_title.is_some();
+    let reopen_title = reopen_title.unwrap_or("Reopen — nothing closed yet (⌘⇧T)");
     let group_class = if thread_open || profile_open {
         "rail__nav rail__nav--over-sheet"
     } else {
@@ -280,29 +278,25 @@ fn NavGroup(history_open: Signal<bool>) -> Element {
         div { class: "{group_class}",
             div { class: "rail__nav-row",
                 button { class: "rail__nav-step",
-                    title: "Back (⌘[)",
+                    title: "{back_title}",
                     disabled: !can_back,
                     onclick: move |_| {
-                        if let Some(kind) = top {
-                            history::step(nav, thread, profile, kind, false);
-                        }
+                        history::step(nav, thread, profile, false);
                     },
                     icons::ArrowLeft { size: icons::Size::Sm }
                 }
                 button { class: "rail__nav-step",
-                    title: "Forward (⌘])",
+                    title: "{forward_title}",
                     disabled: !can_forward,
                     onclick: move |_| {
-                        if let Some(kind) = top {
-                            history::step(nav, thread, profile, kind, true);
-                        }
+                        history::step(nav, thread, profile, true);
                     },
                     icons::ArrowRight { size: icons::Size::Sm }
                 }
             }
             button { class: "rail__btn",
                 title: "{reopen_title}",
-                disabled: reopen.is_none(),
+                disabled: !can_reopen,
                 onclick: move |_| {
                     history::reopen_last(nav, thread, profile);
                 },

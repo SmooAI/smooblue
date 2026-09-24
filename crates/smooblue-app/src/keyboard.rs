@@ -134,8 +134,8 @@ pub fn close_top_modal(ctx: &mut KeyContext) {
     }
 }
 
-/// ⌘-shortcuts that work over the thread / profile sheets: back,
-/// forward, reopen-last-closed, and history. Not while composing —
+/// ⌘-shortcuts for navigation — back, forward (across the deck and
+/// both sheets), reopen-last-closed, and history. Not while composing —
 /// ⌘[ / ⌘] must not yank the thread out from under a reply in progress.
 fn dispatch_nav(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
     if !(modifiers.meta() || modifiers.ctrl()) || ctx.compose.read().open {
@@ -145,13 +145,7 @@ fn dispatch_nav(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
         return false;
     };
     match c.as_str() {
-        "[" | "]" => {
-            let Some(kind) = history::topmost(ctx.nav, ctx.thread, ctx.profile) else {
-                return false;
-            };
-            history::step(ctx.nav, ctx.thread, ctx.profile, kind, c == "]");
-            true
-        }
+        "[" | "]" => history::step(ctx.nav, ctx.thread, ctx.profile, c == "]"),
         "t" | "T" if modifiers.shift() => {
             history::reopen_last(ctx.nav, ctx.thread, ctx.profile);
             true

@@ -24,7 +24,7 @@
 use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
 use crate::demo;
-use crate::history::{use_nav_tracker, NavHistory, NavKind};
+use crate::history::{NavHistory, NavKind};
 use crate::icons;
 use crate::state::{PostedTick, ProfileFocus, ThreadFocus};
 use dioxus::prelude::*;
@@ -55,9 +55,6 @@ pub fn ThreadSheet() -> Element {
     // Closed: render nothing. Hooks below run unconditionally per
     // Dioxus rules, so we put the early-return after them.
     let uri_opt = snap.clone();
-
-    // Back / forward trail + "reopen what I just closed".
-    use_nav_tracker(NavKind::Thread, move || focus.read().0.clone());
 
     // Reactive: read focus inside the resource so clicking through
     // to a different post inside the thread re-fires the fetch. The
@@ -115,13 +112,13 @@ pub fn ThreadSheet() -> Element {
     let close = move |_| {
         focus.set(ThreadFocus(None));
     };
-    let can_back = nav.read().thread.can_go_back();
-    let can_forward = nav.read().thread.can_go_forward();
+    let can_back = nav.read().can_go_back();
+    let can_forward = nav.read().can_go_forward();
     let go_back = move |_| {
-        crate::history::step(nav, focus, profile_focus, NavKind::Thread, false);
+        crate::history::step(nav, focus, profile_focus, false);
     };
     let go_forward = move |_| {
-        crate::history::step(nav, focus, profile_focus, NavKind::Thread, true);
+        crate::history::step(nav, focus, profile_focus, true);
     };
     let author_handle = match &*thread.read_unchecked() {
         Some(Ok(ThreadView::Post { post, .. })) if post.uri == uri => {
