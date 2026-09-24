@@ -133,6 +133,9 @@ fn poll_interval(kind: &ColumnKind) -> Duration {
         ColumnKind::Feed { .. } => Duration::from_secs(25),
         ColumnKind::AuthorFeed { .. } => Duration::from_secs(45),
         ColumnKind::List { .. } => Duration::from_secs(25),
+        // Saved posts only change when you save/unsave; a quick-ish
+        // poll makes a save from another column show up promptly.
+        ColumnKind::Bookmarks => Duration::from_secs(20),
         // Suggestions are personalized; refresh slowly — the user
         // doesn't want their suggested-follows list flickering.
         ColumnKind::Suggestions => Duration::from_secs(300),
@@ -162,6 +165,9 @@ pub fn Column(spec: ColumnSpec) -> Element {
     // Deck spec signal — the poll loop reads this for the live refresh
     // cadence, and the settings panel mutates this column's settings.
     let cols = use_context::<Signal<Vec<ColumnSpec>>>();
+    // Optimistic like/repost/save state — read (and so subscribed to)
+    // only by the Saved column, to drop just-unsaved posts at once.
+    let optimistic_map = use_context::<Signal<crate::state::OptimisticMap>>();
     // Per-column settings panel (gear) open state.
     let settings_open = use_signal(|| false);
     let spec_kind = spec.kind.clone();
@@ -778,6 +784,18 @@ pub fn Column(spec: ColumnSpec) -> Element {
                             .iter()
                             .filter(|it| !has_filter || feed_item_matches(it, &filter_lower))
                             .filter(|it| passes_feed_settings(it, &spec.settings))
+                            // Saved column: a post unsaved just now (here
+                            // or in any column) leaves at once, not on
+                            // the next poll. Only this column subscribes
+                            // to the optimistic map.
+                            .filter(|it| {
+                                !matches!(spec.kind, ColumnKind::Bookmarks)
+                                    || optimistic_map
+                                        .read()
+                                        .get(&it.post.uri)
+                                        .and_then(|o| o.bookmarked)
+                                        != Some(false)
+                            })
                             .collect();
                         if filtered.is_empty() {
                             rsx! {
@@ -1183,6 +1201,7 @@ fn is_paginated(kind: &ColumnKind) -> bool {
             | ColumnKind::Search { .. }
             | ColumnKind::Feed { .. }
             | ColumnKind::List { .. }
+            | ColumnKind::Bookmarks
             | ColumnKind::Notifications
     )
 }
@@ -1753,6 +1772,8 @@ async fn fetch_page(
                 ColumnData::Notifications { groups, subjects }
             }
             ColumnKind::AuthorFeed { .. } => ColumnData::Posts(crate::demo::home_feed()),
+            ColumnKind::Bookmarks if cursor.is_some() => ColumnData::Posts(Vec::new()),
+            ColumnKind::Bookmarks => ColumnData::Posts(crate::demo::saved_feed()),
             ColumnKind::Suggestions => ColumnData::Suggestions(crate::demo::suggestions()),
             // Demo mode shows an empty inbox — no canned convos yet.
             ColumnKind::Messages => ColumnData::Convos(Vec::new()),
@@ -1886,6 +1907,17 @@ async fn fetch_page(
             .map(|r| Page {
                 data: ColumnData::Posts(r.feed),
                 cursor: r.cursor,
+            })
+            .map_err(|e| e.to_string()),
+        ColumnKind::Bookmarks => client
+            .get_bookmarks(cur, PAGE_SIZE)
+            .await
+            .map(|r| {
+                let r = r.into_feed();
+                Page {
+                    data: ColumnData::Posts(r.feed),
+                    cursor: r.cursor,
+                }
             })
             .map_err(|e| e.to_string()),
         ColumnKind::Suggestions => client
@@ -2389,6 +2421,7 @@ fn ColumnHeader(
                     ColumnKind::Feed { .. } => rsx! { icons::Compass { size: icons::Size::Sm } },
                     ColumnKind::List { .. } => rsx! { icons::Users { size: icons::Size::Sm } },
                     ColumnKind::Suggestions => rsx! { icons::Sparkles { size: icons::Size::Sm } },
+                    ColumnKind::Bookmarks => rsx! { icons::Bookmark { size: icons::Size::Sm } },
                     ColumnKind::Messages => rsx! { icons::MessageCircle { size: icons::Size::Sm } },
                     ColumnKind::Inbox => rsx! { icons::Inbox { size: icons::Size::Sm } },
                     ColumnKind::Analytics => rsx! { icons::ChartColumn { size: icons::Size::Sm } },
@@ -2445,6 +2478,7 @@ fn ColumnSettingsPanel(
             | ColumnKind::List { .. }
             | ColumnKind::AuthorFeed { .. }
             | ColumnKind::Search { .. }
+            | ColumnKind::Bookmarks
     );
     let is_notif = matches!(kind, ColumnKind::Notifications);
 

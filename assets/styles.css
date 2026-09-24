@@ -6201,3 +6201,14 @@ button.thread__continue:hover {
     cursor: default;
     background: transparent;
 }
+
+/* Saved (Bluesky bookmark) — filled when the post is in your Saved list.
+ * Smoo orange, distinct from like (red) and repost (green). */
+.post__action--saved {
+    color: var(--color-smooai-orange);
+}
+
+.post__action--saved svg {
+    fill: var(--color-smooai-orange);
+    opacity: 1;
+}

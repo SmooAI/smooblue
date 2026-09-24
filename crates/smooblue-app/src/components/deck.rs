@@ -216,6 +216,7 @@ pub fn DeckShell() -> Element {
                         KbdRow { keys: "g n", action: "Notifications" }
                         KbdRow { keys: "g d", action: "Discover" }
                         KbdRow { keys: "g s", action: "Suggested follows" }
+                        KbdRow { keys: "g b", action: "Saved posts" }
                         KbdRow { keys: "g p", action: "Your profile" }
 
                         // Section: Compose

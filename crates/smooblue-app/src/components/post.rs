@@ -57,6 +57,14 @@ pub fn PostCard(
         Some(b) => b,
         None => server_like_uri.is_some(),
     };
+    let is_bookmarked = match opt_state.bookmarked {
+        Some(b) => b,
+        None => post
+            .viewer
+            .as_ref()
+            .and_then(|v| v.bookmarked)
+            .unwrap_or(false),
+    };
     let is_reposted = match opt_state.reposted {
         Some(b) => b,
         None => server_repost_uri.is_some(),
@@ -238,6 +246,45 @@ pub fn PostCard(
         });
     };
 
+    // ── Save (Bluesky bookmark) ────────────────────────────────────
+    // Same optimistic shape as like: flip now, reconcile on the next
+    // poll, roll back if the server says no. Saves are private and
+    // sync with bsky.app / the mobile apps' "Saved" list.
+    let post_uri_b = post_uri.clone();
+    let post_cid_b = post_cid.clone();
+    let mut toggle_bookmark = move |_evt: MouseEvent| {
+        if session.read().is_none() {
+            return;
+        }
+        let want = !is_bookmarked;
+        optimistic
+            .write()
+            .entry(post_uri_b.clone())
+            .or_default()
+            .bookmarked = Some(want);
+        let uri = post_uri_b.clone();
+        let cid = post_cid_b.clone();
+        spawn(async move {
+            if crate::demo::is_active() {
+                return;
+            }
+            let Some(client) = fresh_client(session).await else {
+                return;
+            };
+            let result = if want {
+                client.create_bookmark(&uri, &cid).await
+            } else {
+                client.delete_bookmark(&uri).await
+            };
+            if let Err(e) = result {
+                tracing::warn!(error = %e, want, "smooblue: bookmark toggle failed");
+                if let Some(entry) = optimistic.write().get_mut(&uri) {
+                    entry.bookmarked = None;
+                }
+            }
+        });
+    };
+
     // ── Repost ─────────────────────────────────────────────────────
     let post_uri_r = post_uri.clone();
     let post_cid_r = post_cid.clone();
@@ -329,6 +376,11 @@ pub fn PostCard(
 
     let like_class = if is_liked {
         "post__action post__action--clickable post__action--liked"
+    } else {
+        "post__action post__action--clickable"
+    };
+    let bookmark_class = if is_bookmarked {
+        "post__action post__action--clickable post__action--saved"
     } else {
         "post__action post__action--clickable"
     };
@@ -533,6 +585,12 @@ pub fn PostCard(
                         } else {
                             span { class: "post__action-count post__action-count--zero", "0" }
                         }
+                    }
+                    // Save: private Bluesky bookmark (the "Saved" column).
+                    button { class: "{bookmark_class}",
+                        onclick: move |evt: MouseEvent| { evt.stop_propagation(); toggle_bookmark(evt); },
+                        title: if is_bookmarked { "Remove from Saved" } else { "Save" },
+                        icons::Bookmark { size: icons::Size::Sm }
                     }
                     // Overflow ("…") button — opens the deck-level
                     // PostMenu anchored at the click. Rendered up there
