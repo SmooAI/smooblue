@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.30.1
+
+### Patch Changes
+
+- [#105](https://github.com/SmooAI/smooblue/pull/105) [`de9f246`](https://github.com/SmooAI/smooblue/commit/de9f246c87809391743e1a5fd2841c453fcee3f3) Thanks [@brentrager](https://github.com/brentrager)! - Back, forward, reopen and History are now always-visible buttons at the top of the left sidebar, right under the logo. You no longer need the keyboard shortcuts or the buttons inside a thread. ← and → step through whichever thread or profile is open, ↺ brings back the one you just closed, and the clock opens History. While a thread or profile is open, the buttons stay clear and clickable on top of the dimmed background, right where you need a way back.
+
 ## 1.30.0
 
 ### Minor Changes
