@@ -60,6 +60,10 @@ pub fn DeckShell() -> Element {
         history_open,
     };
 
+    // One observer for both sheets' focus → the back / forward
+    // timeline, stacking order and "last closed" (crate::history).
+    crate::history::use_nav_observer();
+
     // Drafts index for the active account (resume chip + the
     // composer's Drafts list). Reloads when the account changes; the
     // first load also imports a pre-multi-draft `draft.txt`.

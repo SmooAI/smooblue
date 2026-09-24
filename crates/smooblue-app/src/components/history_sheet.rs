@@ -4,7 +4,7 @@
 //! affordances that live over the deck: the reopen toast shown after a
 //! sheet closes, and the resume-draft chip above the compose FAB.
 
-use crate::history::{self, HistoryEntry, NavHistory, NavKind};
+use crate::history::{self, HistoryEntry, NavHistory, NavKind, View};
 use crate::icons;
 use crate::state::{ComposeContext, DraftsIndex, ProfileFocus, ThreadFocus};
 use dioxus::prelude::*;
@@ -206,17 +206,14 @@ pub fn ReopenToast() -> Element {
         return rsx! { Fragment {} };
     };
     // Don't offer to reopen what's already open again.
-    let reopened = match closed.kind {
-        NavKind::Thread => thread.read().0.is_some(),
-        NavKind::Profile => profile.read().0.is_some(),
+    let (reopened, what) = match closed {
+        View::Thread(_) => (thread.read().0.is_some(), "thread"),
+        View::Profile(_) => (profile.read().0.is_some(), "profile"),
+        View::Deck => (true, ""),
     };
     if reopened {
         return rsx! { Fragment {} };
     }
-    let what = match closed.kind {
-        NavKind::Thread => "thread",
-        NavKind::Profile => "profile",
-    };
     rsx! {
         div { class: "reopen-toast",
             span { class: "reopen-toast__label", "Closed {what}" }

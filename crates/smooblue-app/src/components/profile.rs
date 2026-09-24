@@ -18,7 +18,7 @@ use crate::auth_refresh::fresh_client;
 use crate::components::post::PostCard;
 use crate::components::report_sheet::ReportTarget;
 use crate::demo;
-use crate::history::{use_nav_tracker, NavHistory, NavKind};
+use crate::history::{NavHistory, NavKind};
 use crate::icons;
 use crate::state::{
     add_column_unique, ColumnSpec, ProfileEditOpen, ProfileFocus, ReportFocus, ThreadFocus,
@@ -77,9 +77,6 @@ pub fn ProfileSheet() -> Element {
         }
     });
 
-    // Back / forward trail + "reopen what I just closed".
-    use_nav_tracker(NavKind::Profile, move || focus.read().0.clone());
-
     // Remember who was looked at, for the History sheet. Keyed by DID
     // so the same person opened by handle and by DID is one row.
     let mut recorded = use_signal(|| None::<String>);
@@ -120,9 +117,9 @@ pub fn ProfileSheet() -> Element {
     let close = move |_| {
         focus.set(ProfileFocus(None));
     };
-    let can_back = nav.read().profile.can_go_back();
+    let can_back = nav.read().can_go_back();
     let go_back = move |_| {
-        crate::history::step(nav, thread_focus, focus, NavKind::Profile, false);
+        crate::history::step(nav, thread_focus, focus, false);
     };
     // A thread opened from inside this profile paints above it.
     let backdrop_style = if thread_focus.read().0.is_some() && nav.read().thread_above_profile() {
