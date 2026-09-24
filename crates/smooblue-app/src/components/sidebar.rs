@@ -1,6 +1,8 @@
 //! Left rail navigation. Uses the shared `.rail` / `.rail__btn` classes
 //! from smooai-ui plus a few smooblue-only positioning extensions
-//! (`.rail__logo`, `.rail__divider`, `.rail__spacer`).
+//! (`.rail__logo`, `.rail__divider`, `.rail__spacer`) and the
+//! navigation group at the top (`.rail__nav`: back / forward / reopen /
+//! history).
 
 use crate::auth_refresh::fresh_client;
 use crate::icons;
@@ -69,8 +71,6 @@ pub fn Sidebar(
     let open_saved_feeds = move |_| sf_open.set(true);
     let mut st_open = settings_open;
     let open_settings = move |_| st_open.set(true);
-    let mut hist_open = history_open;
-    let open_history = move |_| hist_open.set(true);
     // Sidebar Profile button now opens the user's own ProfileSheet
     // (banner + bio + counts + Follow yourself? no) — much richer
     // than just adding an AuthorFeed column. The sheet has an
@@ -116,6 +116,8 @@ pub fn Sidebar(
             div { class: "rail__logo", title: "Smooblue",
                 dangerous_inner_html: "{smooblue_theme::BRAND_SVG}",
             }
+            NavGroup { history_open }
+            div { class: "rail__divider" }
             RailBtn { label: "Home", active: true, kind: RailKind::Home, badge: 0, onclick: add_home }
             RailBtn { label: "Search", active: false, kind: RailKind::Search, badge: 0, onclick: open_search }
             RailBtn { label: "Notifications", active: false, kind: RailKind::Bell, badge: unread_count, onclick: add_notif }
@@ -130,7 +132,6 @@ pub fn Sidebar(
             // trending topics, popular feeds, AND a paste-a-URI box).
             // Search is its own button above — they're different intents.
             RailBtn { label: "Add column", active: false, kind: RailKind::Add, badge: 0, onclick: open_saved_feeds }
-            RailBtn { label: "History (⌘Y)", active: false, kind: RailKind::History, badge: 0, onclick: open_history }
             div { class: "rail__spacer" }
             // Profile slot — real avatar when we've resolved one,
             // generic User glyph as fallback until the get_profile
@@ -170,7 +171,6 @@ pub enum RailKind {
     Analytics,
     Bookmark,
     Add,
-    History,
     Profile,
     Settings,
 }
@@ -211,12 +211,110 @@ fn RailBtn(
                 RailKind::Analytics => rsx! { icons::ChartColumn { size: icons::Size::Md } },
                 RailKind::Bookmark => rsx! { icons::Bookmark { size: icons::Size::Md } },
                 RailKind::Add => rsx! { icons::Plus { size: icons::Size::Md } },
-                RailKind::History => rsx! { icons::History { size: icons::Size::Md } },
                 RailKind::Profile => rsx! { icons::User { size: icons::Size::Md } },
                 RailKind::Settings => rsx! { icons::Settings { size: icons::Size::Md } },
             }
             if let Some(text) = badge_text {
                 span { class: "rail__badge", "{text}" }
+            }
+        }
+    }
+}
+
+/// Back / forward / reopen / history — "get back to where you were",
+/// always one click away at the top of the rail. It sits above the
+/// sheet backdrop (`.rail__nav` z-index), so it stays crisp and
+/// clickable while a thread or profile is open — exactly when you want
+/// to step back — but under the compose sheet, so it can't pull a
+/// thread out from under a reply in progress. The same actions as the
+/// ⌘[ / ⌘] / ⌘⇧T / ⌘Y shortcuts ([`crate::keyboard`]).
+#[component]
+fn NavGroup(history_open: Signal<bool>) -> Element {
+    use crate::history::{self, NavHistory, NavKind};
+    use crate::state::ThreadFocus;
+
+    let nav = use_context::<Signal<NavHistory>>();
+    let thread = use_context::<Signal<ThreadFocus>>();
+    let profile = use_context::<Signal<ProfileFocus>>();
+    let mut history_open = history_open;
+
+    let thread_open = thread.read().0.is_some();
+    let profile_open = profile.read().0.is_some();
+    let n = nav.read();
+    // Back / forward act on the sheet on top (profile or thread,
+    // whichever was raised last) — the same one ⌘[ / ⌘] drive.
+    let top = match (thread_open, profile_open) {
+        (true, true) if n.thread_above_profile() => Some(NavKind::Thread),
+        (_, true) => Some(NavKind::Profile),
+        (true, false) => Some(NavKind::Thread),
+        (false, false) => None,
+    };
+    let can_back = top.is_some_and(|k| n.stacks(k).can_go_back());
+    let can_forward = top.is_some_and(|k| n.stacks(k).can_go_forward());
+    // Reopen: something was closed and it isn't already back open.
+    let reopen = n.last_closed.as_ref().and_then(|c| {
+        let open_again = match c.kind {
+            NavKind::Thread => thread_open,
+            NavKind::Profile => profile_open,
+        };
+        (!open_again).then_some(c.kind)
+    });
+    drop(n);
+    let reopen_title = match reopen {
+        Some(NavKind::Thread) => "Reopen the thread you closed (⌘⇧T)",
+        Some(NavKind::Profile) => "Reopen the profile you closed (⌘⇧T)",
+        None => "Reopen — nothing closed yet (⌘⇧T)",
+    };
+    let group_class = if thread_open || profile_open {
+        "rail__nav rail__nav--over-sheet"
+    } else {
+        "rail__nav"
+    };
+    let history_class = if *history_open.read() {
+        "rail__btn rail__btn--active"
+    } else {
+        "rail__btn"
+    };
+
+    rsx! {
+        div { class: "{group_class}",
+            div { class: "rail__nav-row",
+                button { class: "rail__nav-step",
+                    title: "Back (⌘[)",
+                    disabled: !can_back,
+                    onclick: move |_| {
+                        if let Some(kind) = top {
+                            history::step(nav, thread, profile, kind, false);
+                        }
+                    },
+                    icons::ArrowLeft { size: icons::Size::Sm }
+                }
+                button { class: "rail__nav-step",
+                    title: "Forward (⌘])",
+                    disabled: !can_forward,
+                    onclick: move |_| {
+                        if let Some(kind) = top {
+                            history::step(nav, thread, profile, kind, true);
+                        }
+                    },
+                    icons::ArrowRight { size: icons::Size::Sm }
+                }
+            }
+            button { class: "rail__btn",
+                title: "{reopen_title}",
+                disabled: reopen.is_none(),
+                onclick: move |_| {
+                    history::reopen_last(nav, thread, profile);
+                },
+                icons::RotateCcw { size: icons::Size::Md }
+            }
+            button { class: "{history_class}",
+                title: "History — recently viewed threads & profiles (⌘Y)",
+                onclick: move |_| {
+                    let open = *history_open.peek();
+                    history_open.set(!open);
+                },
+                icons::History { size: icons::Size::Md }
             }
         }
     }

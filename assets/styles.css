@@ -6139,3 +6139,65 @@ button.thread__continue:hover {
     font-weight: 700;
     color: var(--color-smooai-orange);
 }
+
+/* ===========================================================
+ *  Rail navigation group — back / forward / reopen / history
+ *
+ *  Sits ABOVE the sheet backdrop (smooai-ui `.modal__backdrop` is
+ *  z-index 50; `.rail` has no stacking context of its own, so this
+ *  z-index competes at the root) — so it stays sharp and clickable
+ *  while a thread / profile sheet is open — but BELOW the compose
+ *  sheet (60), so navigation can't yank a thread out from under a
+ *  reply being written.
+ * =========================================================== */
+.rail__nav {
+    position: relative;
+    z-index: 55;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 4px;
+    border-radius: 10px;
+    transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+/* While a sheet is open the rest of the rail is dimmed + blurred behind
+ * the backdrop; give the group its own surface so it reads as the way
+ * back out. */
+.rail__nav--over-sheet {
+    background: var(--sidebar);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--sidebar-border);
+}
+
+.rail__nav-row {
+    display: flex;
+    gap: 2px;
+}
+
+.rail__nav-step {
+    width: 20px;
+    height: 28px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted-foreground);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.rail__nav-step:hover:not(:disabled),
+.rail__nav .rail__btn:hover:not(:disabled) {
+    background: var(--color-smooai-dark-blue-700);
+    color: var(--foreground);
+}
+
+.rail__nav-step:disabled,
+.rail__nav .rail__btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+    background: transparent;
+}
