@@ -1242,6 +1242,47 @@ impl AtClient {
         self.get_json(&url).await
     }
 
+    /// Save a post to the viewer's private Bluesky bookmarks
+    /// (`app.bsky.bookmark.createBookmark`). The same list bsky.app and
+    /// the mobile apps show under "Saved"; idempotent server-side.
+    pub async fn create_bookmark(&self, uri: &str, cid: &str) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.bookmark.createBookmark")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({ "uri": uri, "cid": cid });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
+    /// Remove a saved post (`app.bsky.bookmark.deleteBookmark`) —
+    /// addressed by the post's URI; there's no bookmark record.
+    pub async fn delete_bookmark(&self, uri: &str) -> Result<(), AtError> {
+        let url = self
+            .session_pds_url("/xrpc/app.bsky.bookmark.deleteBookmark")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        let body = serde_json::json!({ "uri": uri });
+        let _: serde_json::Value = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
+    /// The viewer's saved posts, newest first
+    /// (`app.bsky.bookmark.getBookmarks`, max 100 per page).
+    pub async fn get_bookmarks(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::feed::BookmarksResponse, AtError> {
+        let mut url = self
+            .session_pds_url("/xrpc/app.bsky.bookmark.getBookmarks")
+            .map_err(|e| AtError::Decode(e.to_string()))?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.clamp(1, 100).to_string());
+        if let Some(c) = cursor {
+            url.query_pairs_mut().append_pair("cursor", c);
+        }
+        self.get_json(&url).await
+    }
+
     /// Mute an actor (`app.bsky.graph.muteActor`). Procedure call,
     /// not a createRecord — bsky tracks mutes server-side as a
     /// preference, so there's no record to later delete. Use

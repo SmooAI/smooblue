@@ -122,6 +122,10 @@ pub enum ColumnKind {
     /// store — ingestion populates the DB on a poll, this column
     /// just reads it. Pearl th-e17045.
     Inbox,
+    /// `app.bsky.bookmark.getBookmarks` — the viewer's saved posts
+    /// (Bluesky's private bookmarks, the same list bsky.app shows under
+    /// "Saved"). Renders through the standard PostCard path.
+    Bookmarks,
     /// Account analytics dashboard — growth curves, posting cadence,
     /// and ranked follower/post lists. Backed by the [`crate::analytics`]
     /// SQLite store; this column reads the aggregated view DTO, the
@@ -195,6 +199,15 @@ impl ColumnSpec {
             id: "inbox".into(),
             kind: ColumnKind::Inbox,
             title: "Inbox".into(),
+            settings: ColumnSettings::default(),
+        }
+    }
+
+    pub fn bookmarks() -> Self {
+        Self {
+            id: "bookmarks".into(),
+            kind: ColumnKind::Bookmarks,
+            title: "Saved".into(),
             settings: ColumnSettings::default(),
         }
     }
@@ -341,6 +354,9 @@ pub struct OptimisticPostState {
     pub reposted: Option<bool>,
     /// AT-URI of our repost record.
     pub repost_uri: Option<String>,
+    /// Same shape as `liked`, for saves (Bluesky bookmarks). No record
+    /// URI to track — a bookmark is addressed by the post's own URI.
+    pub bookmarked: Option<bool>,
 }
 
 pub type OptimisticMap = std::collections::HashMap<String, OptimisticPostState>;

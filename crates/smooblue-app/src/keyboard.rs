@@ -13,7 +13,7 @@
 //! | `r` | reply to the focused post |
 //! | `o` / `Enter` | open thread for the focused post |
 //! | `gp` | open author's profile |
-//! | `gh` / `gn` / `gd` / `gs` | go: home / notifications / discover / suggestions |
+//! | `gh` / `gn` / `gd` / `gs` / `gb` | go: home / notifications / discover / suggestions / saved |
 //! | `<space>n` | new post (compose) |
 //! | `<space>/` or `Cmd-K` | search |
 //! | `<space>s` | settings |
@@ -211,6 +211,11 @@ pub fn dispatch(ctx: &mut KeyContext, key: &Key, modifiers: Modifiers) -> bool {
             // gd = Discover
             ("g", Key::Character(c)) if c == "d" => {
                 add_column_unique(&mut ctx.cols, ColumnSpec::discover());
+                return true;
+            }
+            // gb = Saved posts (Bluesky bookmarks)
+            ("g", Key::Character(c)) if c == "b" => {
+                add_column_unique(&mut ctx.cols, ColumnSpec::bookmarks());
                 return true;
             }
             // gs = Suggestions

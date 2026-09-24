@@ -64,6 +64,8 @@ pub fn Sidebar(
     let add_messages =
         move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::messages());
     let add_inbox = move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::inbox());
+    let add_saved =
+        move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::bookmarks());
     let add_analytics =
         move |_| add_or_focus_column(&mut cols, &mut focus_col, ColumnSpec::analytics());
     let open_search = move |_| search_open.set(true);
@@ -125,6 +127,7 @@ pub fn Sidebar(
             RailBtn { label: "Suggested follows", active: false, kind: RailKind::Sparkles, badge: 0, onclick: add_suggestions }
             RailBtn { label: "Messages", active: false, kind: RailKind::Messages, badge: 0, onclick: add_messages }
             RailBtn { label: "Inbox", active: false, kind: RailKind::InboxTriage, badge: 0, onclick: add_inbox }
+            RailBtn { label: "Saved posts (g b)", active: false, kind: RailKind::Bookmark, badge: 0, onclick: add_saved }
             RailBtn { label: "Analytics", active: false, kind: RailKind::Analytics, badge: 0, onclick: add_analytics }
             div { class: "rail__divider" }
             // "+ Add column" opens the Saved Feeds sheet (which lists

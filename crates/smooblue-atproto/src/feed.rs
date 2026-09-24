@@ -284,6 +284,56 @@ pub struct PostViewerState {
     /// AT-URI of the viewer's repost record, if they reposted.
     #[serde(default)]
     pub repost: Option<String>,
+    /// Whether the viewer has saved this post (Bluesky's private
+    /// bookmarks, `app.bsky.bookmark.*`). Unlike likes/reposts there's
+    /// no record URI — a bookmark is addressed by the post's own URI.
+    #[serde(default)]
+    pub bookmarked: Option<bool>,
+}
+
+/// Response of `app.bsky.bookmark.getBookmarks` — the viewer's saved
+/// posts, newest first. `item` is a union (`postView` / `notFoundPost`
+/// / `blockedPost`), kept raw so one odd entry can't fail the page;
+/// [`Self::into_feed`] keeps the live posts.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BookmarksResponse {
+    #[serde(default)]
+    pub bookmarks: Vec<BookmarkView>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BookmarkView {
+    #[serde(rename = "createdAt", default)]
+    pub created_at: Option<String>,
+    pub item: serde_json::Value,
+}
+
+impl BookmarksResponse {
+    /// The saved posts that still resolve, as ordinary feed items so
+    /// the Saved column renders through the normal post pipeline.
+    /// Deleted / blocked posts are dropped (there's nothing to show,
+    /// and bsky.app hides them too).
+    pub fn into_feed(self) -> FeedResponse {
+        let feed = self
+            .bookmarks
+            .into_iter()
+            .filter(|b| {
+                b.item.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.feed.defs#postView")
+            })
+            .filter_map(|b| serde_json::from_value::<PostView>(b.item).ok())
+            .map(|post| FeedItem {
+                post,
+                reply: None,
+                reason: None,
+            })
+            .collect();
+        FeedResponse {
+            feed,
+            cursor: self.cursor,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -1607,5 +1657,47 @@ mod tests {
         assert!(s
             .iter()
             .any(|seg| matches!(seg, FacetSegment::Mention { text, .. } if text == "@alice")));
+    }
+}
+
+#[cfg(test)]
+mod bookmark_tests {
+    use super::*;
+
+    #[test]
+    fn bookmarks_keep_live_posts_and_drop_deleted_or_blocked() {
+        let json = serde_json::json!({
+            "cursor": "next",
+            "bookmarks": [
+                {
+                    "subject": { "uri": "at://did:plc:a/app.bsky.feed.post/1", "cid": "c1" },
+                    "createdAt": "2026-09-24T12:00:00Z",
+                    "item": {
+                        "$type": "app.bsky.feed.defs#postView",
+                        "uri": "at://did:plc:a/app.bsky.feed.post/1",
+                        "cid": "c1",
+                        "author": { "did": "did:plc:a", "handle": "a.bsky.social" },
+                        "record": { "text": "saved!", "createdAt": "2026-09-24T11:00:00Z" },
+                        "indexedAt": "2026-09-24T11:00:00Z",
+                        "viewer": { "bookmarked": true }
+                    }
+                },
+                {
+                    "subject": { "uri": "at://did:plc:b/app.bsky.feed.post/2", "cid": "c2" },
+                    "item": { "$type": "app.bsky.feed.defs#notFoundPost", "uri": "at://did:plc:b/app.bsky.feed.post/2", "notFound": true }
+                },
+                {
+                    "subject": { "uri": "at://did:plc:c/app.bsky.feed.post/3", "cid": "c3" },
+                    "item": { "$type": "app.bsky.feed.defs#blockedPost", "uri": "at://did:plc:c/app.bsky.feed.post/3", "blocked": true }
+                }
+            ]
+        });
+        let resp: BookmarksResponse = serde_json::from_value(json).unwrap();
+        let feed = resp.into_feed();
+        assert_eq!(feed.cursor.as_deref(), Some("next"));
+        assert_eq!(feed.feed.len(), 1);
+        let post = &feed.feed[0].post;
+        assert_eq!(post.record.text, "saved!");
+        assert_eq!(post.viewer.as_ref().and_then(|v| v.bookmarked), Some(true));
     }
 }

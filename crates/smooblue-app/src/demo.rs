@@ -1171,6 +1171,21 @@ fn embed_image(url: &str, alt: &str) -> EmbedImage {
     }
 }
 
+/// Demo "Saved" column: a few of the home-feed posts, marked saved.
+pub fn saved_feed() -> Vec<FeedItem> {
+    home_feed()
+        .into_iter()
+        .step_by(3)
+        .take(5)
+        .map(|mut item| {
+            let viewer = item.post.viewer.get_or_insert_with(Default::default);
+            viewer.bookmarked = Some(true);
+            item.reason = None;
+            item
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1202,5 +1217,14 @@ mod tests {
         std::env::set_var("SMOOBLUE_DEMO", "0");
         assert!(!is_active());
         std::env::remove_var("SMOOBLUE_DEMO");
+    }
+
+    #[test]
+    fn saved_feed_posts_are_marked_saved() {
+        let saved = super::saved_feed();
+        assert!(!saved.is_empty());
+        assert!(saved
+            .iter()
+            .all(|i| i.post.viewer.as_ref().and_then(|v| v.bookmarked) == Some(true)));
     }
 }
