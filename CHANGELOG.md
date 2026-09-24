@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.30.2
+
+### Patch Changes
+
+- [#107](https://github.com/SmooAI/smooblue/pull/107) [`dca91d6`](https://github.com/SmooAI/smooblue/commit/dca91d650363bd7e42ddaf15d34e21b571635993) Thanks [@brentrager](https://github.com/brentrager)! - Back and forward now work like a browser, so you'll actually see them light up. They used to turn on only after you clicked from one reply to another inside a single open thread, and every thread you opened from a column started with nothing to go back to. Now there's one history across the deck, threads and profiles:
+
+  - Open any thread and ← takes you back to the deck.
+  - At the deck, ← brings back what you just closed.
+  - Open one thread, close it, and open another: ← walks back through both.
+
+  Hover the arrows to see where they'll go. This applies to the sidebar buttons, the arrows in the thread header, and ⌘[ / ⌘].
+
 ## 1.30.1
 
 ### Patch Changes
