@@ -62,6 +62,8 @@ All return real `smooblue_atproto::feed::*` types so the UI code can't tell it's
 | `SMOOBLUE_DEBUG_ATTACH=/path/to/image.jpg` | Inject a synthetic image attachment on compose mount (skip the file picker) |
 | `SMOOBLUE_DEMO_FAIL_POST=N` | Make the Nth post of a compose submit fail (1-based) — exercises the partial-thread recovery path |
 
+Demo mode **never writes the user's config files**. Every save or delete in `persistence.rs` (columns, theme, accounts, sessions, last handle) is a no-op while demo is active. A demo run once overwrote a real `columns.json` with the demo deck, whose "Discover" and "Rust" columns are Home feeds.
+
 Demo mode opens the app SQLite database **in memory**, so drafts, history, and anything else stored there work for the life of the process without reading or writing the user's real data.
 
 ---

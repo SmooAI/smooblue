@@ -36,6 +36,16 @@ fn config_dir() -> Option<std::path::PathBuf> {
     )
 }
 
+/// Demo mode (`SMOOBLUE_DEMO=1`) must never write to the user's real
+/// config: its synthetic deck — "Discover" / "Rust" columns that are
+/// really Home feeds — once overwrote a real `columns.json` when a demo
+/// run added a column, and a demo sign-out would have deleted real
+/// session files. Every save / delete below is a no-op in demo; the
+/// SQLite store is already in-memory there (`inbox::open`).
+fn demo_readonly() -> bool {
+    crate::demo::is_active()
+}
+
 /// Atomically write `data` to `path` with mode 0600. Atomic so a
 /// crash mid-write doesn't leave a half-truncated session file.
 fn write_secret(path: &std::path::Path, data: &str) -> Result<(), String> {
@@ -56,6 +66,9 @@ fn write_secret(path: &std::path::Path, data: &str) -> Result<(), String> {
 
 /// Persist the OAuth session.
 pub fn save_session(session: &Session) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let path = config_dir().ok_or("no config dir")?.join(SESSION_FILE);
     let json = serde_json::to_string(session).map_err(|e| e.to_string())?;
     write_secret(&path, &json)
@@ -70,6 +83,9 @@ pub fn load_session() -> Option<Session> {
 
 /// Drop the persisted session (sign-out).
 pub fn clear_session() -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let path = config_dir().ok_or("no config dir")?.join(SESSION_FILE);
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(()),
@@ -138,6 +154,9 @@ pub fn load_accounts() -> Accounts {
 }
 
 pub fn save_accounts(accounts: &Accounts) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let path = accounts_path().ok_or_else(|| "no config dir".to_string())?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -149,6 +168,9 @@ pub fn save_accounts(accounts: &Accounts) -> Result<(), String> {
 /// Persist a session keyed by DID. Independent of [`save_session`]
 /// (legacy single-slot) — multi-account callers should use this.
 pub fn save_session_for(did: &str, session: &Session) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let path = config_dir()
         .ok_or("no config dir")?
         .join(session_filename_for(did));
@@ -163,6 +185,9 @@ pub fn load_session_for(did: &str) -> Option<Session> {
 }
 
 pub fn delete_session_for(did: &str) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let path = config_dir()
         .ok_or("no config dir")?
         .join(session_filename_for(did));
@@ -174,6 +199,9 @@ pub fn delete_session_for(did: &str) -> Result<(), String> {
 }
 
 pub fn save_columns(cols: &[crate::state::ColumnSpec]) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
         .ok_or_else(|| "no config dir".to_string())?;
     std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
@@ -192,6 +220,9 @@ pub fn load_columns() -> Option<Vec<crate::state::ColumnSpec>> {
 /// Remember the handle the user signed in with. Plain text, non-secret.
 /// Used to pre-fill the login input after sign-out so they don't retype.
 pub fn save_last_handle(handle: &str) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
         .ok_or_else(|| "no config dir".to_string())?;
     std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
@@ -214,6 +245,9 @@ pub fn load_last_handle() -> Option<String> {
 /// [`crate::drafts::import_legacy_draft`] has moved it into the
 /// drafts table. Best-effort — a missing file is the goal state.
 pub fn clear_legacy_draft() {
+    if demo_readonly() {
+        return;
+    }
     if let Some(dir) = directories::ProjectDirs::from("ai", "Smoo", "smooblue") {
         let _ = std::fs::remove_file(dir.config_dir().join(DRAFT_FILE));
     }
@@ -237,6 +271,9 @@ pub fn load_draft() -> Option<String> {
 /// Free-form string on purpose — keeps room for future variants
 /// (e.g., "system", "high-contrast") without a migration.
 pub fn save_theme(mode: &str) -> Result<(), String> {
+    if demo_readonly() {
+        return Ok(());
+    }
     let dir = directories::ProjectDirs::from("ai", "Smoo", "smooblue")
         .ok_or_else(|| "no config dir".to_string())?;
     std::fs::create_dir_all(dir.config_dir()).map_err(|e| e.to_string())?;
