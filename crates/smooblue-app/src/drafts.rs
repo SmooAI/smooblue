@@ -40,6 +40,12 @@ pub struct DraftPost {
     pub images: Vec<DraftMedia>,
     #[serde(default)]
     pub video: Option<DraftMedia>,
+    /// A GIF picked from the composer's GIF search (first post only).
+    #[serde(default)]
+    pub gif: Option<crate::gifs::Gif>,
+    /// The user's alt text for that GIF (empty = Tenor's description).
+    #[serde(default)]
+    pub gif_alt: String,
 }
 
 impl DraftPost {
@@ -51,7 +57,10 @@ impl DraftPost {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty() && self.images.is_empty() && self.video.is_none()
+        self.text.trim().is_empty()
+            && self.images.is_empty()
+            && self.video.is_none()
+            && self.gif.is_none()
     }
 }
 
@@ -153,6 +162,9 @@ impl Draft {
         for p in &self.posts {
             if p.video.is_some() {
                 return "(video)".into();
+            }
+            if p.gif.is_some() {
+                return "(GIF)".into();
             }
             if !p.images.is_empty() {
                 return "(image)".into();

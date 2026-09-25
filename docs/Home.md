@@ -56,6 +56,7 @@ cssclasses:
 - **Add an XRPC endpoint to the client** — [[Engineering/Adding-an-XRPC-Endpoint]]
 - **Drafts, thread composing, back/forward + History** — [[Engineering/Drafts-and-Navigation-History]]
 - **Saved posts (Bluesky bookmarks)** — [[Engineering/Saved-Posts]]
+- **GIFs (KLIPY picker + inline playback)** — [[Engineering/GIFs]]
 - **Land a fix** — [[Engineering/Engineering-Guide#Workflow]]
 
 ### Ideas / research

@@ -13,6 +13,7 @@ pub mod demo;
 pub mod diag_log;
 pub mod drafts;
 pub mod file_promise;
+pub mod gifs;
 pub mod history;
 pub mod icons;
 pub mod image_prep;
