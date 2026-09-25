@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.31.1
+
+### Patch Changes
+
+- [#111](https://github.com/SmooAI/smooblue/pull/111) [`8a9592f`](https://github.com/SmooAI/smooblue/commit/8a9592f34e9510033606e16e798355280d777b40) Thanks [@brentrager](https://github.com/brentrager)! - Demo mode (`SMOOBLUE_DEMO=1`) no longer touches your real settings. Adding a column during a demo run used to save the demo's column layout over your real one. That layout has "Discover" and "Rust" columns that are really Home feeds, so every column ended up showing Home. A sign-out inside demo mode could also have removed your real saved login. Demo mode now never saves or deletes your columns, theme, accounts, login or session files.
+
 ## 1.31.0
 
 ### Minor Changes
