@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.32.0
+
+### Minor Changes
+
+- [#113](https://github.com/SmooAI/smooblue/pull/113) [`afc0a61`](https://github.com/SmooAI/smooblue/commit/afc0a613d307916047efc13afab72b7bd70e2054) Thanks [@brentrager](https://github.com/brentrager)! - GIFs. The composer has a new **GIF** button that opens a GIF search: trending GIFs to start, then results as you type. Pick one to attach it, and optionally add your own alt text. GIFs are posted the same way the Bluesky app posts them, so they play in bsky.app and on phones too. GIFs in your feed now play inline instead of showing as a still link card, including older Tenor GIFs; click one to view it full-size.
+
 ## 1.31.1
 
 ### Patch Changes
