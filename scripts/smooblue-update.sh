@@ -30,6 +30,20 @@ echo "=== $(date -u +%FT%TZ) smooblue-update start ==="
 
 cd "$REPO"
 
+# Guard: stand down when the installed app is a Developer ID-signed
+# release. Those carry Sparkle and update themselves from the signed
+# appcast (docs/Operations/Sparkle-Updates.md); rebuilding from source
+# here would replace a notarized release with a local ad-hoc build —
+# no Developer ID signature, and none of the build-time secrets (e.g.
+# SMOOBLUE_KLIPY_KEY, so no GIF picker). That exact clobber happened on
+# 2026-09-25, an hour after Sparkle installed 1.32.0.
+# SMOOBLUE_UPDATER_FORCE=1 builds from source anyway (development).
+if [[ "${SMOOBLUE_UPDATER_FORCE:-0}" != "1" && -d "$INSTALL_PATH" ]] \
+    && codesign -dvv "$INSTALL_PATH" 2>&1 | grep -q '^Authority=Developer ID Application'; then
+    echo "Skipping: $INSTALL_PATH is a signed release — Sparkle keeps it current."
+    exit 0
+fi
+
 # Guard: only update when main is checked out + clean. We never want
 # to clobber a feature branch the user is working on.
 current_branch="$(git rev-parse --abbrev-ref HEAD)"
