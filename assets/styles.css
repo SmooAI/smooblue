@@ -6212,3 +6212,156 @@ button.thread__continue:hover {
     fill: var(--color-smooai-orange);
     opacity: 1;
 }
+
+/* ===========================================================
+ *  Inline GIF (Tenor link embed, as the Bluesky apps post GIFs)
+ * =========================================================== */
+.embed__gif {
+    position: relative;
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--card);
+    cursor: zoom-in;
+}
+
+.embed__gif img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: 360px;
+    object-fit: contain;
+}
+
+.embed__gif-badge {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    font-size: calc(10px * var(--font-scale, 1));
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    pointer-events: none;
+}
+
+/* ===========================================================
+ *  Compose — GIF picker (Tenor) + selected-GIF tile
+ * =========================================================== */
+.compose__gif-btn {
+    height: 32px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: calc(11px * var(--font-scale, 1));
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+}
+
+.compose__gif-btn:hover:not(:disabled),
+.compose__gif-btn--active {
+    border-color: var(--color-smooai-orange);
+    color: var(--color-smooai-orange);
+}
+
+.compose__gif-picker {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px;
+    background: var(--background);
+}
+
+.compose__gif-picker-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.compose__gif-search {
+    flex: 1 1 auto;
+}
+
+.compose__gif-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    /* Capped to the window so the compose sheet (overflow: visible,
+     * for the @mention popover) never pushes the Post bar off-screen. */
+    max-height: min(280px, 32vh);
+    overflow-y: auto;
+}
+
+.compose__gif-cell {
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--card);
+    height: 90px;
+    cursor: pointer;
+    outline-offset: -2px;
+}
+
+.compose__gif-cell:hover,
+.compose__gif-cell:focus-visible {
+    outline: 2px solid var(--color-smooai-orange);
+}
+
+.compose__gif-cell img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.compose__gif-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 6px;
+    min-height: 26px;
+}
+
+.compose__gif-credit {
+    margin-left: auto;
+    color: var(--muted-foreground);
+    font-size: calc(10px * var(--font-scale, 1));
+}
+
+.compose__gif-tile {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.compose__gif-alt {
+    font-size: calc(13px * var(--font-scale, 1));
+}
+
+.compose__gif-preview {
+    position: relative;
+    max-width: 240px;
+    max-height: min(180px, 22vh);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+}
+
+.compose__gif-preview img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}

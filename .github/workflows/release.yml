@@ -36,7 +36,12 @@ jobs:
             - name: Cache cargo
               uses: Swatinem/rust-cache@v2
 
+            # SMOOBLUE_KLIPY_KEY is compiled in (option_env!) for the
+            # composer's GIF picker; without it the GIF button just
+            # doesn't show. A client-side KLIPY API key.
             - name: Build macOS .app bundle
+              env:
+                  SMOOBLUE_KLIPY_KEY: ${{ secrets.SMOOBLUE_KLIPY_KEY }}
               run: ./scripts/bundle-macos.sh
 
             # ── Developer ID + notarization + Sparkle (OTA updates) ──
@@ -223,6 +228,8 @@ jobs:
                       build-essential
 
             - name: cargo build --release
+              env:
+                  SMOOBLUE_KLIPY_KEY: ${{ secrets.SMOOBLUE_KLIPY_KEY }}
               run: cargo build --release -p smooblue-app
 
             - name: Stage tarball contents

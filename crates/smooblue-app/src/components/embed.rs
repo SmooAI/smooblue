@@ -176,6 +176,11 @@ fn ImageTile(img: EmbedImage, index: usize, total: usize) -> Element {
 /// description + domain on the right. Click opens the URL.
 #[component]
 fn LinkCard(ext: EmbedExternal) -> Element {
+    // A GIF link (KLIPY / Tenor), as the Bluesky apps and our GIF
+    // picker post them, plays inline instead of a frozen link card.
+    if let Some((w, h)) = crate::gifs::gif_embed_dims(&ext.uri) {
+        return rsx! { GifEmbed { ext, width: w, height: h } };
+    }
     let domain = Url::parse(&ext.uri)
         .ok()
         .and_then(|u| {
@@ -207,6 +212,41 @@ fn LinkCard(ext: EmbedExternal) -> Element {
                     span { class: "embed__link-desc", "{ext.description}" }
                 }
             }
+        }
+    }
+}
+
+/// An inline, animated GIF from a KLIPY / Tenor link embed. Sized from the
+/// link's `ww`/`hh` params so the feed doesn't jump as it loads; click
+/// opens it in the lightbox like any image. Alt text is the embed's
+/// description minus the official apps' `ALT: ` / `Alt: ` prefix.
+#[component]
+fn GifEmbed(ext: EmbedExternal, width: u32, height: u32) -> Element {
+    let alt = ext
+        .description
+        .strip_prefix("Alt: ")
+        .or_else(|| ext.description.strip_prefix("ALT: "))
+        .unwrap_or(&ext.description)
+        .to_string();
+    let src = ext.uri.clone();
+    let mut lightbox = use_context::<Signal<crate::state::LightboxFocus>>();
+    let (src_lb, alt_lb) = (src.clone(), alt.clone());
+    let open = move |e: MouseEvent| {
+        e.stop_propagation();
+        lightbox.set(crate::state::LightboxFocus(Some(
+            crate::state::LightboxItem::Image {
+                url: src_lb.clone(),
+                alt: alt_lb.clone(),
+            },
+        )));
+    };
+    rsx! {
+        button { class: "embed__gif",
+            style: "aspect-ratio: {width} / {height};",
+            title: "{alt}",
+            onclick: open,
+            img { loading: "lazy", decoding: "async", src: "{src}", alt: "{alt}" }
+            span { class: "embed__gif-badge", "GIF" }
         }
     }
 }

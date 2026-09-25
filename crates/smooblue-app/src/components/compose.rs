@@ -245,6 +245,27 @@ impl ExtraPost {
     }
 }
 
+/// A GIF chosen in the composer's GIF picker, plus the user's alt
+/// text for it (empty = use the provider's description). Posted as the first
+/// post's link embed, exactly as the Bluesky apps post GIFs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedGif {
+    pub gif: crate::gifs::Gif,
+    pub alt: String,
+}
+
+impl SelectedGif {
+    /// The link-card embed the GIF posts as (see [`crate::gifs`]).
+    fn as_card(&self) -> LinkCard {
+        LinkCard {
+            uri: self.gif.embed_uri(),
+            title: self.gif.description.clone(),
+            description: crate::gifs::gif_description(&self.gif.description, &self.alt),
+            image_url: Some(self.gif.preview_url.clone()),
+        }
+    }
+}
+
 /// MIME type for a video file extension we accept, or `None` if the
 /// extension isn't a supported video.
 fn video_mime(ext: &str) -> Option<&'static str> {
@@ -385,6 +406,7 @@ struct Composer {
     extras: Signal<Vec<ExtraPost>>,
     attachments: Signal<Vec<AttachedImage>>,
     video: Signal<Option<VideoAttachment>>,
+    gif: Signal<Option<SelectedGif>>,
     link_card: Signal<Option<LinkCard>>,
     link_card_dismissed: Signal<HashSet<String>>,
     draft_id: Signal<Option<String>>,
@@ -422,12 +444,19 @@ impl Composer {
                 path: v.source_path.clone(),
                 alt: v.alt.clone(),
             }),
+            gif: self.gif.peek().as_ref().map(|g| g.gif.clone()),
+            gif_alt: self
+                .gif
+                .peek()
+                .as_ref()
+                .map(|g| g.alt.clone())
+                .unwrap_or_default(),
         }];
         for e in self.extras.peek().iter() {
             posts.push(DraftPost {
                 text: e.text.clone(),
                 images: images_for(e.id),
-                video: None,
+                ..Default::default()
             });
         }
         Draft {
@@ -491,6 +520,7 @@ impl Composer {
         self.extras.set(Vec::new());
         self.attachments.set(Vec::new());
         self.video.set(None);
+        self.gif.set(None);
         self.link_card.set(None);
         self.link_card_dismissed.write().clear();
         self.draft_id.set(None);
@@ -510,6 +540,10 @@ impl Composer {
         for (i, p) in d.posts.iter().enumerate() {
             let slot = if i == 0 {
                 self.text.set(p.text.clone());
+                self.gif.set(p.gif.clone().map(|gif| SelectedGif {
+                    gif,
+                    alt: p.gif_alt.clone(),
+                }));
                 ROOT_SLOT
             } else {
                 let e = ExtraPost::new(p.text.clone());
@@ -684,6 +718,7 @@ impl Composer {
         });
         if done.contains(&ROOT_SLOT) {
             self.video.set(None);
+            self.gif.set(None);
             self.link_card.set(None);
         }
         let handle = self
@@ -886,6 +921,10 @@ pub fn ComposeSheet() -> Element {
     // Single video attachment on the first post (mutually exclusive
     // with images per the lexicon — bsky records carry one media slot).
     let mut video_attachment = use_signal::<Option<VideoAttachment>>(|| None);
+    // A GIF from the GIF picker (first post only; it owns the media
+    // slot like a video, and posts as a KLIPY link embed).
+    let mut gif = use_signal(|| None::<SelectedGif>);
+    let mut show_gif_picker = use_signal(|| false);
     let mut posting = use_signal(|| false);
     // (current post, total) while a thread is publishing.
     let mut progress = use_signal(|| None::<(usize, usize)>);
@@ -936,6 +975,7 @@ pub fn ComposeSheet() -> Element {
         extras: thread_extras,
         attachments,
         video: video_attachment,
+        gif,
         link_card,
         link_card_dismissed,
         draft_id,
@@ -990,6 +1030,7 @@ pub fn ComposeSheet() -> Element {
         let _ = thread_extras.read();
         let _ = attachments.read();
         let _ = video_attachment.read();
+        let _ = gif.read();
         let _ = reply_to.read();
         let _ = quote_to.read();
         let seq = {
@@ -1199,7 +1240,11 @@ pub fn ComposeSheet() -> Element {
         .iter()
         .any(|a| matches!(a.state, AttachmentState::Failed(_)));
     let has_video = video_attachment.read().is_some();
-    let has_card = link_card.read().is_some() && root_attachments == 0 && !has_video;
+    let has_gif = gif.read().is_some();
+    let has_card = link_card.read().is_some() && root_attachments == 0 && !has_video && !has_gif;
+    // The first post has one media slot: images, a video, or a GIF.
+    let media_taken = root_attachments > 0 || has_video || has_gif;
+    let gif_key = crate::gifs::gif_api_key();
     let over_posts = over_limit_posts(
         std::iter::once(text.read().as_str())
             .chain(extras_snap.iter().map(|e| e.text.as_str()))
@@ -1211,6 +1256,7 @@ pub fn ComposeSheet() -> Element {
         && extras_snap.iter().all(|e| e.text.trim().is_empty())
         && !has_attachments
         && !has_video
+        && !has_gif
         && !has_card;
     let at_image_cap = root_attachments >= MAX_IMAGES;
 
@@ -1245,7 +1291,13 @@ pub fn ComposeSheet() -> Element {
             return;
         }
         let video_now = video_attachment.peek().clone();
-        let card_now = link_card.peek().clone();
+        // A picked GIF IS the first post's link card (a KLIPY link, as
+        // the Bluesky apps post GIFs) and wins over a detected URL card.
+        let card_now = gif
+            .peek()
+            .as_ref()
+            .map(SelectedGif::as_card)
+            .or_else(|| link_card.peek().clone());
         let mut plan: Vec<OutPost> = Vec::new();
         let slots = std::iter::once((ROOT_SLOT, root_text))
             .chain(extras_now.into_iter().map(|e| (e.id, e.text)));
@@ -1549,8 +1601,24 @@ pub fn ComposeSheet() -> Element {
     };
 
     let index_snap = index.read().0.clone();
+    let gif_btn_class = if *show_gif_picker.read() {
+        "compose__gif-btn compose__gif-btn--active"
+    } else if media_taken && !has_gif {
+        "compose__gif-btn compose__attach--disabled"
+    } else {
+        "compose__gif-btn"
+    };
+    let gif_title = if has_gif {
+        "Choose a different GIF"
+    } else if media_taken {
+        "Remove the images or video to add a GIF"
+    } else {
+        "Add a GIF"
+    };
     let attach_title = if has_video {
         "Remove the video to attach images"
+    } else if has_gif {
+        "Remove the GIF to attach images"
     } else if at_image_cap {
         "Image limit reached (4 max)"
     } else {
@@ -1870,7 +1938,43 @@ pub fn ComposeSheet() -> Element {
                 // attach for the first URL in the post. Hidden once
                 // images / a video are attached (they own the media
                 // slot, so the card won't be sent). The × dismisses it.
-                if root_attachments == 0 && !has_video {
+                if let Some(sel) = gif.read().clone() {
+                    div { class: "compose__gif-tile",
+                        div { class: "compose__gif-preview",
+                            style: "aspect-ratio: {sel.gif.width} / {sel.gif.height};",
+                            img { src: "{sel.gif.url}", alt: "{sel.gif.description}" }
+                            span { class: "embed__gif-badge", "GIF" }
+                            button { class: "compose__attachment-remove",
+                                title: "Remove GIF",
+                                onclick: move |_| gif.set(None),
+                                icons::X { size: icons::Size::Sm }
+                            }
+                        }
+                        input {
+                            class: "input compose__gif-alt",
+                            placeholder: "Alt text (optional) — defaults to “{sel.gif.description}”",
+                            value: "{sel.alt}",
+                            oninput: move |e| {
+                                if let Some(g) = gif.write().as_mut() {
+                                    g.alt = truncate_alt(e.value());
+                                }
+                            },
+                        }
+                    }
+                }
+                if *show_gif_picker.read() {
+                    if let Some(key) = gif_key.clone() {
+                        GifPicker {
+                            api_key: key,
+                            on_pick: move |picked: crate::gifs::Gif| {
+                                gif.set(Some(SelectedGif { gif: picked, alt: String::new() }));
+                                show_gif_picker.set(false);
+                            },
+                            on_close: move |_| show_gif_picker.set(false),
+                        }
+                    }
+                }
+                if root_attachments == 0 && !has_video && !has_gif {
                     if let Some(card) = link_card.read().clone() {
                         div { class: "compose__link-card",
                             if let Some(img) = card.image_url.as_ref() {
@@ -1936,11 +2040,23 @@ pub fn ComposeSheet() -> Element {
                         " Add post"
                     }
                     button {
-                        class: if at_image_cap || has_video { "compose__attach compose__attach--disabled" } else { "compose__attach" },
+                        class: if at_image_cap || has_video || has_gif { "compose__attach compose__attach--disabled" } else { "compose__attach" },
                         title: "{attach_title}",
-                        disabled: at_image_cap || has_video,
+                        disabled: at_image_cap || has_video || has_gif,
                         onclick: move |_| pick_images_into(attachments, ROOT_SLOT),
                         icons::ImageIcon { size: icons::Size::Sm }
+                    }
+                    if gif_key.is_some() {
+                        button {
+                            class: "{gif_btn_class}",
+                            title: "{gif_title}",
+                            disabled: media_taken && !has_gif,
+                            onclick: move |_| {
+                                let open = *show_gif_picker.peek();
+                                show_gif_picker.set(!open);
+                            },
+                            "GIF"
+                        }
                     }
                     if !empty {
                         button {
@@ -2003,6 +2119,143 @@ pub fn ComposeSheet() -> Element {
                     div { class: "compose__error", "{msg}" }
                 }
                 }
+            }
+        }
+    }
+}
+
+/// The composer's GIF search panel (KLIPY — see [`crate::gifs`]; the
+/// "Search KLIPY" / "Powered by KLIPY" wording is KLIPY's attribution
+/// requirement for a production key). Shows trending GIFs until
+/// you type, then searches as you type (debounced); "More" pages
+/// on. Picking one hands it to the composer, which posts it the way
+/// the Bluesky apps do (see [`crate::gifs`]).
+#[component]
+fn GifPicker(
+    api_key: String,
+    on_pick: EventHandler<crate::gifs::Gif>,
+    on_close: EventHandler<()>,
+) -> Element {
+    let mut query = use_signal(String::new);
+    let mut results = use_signal(Vec::<crate::gifs::Gif>::new);
+    let mut next = use_signal(|| None::<String>);
+    let mut loading = use_signal(|| false);
+    let mut error = use_signal(|| None::<String>);
+    let mut seq = use_signal(|| 0u64);
+    let key = use_signal(|| api_key.clone());
+
+    // (Re)search whenever the query changes: trending for an empty
+    // query, otherwise a debounced search. The seq guard drops
+    // responses to queries that have since been superseded.
+    use_effect(move || {
+        let q = query.read().clone();
+        let my = {
+            let mut s = seq.write();
+            *s = s.wrapping_add(1);
+            *s
+        };
+        spawn(async move {
+            if !q.trim().is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+            if *seq.peek() != my {
+                return;
+            }
+            loading.set(true);
+            let http = reqwest::Client::new();
+            let res = crate::gifs::search(&http, &key.peek(), &q, None).await;
+            if *seq.peek() != my {
+                return;
+            }
+            loading.set(false);
+            match res {
+                Ok(page) => {
+                    error.set(None);
+                    results.set(page.gifs);
+                    next.set(page.next);
+                }
+                Err(e) => error.set(Some(format!("GIF search failed: {e}"))),
+            }
+        });
+    });
+
+    let load_more = move |_| {
+        let Some(pos) = next.peek().clone() else {
+            return;
+        };
+        let q = query.peek().clone();
+        let my = *seq.peek();
+        loading.set(true);
+        spawn(async move {
+            let http = reqwest::Client::new();
+            let res = crate::gifs::search(&http, &key.peek(), &q, Some(&pos)).await;
+            if *seq.peek() != my {
+                return;
+            }
+            loading.set(false);
+            match res {
+                Ok(page) => {
+                    results.write().extend(page.gifs);
+                    next.set(page.next);
+                }
+                Err(e) => error.set(Some(format!("GIF search failed: {e}"))),
+            }
+        });
+    };
+
+    let gifs = results.read().clone();
+    rsx! {
+        div { class: "compose__gif-picker",
+            div { class: "compose__gif-picker-head",
+                input {
+                    class: "input compose__gif-search",
+                    placeholder: "Search KLIPY",
+                    value: "{query}",
+                    onmounted: move |evt: Event<MountedData>| {
+                        spawn(async move {
+                            let _ = evt.data().set_focus(true).await;
+                        });
+                    },
+                    oninput: move |e| query.set(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == Key::Escape {
+                            // Close only the picker, not the composer.
+                            e.stop_propagation();
+                            on_close.call(());
+                        }
+                    },
+                }
+                button { class: "compose__close",
+                    title: "Close GIF search",
+                    onclick: move |_| on_close.call(()),
+                    icons::X { size: icons::Size::Sm }
+                }
+            }
+            if let Some(msg) = error.read().clone() {
+                div { class: "compose__error", "{msg}" }
+            }
+            div { class: "compose__gif-grid",
+                for g in gifs {
+                    {
+                        let picked = g.clone();
+                        rsx! {
+                            button { key: "{g.id}",
+                                class: "compose__gif-cell",
+                                title: "{g.description}",
+                                onclick: move |_| on_pick.call(picked.clone()),
+                                img { loading: "lazy", decoding: "async", src: "{g.tiny_url}", alt: "{g.description}" }
+                            }
+                        }
+                    }
+                }
+            }
+            div { class: "compose__gif-foot",
+                if *loading.read() {
+                    span { class: "compose__thumb-spinner" }
+                } else if next.read().is_some() {
+                    button { class: "compose__head-btn", onclick: load_more, "More" }
+                }
+                span { class: "compose__gif-credit", "Powered by KLIPY" }
             }
         }
     }
@@ -2722,5 +2975,56 @@ mod mention_ranking_tests {
         let second = actor("aab.bsky.social", Some("A"), false, false);
         let ranked = rank_mention_results(vec![first, second], "aa");
         assert_eq!(handles(&ranked), vec!["aaa.bsky.social", "aab.bsky.social"]);
+    }
+}
+
+#[cfg(test)]
+mod gif_card_tests {
+    use super::SelectedGif;
+    use crate::gifs::Gif;
+
+    fn gif() -> Gif {
+        Gif {
+            id: "1".into(),
+            url: "https://static.klipy.com/ii/abc/fd/ba/W4JYQBqv.gif".into(),
+            width: 220,
+            height: 392,
+            tiny_url: "https://static.klipy.com/ii/abc/fd/ba/t.gif".into(),
+            preview_url: "https://static.klipy.com/ii/abc/fd/ba/p.png".into(),
+            description: "Chatty Cat".into(),
+            mp4_slug: Some("a0JRK0vH".into()),
+            webm_slug: None,
+        }
+    }
+
+    #[test]
+    fn a_picked_gif_posts_as_the_bluesky_apps_gif_link_card() {
+        let card = SelectedGif {
+            gif: gif(),
+            alt: String::new(),
+        }
+        .as_card();
+        assert_eq!(
+            card.uri,
+            "https://static.klipy.com/ii/abc/fd/ba/W4JYQBqv.gif?hh=392&ww=220&mp4=a0JRK0vH"
+        );
+        assert_eq!(card.title, "Chatty Cat");
+        assert_eq!(card.description, "ALT: Chatty Cat");
+        assert_eq!(
+            card.image_url.as_deref(),
+            Some("https://static.klipy.com/ii/abc/fd/ba/p.png")
+        );
+        // It round-trips into our own feed renderer as a playable GIF.
+        assert_eq!(crate::gifs::gif_embed_dims(&card.uri), Some((220, 392)));
+    }
+
+    #[test]
+    fn user_alt_text_uses_the_user_prefix() {
+        let card = SelectedGif {
+            gif: gif(),
+            alt: "my cat saying hi".into(),
+        }
+        .as_card();
+        assert_eq!(card.description, "Alt: my cat saying hi");
     }
 }
