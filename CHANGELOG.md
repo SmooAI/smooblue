@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.32.1
+
+### Patch Changes
+
+- [#116](https://github.com/SmooAI/smooblue/pull/116) [`df16f1d`](https://github.com/SmooAI/smooblue/commit/df16f1d6c8c12ef584bf2a94f2ba785cb40abf44) Thanks [@brentrager](https://github.com/brentrager)! - New app icon: a sleeker butterfly inside the Smoo AI gradient ring, matching Big Smooth, SmoothFlow and the Smoo AI desktop app. The Smoo chip in the corner is gone.
+
 ## 1.32.0
 
 ### Minor Changes
