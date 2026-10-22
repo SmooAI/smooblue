@@ -52,6 +52,8 @@ pub enum AltSource {
     AppleVision,
 }
 
+// async_trait's expansion adds #[must_use] to a method returning an already-must_use boxed future.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait AltTextProvider: Send + Sync {
     /// Generate a screen-reader alt-text from the raw image bytes +
