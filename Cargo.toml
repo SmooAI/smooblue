@@ -43,7 +43,7 @@ dioxus-desktop = "0.6"
 # (sidebar, post actions, notification reasons, compose, etc).
 # Pinned at 0.9 because 0.10 jumped to dioxus 0.7 (Component<T> generic
 # trait changed, rsx! can no longer infer T). Bump together with dioxus.
-dioxus-free-icons = { version = "=0.9", features = ["lucide"] }
+dioxus-free-icons = { version = "=0.10", features = ["lucide"] }
 
 # Async / runtime
 tokio = { version = "1", features = ["full"] }
