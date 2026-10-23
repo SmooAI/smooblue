@@ -2,6 +2,8 @@
 
 #operations
 
+> **Users don't need this anymore.** Release builds update themselves with Sparkle ([[Sparkle-Updates]]). This launchd job is only for developers running Smooblue built **from source**. It **stands down automatically** when `/Applications/Smooblue.app` is a Developer ID-signed release, so it can't swap a notarized release for a local ad-hoc build that lacks the build-time secrets. On 2026-09-25 it did exactly that, and the GIF picker disappeared. `SMOOBLUE_UPDATER_FORCE=1` overrides. To remove the job entirely, see **Uninstall** below.
+
 Hourly launchd job that keeps `/Applications/Smooblue.app` current with `main`. Optional — manual `bash scripts/smooblue-update.sh` works the same way.
 
 ---
